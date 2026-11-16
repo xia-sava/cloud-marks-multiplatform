@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- 認証情報を端末から出さないため、バックアップも端末間の移行も止める。
+         Android 11まではallowBackup="false"だけで両方止まる。Android 12以上（targetSdk 31以上）では
+         それだけでは端末間の移行が止まらないため、dataExtractionRulesですべてのドメインを除く。 -->
+    <application
+            android:allowBackup="false"
+            android:dataExtractionRules="@xml/data_extraction_rules"
+            android:label="@string/app_name"
+            android:supportsRtl="true"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <activity
+                android:exported="true"
+                android:name=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

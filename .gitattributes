@@ -1,0 +1,5 @@
+# 改行はリポジトリ内をLFに揃える。
+* text=auto eol=lf
+
+# Windowsのバッチは実行にCRLFが要る。
+*.bat text eol=crlf

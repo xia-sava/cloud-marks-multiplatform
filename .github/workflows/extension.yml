@@ -1,0 +1,46 @@
+name: extension
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/extension/**"
+      - "contracts/**"
+      - ".github/workflows/extension.yml"
+  pull_request:
+    paths:
+      - "apps/extension/**"
+      - "contracts/**"
+      - ".github/workflows/extension.yml"
+
+# 既定ではGITHUB_TOKENに何の権限も与えない。必要なジョブが必要な分だけ宣言する。
+permissions: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        working-directory: apps/extension
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: apps/extension/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      - run: npm run build

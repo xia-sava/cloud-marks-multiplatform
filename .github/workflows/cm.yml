@@ -1,0 +1,94 @@
+name: cm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/cm/**"
+      - "contracts/**"
+      - ".github/workflows/cm.yml"
+  pull_request:
+    paths:
+      - "apps/cm/**"
+      - "contracts/**"
+      - ".github/workflows/cm.yml"
+
+env:
+  # デスクトップ（sharedのjvm()とdesktopApp）をコンパイル・テストするJDKの版。
+  # apps/cm/gradle/libs.versions.tomlのdesktop-jdkと揃え、Gradleがツールチェーンとして見つけられるようにする。
+  JAVA_VERSION: "25"
+
+# 既定ではGITHUB_TOKENに何の権限も与えない。必要なジョブが必要な分だけ宣言する。
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      # リポジトリに置いているgradle-wrapper.jarが公式のものであることを確かめる。
+      - uses: gradle/actions/wrapper-validation@v6
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      # checkはandroidMainのコンパイルを含まないため、対象を明示して補う。
+      - name: Run tests
+        working-directory: apps/cm
+        run: >
+          ./gradlew check :shared:compileAndroidMain :androidApp:compileDebugKotlin
+          --console=plain
+
+      # 落ちたときに何が起きたかを残す。ログへ出るのは結果だけで、
+      # 手元で再現しない失敗はこれが無いと辿れない。
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: test-reports
+          path: |
+            apps/cm/shared/build/reports/tests/
+            apps/cm/shared/build/test-results/
+            apps/cm/androidApp/build/reports/
+          if-no-files-found: ignore
+          retention-days: 1
+
+  # 認証情報の暗号化（DPAPI）のテストはWindowsでだけ走る。ubuntuではskipされ、壊しても気づけない。
+  windows-jvm-test:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Run JVM tests
+        working-directory: apps/cm
+        shell: bash
+        run: ./gradlew :shared:jvmTest --console=plain
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: windows-test-reports
+          path: |
+            apps/cm/shared/build/reports/tests/
+            apps/cm/shared/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 1

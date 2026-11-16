@@ -1,0 +1,20 @@
+# Kotlin / Gradle / IDE (apps/cm)
+*.iml
+.kotlin
+.gradle
+**/build/
+!src/**/build/
+.idea
+local.properties
+
+# Node / TypeScript (apps/extension)
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+
+# OS
+.DS_Store
+Thumbs.db

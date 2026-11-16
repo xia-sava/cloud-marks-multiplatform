@@ -1,0 +1,7 @@
+{
+  "protocol": 1,
+  "type": "addBookmarks",
+  "tabs": [
+    {"url": "https://example.net/page", "title": "名前の欄で書き換えたタイトル"}
+  ]
+}
