@@ -39,12 +39,12 @@ private const val DATE_HEADER = "Date"
  * AWS SDK for Kotlin による [ObjectStore]。
  *
  * 接続先と認証情報は引数だけから取り、プロファイルや環境変数は読まない。
- * SDK は `5xx` とタイムアウトを自分で送り直し、それでも失敗したものを返す。
+ * SDK は `5xx` とタイムアウトを自分で再送し、それでも失敗したものを返す。
  * 呼び出し元のキャンセルはそのまま伝える。呼び出し元がキャンセルされていないのに SDK の中から届いた
- * `CancellationException`（SDK の中のタイムアウトなど）は、結果が分からないとする。
+ * `CancellationException`（SDK の中のタイムアウトなど）は、結果が不明とする。
  * 使い終えたら [close] で SDK のクライアントを閉じる。
  *
- * @param maxKeys 一覧の 1 ページに入れるキーの数の上限。null なら SDK（S3）の既定のまま。ページングの試験が小さな値で使う
+ * @param maxKeys 一覧の 1 ページに入れるキーの数の上限。null なら SDK（S3）の既定のまま。ページングのテストが小さな値で使う
  */
 class S3ObjectStore internal constructor(
     region: String,
@@ -111,7 +111,7 @@ class S3ObjectStore internal constructor(
             }
         }
         return try {
-            // 書けても ETag が無ければ次の書き込みの条件に使えないため、結果が分からないとする。呼び出し側が読み直して確かめる
+            // 書けても ETag が無ければ次の書き込みの条件に使えないため、結果が不明とする。呼び出し側が読み直して確かめる
             client.putObject(request).eTag
                 ?.let { PutObjectResult.Success(it) }
                 ?: PutObjectResult.Unknown(MISSING_ETAG)
@@ -127,8 +127,8 @@ class S3ObjectStore internal constructor(
 
     /**
      * 一覧の応答の `Date` は SDK の応答の型に出ないため、この一覧のあいだだけ付ける interceptor で、成功した応答のヘッダから取る。
-     * interceptor を付けたクライアントは設定だけを替えた複製で、通信の資源は元のクライアントと共有する。
-     * 複製は使い終えたら閉じる（資源は、共有するすべてのクライアントが閉じたときに閉じる）。
+     * interceptor を付けたクライアントは設定だけを替えた複製で、通信のリソースは元のクライアントと共有する。
+     * 複製は使い終えたら閉じる（リソースは、共有するすべてのクライアントが閉じたときに閉じる）。
      */
     override suspend fun list(keyPrefix: String): ListObjectsResult {
         val dateCapture = ResponseDateCapture()
@@ -201,17 +201,17 @@ internal fun listPageOf(response: ListObjectsV2Response, serverTime: Instant?): 
 }
 
 /**
- * 成功した応答の `Date` ヘッダを覚える interceptor。1 つの要求のあいだに応答を複数受けたとき（SDK の送り直し）は、最後のもの。
+ * 成功した応答の `Date` ヘッダを保持する interceptor。1 つのリクエストのあいだに応答を複数受けたとき（SDK の再送）は、最後のもの。
  */
 private class ResponseDateCapture : HttpInterceptor {
     private val header = AtomicReference<String?>(null)
 
-    /** 覚えた値を捨てる。要求の前に呼ぶ。 */
+    /** 保持した値を捨てる。リクエストの前に呼ぶ。 */
     fun reset() {
         header.set(null)
     }
 
-    /** 覚えた `Date` を読む。無いか、読めなければ null。 */
+    /** 保持した `Date` を読む。無いか、読めなければ null。 */
     fun date(): Instant? = header.get()?.let(::parseHttpDate)
 
     override fun readAfterTransmit(context: ProtocolResponseInterceptorContext<Any, HttpRequest, HttpResponse>) {

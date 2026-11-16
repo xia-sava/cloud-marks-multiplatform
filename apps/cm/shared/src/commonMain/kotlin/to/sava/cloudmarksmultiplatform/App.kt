@@ -9,7 +9,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 
-/** Androidとデスクトップの双方から呼ぶ共通のエントリポイント。 */
+// TODO: Android のエントリポイントが CloudMarksApp を使うようになったら消す
+/** Android のエントリポイントが呼ぶ、アプリの名前だけを出す画面。デスクトップは `jvmShared` の `CloudMarksApp()` を呼ぶ。 */
 @Composable
 fun App() {
     MaterialTheme {

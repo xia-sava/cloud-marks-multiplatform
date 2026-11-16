@@ -12,7 +12,7 @@ class ApplyItemOperationsTest {
     private val newItem1 = NewItem(itemId(401), "https://example.com/1", "one")
     private val newItem2 = NewItem(itemId(402), "https://example.com/2", "two")
 
-    // ブックマークとして追加：根の項目の末尾に入力の順で足し、added を設定する。ほかのフォルダの項目は変わらない
+    // ブックマークとして追加：ルートフォルダの項目の末尾に入力の順で足し、added を設定する。ほかのフォルダの項目は変わらない
     @Test
     fun addBookmarksAppendsToRootInInputOrderWithAdded() {
         val result = applyOne(SAMPLE_STATE, AddBookmarks(listOf(newItem1, newItem2), ADDED))
@@ -28,7 +28,7 @@ class ApplyItemOperationsTest {
         assertFalse(result.unchanged)
     }
 
-    // ブックマークとして追加：根に同じ ID の項目があれば適用済み。一部だけあれば、無いものだけ足す
+    // ブックマークとして追加：ルートフォルダに同じ ID の項目があれば適用済み。一部だけあれば、無いものだけ足す
     @Test
     fun addBookmarksSkipsItemsAlreadyInRoot() {
         val operation = AddBookmarks(listOf(newItem1, newItem2), ADDED)
@@ -42,7 +42,7 @@ class ApplyItemOperationsTest {
         assertEquals(listOf(newItem1.id, newItem2.id), partial.state.itemIds(ROOT))
     }
 
-    // ブックマークとして追加：根の項目を読み込んでいなければ、プログラムの誤りとして例外にする
+    // ブックマークとして追加：ルートフォルダの項目を読み込んでいなければ、プログラムの誤りとして例外にする
     @Test
     fun addBookmarksFailsWhenRootItemsAreNotLoaded() {
         val unloaded = SAMPLE_STATE.copy(items = SAMPLE_STATE.items - ROOT)
@@ -80,7 +80,7 @@ class ApplyItemOperationsTest {
         assertTrue(result.unchanged)
     }
 
-    // 項目の削除：木に無いフォルダを指していても何もせず、項目を読み込んでいなくても例外にならない
+    // 項目の削除：ツリーに無いフォルダを指していても何もせず、項目を読み込んでいなくても例外にならない
     @Test
     fun deleteItemsFromMissingFolderDoesNothing() {
         val result = applyOne(SAMPLE_STATE, DeleteItems(listOf(ItemRef(folderId(99), itemId(1)))))
@@ -89,15 +89,15 @@ class ApplyItemOperationsTest {
         assertTrue(result.unchanged)
     }
 
-    // 項目の挿入：目印の前に入力の順で入れ、目印が無い・null なら末尾に入れる
+    // 項目の挿入：位置に指定した項目の前に入力の順で入れ、位置に指定した項目が無い・null なら末尾に入れる
     @Test
     fun insertItemsPlacesBeforeMarkerOrAtEnd() {
         val inserted = listOf(item(itemId(501)), item(itemId(502)))
         val cases = mapOf(
-            "目印の前" to (A_ITEM_2 to listOf(A_ITEM_1, itemId(501), itemId(502), A_ITEM_2, A_ITEM_3)),
+            "位置に指定した項目の前" to (A_ITEM_2 to listOf(A_ITEM_1, itemId(501), itemId(502), A_ITEM_2, A_ITEM_3)),
             "先頭の項目の前" to (A_ITEM_1 to listOf(itemId(501), itemId(502), A_ITEM_1, A_ITEM_2, A_ITEM_3)),
             "指定なし" to (null to listOf(A_ITEM_1, A_ITEM_2, A_ITEM_3, itemId(501), itemId(502))),
-            "目印が無い" to (itemId(999) to listOf(A_ITEM_1, A_ITEM_2, A_ITEM_3, itemId(501), itemId(502))),
+            "位置に指定した項目が無い" to (itemId(999) to listOf(A_ITEM_1, A_ITEM_2, A_ITEM_3, itemId(501), itemId(502))),
         )
 
         cases.forEach { (name, case) ->
@@ -121,7 +121,7 @@ class ApplyItemOperationsTest {
         assertEquals(setOf(FOLDER_C), result.changedFolderIds)
     }
 
-    // 項目の挿入：同じ ID の項目が既にあれば適用済み。2 回適用しても状態は変わらない。入れる先が無ければ適用しない
+    // 項目の挿入：同じ ID の項目が既にあれば適用済み。2 回適用しても状態は変わらない。挿入先が無ければ適用しない
     @Test
     fun insertItemsIsIdempotentAndRequiresExistingFolder() {
         val operation = InsertItems(FOLDER_A, listOf(item(itemId(501))), A_ITEM_2)
@@ -132,7 +132,7 @@ class ApplyItemOperationsTest {
         assertTrue(missing.unchanged)
     }
 
-    // 項目の移動：別のフォルダへ、目印の前に入力の順で入れる。元のフォルダから外れる
+    // 項目の移動：別のフォルダへ、位置に指定した項目の前に入力の順で入れる。元のフォルダから外れる
     @Test
     fun moveItemsToAnotherFolderBeforeMarker() {
         val result = applyOne(
@@ -152,7 +152,7 @@ class ApplyItemOperationsTest {
         assertFalse(result.treeChanged)
     }
 
-    // 項目の移動：移す先の末尾（目印なし）。複数のフォルダから、入力の順に集める
+    // 項目の移動：移動先の末尾（位置の指定なし）。複数のフォルダから、入力の順に集める
     @Test
     fun moveItemsFromSeveralFoldersToEndWithoutMarker() {
         val result = applyOne(
@@ -181,12 +181,12 @@ class ApplyItemOperationsTest {
         assertEquals(setOf(FOLDER_A), result.changedFolderIds)
     }
 
-    // 項目の移動：位置は対象を外したあとの並びで決める（元の並びの添字ではなく、目印の前に入る）
+    // 項目の移動：位置は対象を外したあとの並びで決める（元の並びの添字ではなく、位置に指定した項目の前に入る）
     @Test
     fun moveItemsDecidesPositionAfterRemovingTargets() {
         val cases = mapOf(
-            "後ろの目印の前" to (A_ITEM_3 to listOf(A_ITEM_2, A_ITEM_1, A_ITEM_3)),
-            "対象自身が目印なので末尾" to (A_ITEM_1 to listOf(A_ITEM_2, A_ITEM_3, A_ITEM_1)),
+            "位置に指定した後ろの項目の前" to (A_ITEM_3 to listOf(A_ITEM_2, A_ITEM_1, A_ITEM_3)),
+            "位置に指定した項目が対象自身なので末尾" to (A_ITEM_1 to listOf(A_ITEM_2, A_ITEM_3, A_ITEM_1)),
         )
 
         cases.forEach { (name, case) ->
@@ -206,7 +206,7 @@ class ApplyItemOperationsTest {
         assertTrue(result.unchanged)
     }
 
-    // 項目の移動：目印が対象に含まれていれば末尾に置く
+    // 項目の移動：位置に指定した項目が対象に含まれていれば末尾に置く
     @Test
     fun moveItemsPutsAtEndWhenMarkerIsAmongTargets() {
         val result = applyOne(
@@ -221,7 +221,7 @@ class ApplyItemOperationsTest {
         assertEquals(listOf(A_ITEM_3, A_ITEM_1, A_ITEM_2), result.state.itemIds(FOLDER_A))
     }
 
-    // 項目の移動：目印が無い（指定なし・並びに無い ID）ときは末尾に置く
+    // 項目の移動：位置に指定した項目が無い（指定なし・並びに無い ID）ときは末尾に置く
     @Test
     fun moveItemsPutsAtEndWhenMarkerIsAbsentOrUnknown() {
         listOf(null, itemId(999)).forEach { before ->
@@ -260,7 +260,7 @@ class ApplyItemOperationsTest {
         assertTrue(result.unchanged)
     }
 
-    // 項目の移動：移す先のフォルダが無ければ、操作全体を適用しない
+    // 項目の移動：移動先のフォルダが無ければ、操作全体を適用しない
     @Test
     fun moveItemsToMissingDestinationIsNotApplied() {
         val result = applyOne(

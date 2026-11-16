@@ -6,7 +6,7 @@ plugins {
     alias(libs.plugins.composeCompiler)
 }
 
-/** Desktopを動かすJetBrains Runtimeのバージョン。コンパイルに使うJDKの版も同じにする。 */
+/** Desktopを動かすJetBrains Runtimeのバージョン。コンパイルに使うJDKのバージョンも同じにする。 */
 private val JETBRAINS_RUNTIME_VERSION = libs.versions.desktop.jdk.get().toInt()
 
 /**
@@ -16,15 +16,15 @@ private val JETBRAINS_RUNTIME_VERSION = libs.versions.desktop.jdk.get().toInt()
 private val ENABLE_NATIVE_ACCESS = "--enable-native-access=ALL-UNNAMED"
 
 private val MISSING_JETBRAINS_RUNTIME =
-    "JetBrains Runtime $JETBRAINS_RUNTIME_VERSION が見当たらないため、同じ版の別のJDKで動かす。" +
+    "JetBrains Runtime $JETBRAINS_RUNTIME_VERSION が見当たらないため、同じバージョンの別のJDKで動かす。" +
         "Windowsでマウスを載せただけのアクティブ化（X-mouse）は動作しない。"
 
 private val REQUIRED_JETBRAINS_RUNTIME_MISSING =
     "JetBrains Runtime $JETBRAINS_RUNTIME_VERSION が見当たらない。" +
-        "同じ版の別のJDKでパッケージングした配布物は、" +
+        "同じバージョンの別のJDKでパッケージングした配布物は、" +
         "Windowsでマウスを載せただけのアクティブ化（X-mouse）が動作しない。"
 
-/** 手元のJetBrains Runtime。無ければ失敗として返り、[sameVersionRuntime]へ委ねる。 */
+/** ローカルにあるJetBrains Runtime。無ければ失敗として返り、[sameVersionRuntime]へ委ねる。 */
 private val jetBrainsRuntime = runCatching {
     extensions.getByType<JavaToolchainService>().launcherFor {
         languageVersion.set(JavaLanguageVersion.of(JETBRAINS_RUNTIME_VERSION))
@@ -33,18 +33,18 @@ private val jetBrainsRuntime = runCatching {
 }
 
 /**
- * JetBrains Runtimeが無いときに動かす、同じ版のJDK（ベンダーを問わない）。
+ * JetBrains Runtimeが無いときに動かす、同じバージョンのJDK（ベンダーを問わない）。
  *
- * Composeの既定はGradleのデーモンのJDKで、版が低いとコンパイルしたクラスを読み込めない。
+ * Composeの既定はGradleのデーモンのJDKで、バージョンが低いとコンパイルしたクラスを読み込めない。
  */
 private val sameVersionRuntime = extensions.getByType<JavaToolchainService>().launcherFor {
     languageVersion.set(JavaLanguageVersion.of(JETBRAINS_RUNTIME_VERSION))
 }
 
 /**
- * 同じ版の別のJDKへフォールバックすることを許さないか。
+ * 同じバージョンの別のJDKへフォールバックすることを許さないか。
  *
- * 配布物をビルドするときに有効にする。ログへ出すだけでは、働かないものが成功として出てくる。
+ * 配布物をビルドするときに有効にする。ログへ出すだけでは、動作しない部分のある配布物がビルドに成功したまま作られる。
  */
 private val requiresJetBrainsRuntime =
     providers.gradleProperty("cloudmarks.requireJetBrainsRuntime").isPresent
@@ -66,7 +66,7 @@ val cloudMarksPackageName = "CloudMarks"
 /** バージョンを渡されなかったときの文字列。 */
 private val DEFAULT_VERSION_NAME = "0.0.0"
 
-/** インストーラが受け付けるバージョンの書式。jpackageは配布形式ごとにこれを検める。 */
+/** インストーラが受け付けるバージョンの書式。jpackageは配布形式ごとにこれを検証する。 */
 private val PACKAGE_VERSION_PATTERN = Regex("""\d+\.\d+\.\d+""")
 
 /** Inno Setupのコンパイラの名前。 */
@@ -98,7 +98,7 @@ private fun findInnoSetupCompiler(): File? {
     return (onPath + installed).map { File(it, INNO_SETUP_COMPILER_NAME) }.firstOrNull { it.isFile }
 }
 
-// バージョンは配布時に -Pcloudmarks.versionName で渡す。渡されない手元のビルドは既定値を使う。
+// バージョンは配布時に -Pcloudmarks.versionName で渡す。渡されないローカルのビルドは既定値を使う。
 val cloudMarksVersionName =
     providers.gradleProperty("cloudmarks.versionName").getOrElse(DEFAULT_VERSION_NAME)
 /** 数字3つの書式のバージョン。[cloudMarksVersionName]がその書式でなければ既定の値。 */
@@ -108,11 +108,11 @@ val cloudMarksPackageVersion =
 compose.desktop {
     application {
         mainClass = "to.sava.cloudmarksmultiplatform.MainKt"
-        // 認証情報の暗号化（DPAPI）をFFMで呼ぶ。`run`と配布物の両方に効く。
+        // 認証情報の暗号化（DPAPI）をFFMで呼ぶ。`run`と配布物の両方に適用される。
         jvmArgs += ENABLE_NATIVE_ACCESS
 
         // Windowsでマウスを載せただけのアクティブ化を働かせるには、JetBrains Runtimeで動かす必要がある。
-        // 素のOpenJDKはその求めに応じない。手元に無ければ同じ版の別のJDKで動かして
+        // 素のOpenJDKはこれに対応していない。ローカルに無ければ同じバージョンの別のJDKで動かして
         // 何が働かなくなるかをログへ出し、配布物をビルドするときは失敗させる。
         jetBrainsRuntime
             .onSuccess { javaHome = it.metadata.installationPath.asFile.path }
@@ -123,14 +123,14 @@ compose.desktop {
             }
 
         nativeDistributions {
-            // jlinkの自動解決では入らないが、S3へのHTTPS接続に要る。
+            // jlinkの自動解決では含まれないが、S3へのHTTPS接続に要る。
             modules("jdk.crypto.ec")
             // Windowsのインストーラはjpackageではビルドしない。`createDistributable`の出力を
             // `packageInnoSetup`がInno Setupへ渡す。
             targetFormats(TargetFormat.Dmg, TargetFormat.Deb)
             packageName = cloudMarksPackageName
-            // バージョンを打たないビルドの名前は書式が合わず、インストーラをビルドしない場面でも
-            // 設定を弾くため、その場合は既定へフォールバックする。
+            // バージョンを指定しないビルドの名前は書式に合わず、インストーラをビルドしない場面でも
+            // 設定が拒否されるため、その場合は既定へフォールバックする。
             packageVersion = cloudMarksPackageVersion
         }
     }
@@ -161,7 +161,7 @@ tasks.register<Exec>("packageInnoSetup") {
     outputs.dir(installerDir)
 
     doFirst {
-        // BOMが無くてもコンパイルは通り、日本語の化けたインストーラが成功として出てくる。
+        // BOMが無くてもコンパイルは通り、ビルドに成功したまま日本語の化けたインストーラができる。
         val head = script.asFile.inputStream().use { it.readNBytes(byteOrderMark.size) }
         if (!head.contentEquals(byteOrderMark)) throw GradleException(missingByteOrderMark)
 

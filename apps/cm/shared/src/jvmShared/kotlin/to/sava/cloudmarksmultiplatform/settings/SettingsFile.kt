@@ -37,7 +37,7 @@ private class StoredCredentials(
     val secretAccessKey: String,
 )
 
-/** 読む途中の失敗を、[SettingsFile.read] の入口まで運ぶための内部の例外。入口で必ず捕まえて結果の値にする。 */
+/** 読む途中の失敗を、[SettingsFile.read] まで運ぶための内部の例外。[SettingsFile.read] で必ず捕まえて結果の値にする。 */
 private class SettingsReadFailure(val result: SettingsReadResult) : Exception()
 
 private fun corrupt(detail: String): Nothing = throw SettingsReadFailure(SettingsReadResult.Corrupt(detail))
@@ -47,7 +47,7 @@ private fun corrupt(detail: String): Nothing = throw SettingsReadFailure(Setting
  *
  * S3 の接続先（リージョン・バケット・プレフィックス）と、[protector] で暗号化した認証情報を 1 つのファイルに入れる。
  * 認証情報は平文で書かない。暗号化できなければ、書かずに [SettingsWriteResult.ProtectionUnavailable] を返す。
- * 版の欄は持たず、読むときは知らない欄を無視する。
+ * 形式の版の欄は持たず、読むときは知らない欄を無視する。
  *
  * 読み書きはブロックする。呼び出し側が I/O 用のスレッドで呼ぶ。
  *

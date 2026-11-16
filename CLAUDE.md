@@ -5,7 +5,7 @@
 ## 2つのアプリにまたがる変更
 
 Native Messaging のメッセージの形を変えるときは、拡張と `apps/cm` の両方を1つの変更として扱う。
-形の見本は `contracts/native-messaging/` にあり、両方のテストが読むため、形の食い違いはテストの失敗として現れる。
+形の見本は `contracts/native-messaging/` にある。両方のテストがこれを読むため、形の食い違いはテストの失敗として現れる。
 
 S3 上の形式を変えるときは、`contracts/storage/` の見本も同じ変更で直す。
 

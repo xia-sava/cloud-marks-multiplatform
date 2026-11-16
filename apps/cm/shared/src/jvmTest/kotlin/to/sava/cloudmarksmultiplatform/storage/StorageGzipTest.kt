@@ -23,7 +23,7 @@ class StorageGzipTest {
     private fun gzipOf(bytes: ByteArray): ByteArray =
         ByteArrayOutputStream().also { output -> GZIPOutputStream(output).use { it.write(bytes) } }.toByteArray()
 
-    // 目録を圧縮してから展開すると、元の型に戻る
+    // マニフェストを圧縮してから展開すると、元の型に戻る
     @Test
     fun manifestRoundTrips() {
         val result = decodeManifestGzip(encodeManifestGzip(manifest))
@@ -31,7 +31,7 @@ class StorageGzipTest {
         assertEquals(ManifestDecodeResult.Readable(manifest), result)
     }
 
-    // フォルダのファイルを圧縮してから展開すると、元の型に戻る
+    // 項目ファイルを圧縮してから展開すると、元の型に戻る
     @Test
     fun itemsFileRoundTrips() {
         val result = decodeItemsFileGzip(encodeItemsFileGzip(itemsFile), ROOT_ID, folder, manifestVersion = 1)
@@ -71,7 +71,7 @@ class StorageGzipTest {
         assertIs<ManifestDecodeResult.Corrupt>(decodeManifestGzip(bytes))
     }
 
-    // 目録の version が新しいとき、展開できないフォルダのファイルは「アプリの更新が要る」として返る
+    // マニフェストの version が新しいとき、展開できない項目ファイルは「アプリの更新が要る」として返る
     @Test
     fun undecompressableItemsFileWithNewerManifestIsUpdateRequired() {
         val result = decodeItemsFileGzip("x".toByteArray(), ROOT_ID, folder, manifestVersion = 2)

@@ -14,7 +14,7 @@ class ApplyFolderOperationsTest {
         NewItem(itemId(402), "https://example.com/2", "two"),
     )
 
-    // フォルダとして追加：根の子のフォルダの末尾に作り、項目を入力の順に入れて added を設定する
+    // フォルダとして追加：ルートフォルダの子のフォルダの末尾に作り、項目を入力の順に入れて added を設定する
     @Test
     fun addFolderAppendsFolderToRootWithItemsInOrder() {
         val result = applyOne(SAMPLE_STATE, AddFolder(newFolder, "新しい", newItems, ADDED))
@@ -48,15 +48,15 @@ class ApplyFolderOperationsTest {
         assertTrue(result.unchanged)
     }
 
-    // フォルダの作成：目印の前、末尾（目印なし・目印が親の子でない）に入る。項目は空で読み込んだ状態になる
+    // フォルダの作成：位置に指定したフォルダの前、末尾（位置の指定なし・位置に指定したフォルダが親の子でない）に入る。項目は空で読み込んだ状態になる
     @Test
     fun createFolderPlacesBeforeMarkerOrAtEnd() {
         val cases = mapOf(
-            "目印の前" to (FOLDER_B to listOf(FOLDER_A, newFolder, FOLDER_B, FOLDER_C)),
+            "位置に指定したフォルダの前" to (FOLDER_B to listOf(FOLDER_A, newFolder, FOLDER_B, FOLDER_C)),
             "先頭" to (FOLDER_A to listOf(newFolder, FOLDER_A, FOLDER_B, FOLDER_C)),
             "指定なし" to (null to listOf(FOLDER_A, FOLDER_B, FOLDER_C, newFolder)),
-            "目印が親の子でない" to (FOLDER_A1 to listOf(FOLDER_A, FOLDER_B, FOLDER_C, newFolder)),
-            "目印が無い" to (folderId(99) to listOf(FOLDER_A, FOLDER_B, FOLDER_C, newFolder)),
+            "位置に指定したフォルダが親の子でない" to (FOLDER_A1 to listOf(FOLDER_A, FOLDER_B, FOLDER_C, newFolder)),
+            "位置に指定したフォルダが無い" to (folderId(99) to listOf(FOLDER_A, FOLDER_B, FOLDER_C, newFolder)),
         )
 
         cases.forEach { (name, case) ->
@@ -85,7 +85,7 @@ class ApplyFolderOperationsTest {
         assertTrue(emptyName.unchanged)
     }
 
-    // フォルダの移動：子孫ごと別の親へ移り、目印の前に入る。親の子の並びと、移したフォルダの親が替わる
+    // フォルダの移動：子孫ごと別の親へ移り、位置に指定したフォルダの前に入る。親の子の並びと、移したフォルダの親が替わる
     @Test
     fun moveFolderMovesWithDescendantsBeforeMarker() {
         val result = applyOne(SAMPLE_STATE, MoveFolder(FOLDER_A, FOLDER_C, before = null))
@@ -103,7 +103,7 @@ class ApplyFolderOperationsTest {
         assertEquals(emptyList(), beforeMarker.state.childIds(FOLDER_A))
     }
 
-    // フォルダの移動：同じ親の中での並べ替え。目印が対象そのものなら、外したあとの並びで決まるので末尾
+    // フォルダの移動：同じ親の中での並べ替え。位置に指定したフォルダが対象そのものなら、外したあとの並びで決まるので末尾
     @Test
     fun moveFolderReordersWithinSameParent() {
         val toFront = applyOne(SAMPLE_STATE, MoveFolder(FOLDER_C, ROOT, before = FOLDER_A))
@@ -113,13 +113,13 @@ class ApplyFolderOperationsTest {
         assertEquals(listOf(FOLDER_B, FOLDER_C, FOLDER_A), markerIsTarget.state.childIds(ROOT))
     }
 
-    // フォルダの移動：対象か新しい親が無いとき、対象が根のとき、新しい親が対象そのものかその子孫のときは適用しない
+    // フォルダの移動：対象か新しい親が無いとき、対象がルートフォルダのとき、新しい親が対象そのものかその子孫のときは適用しない
     @Test
     fun moveFolderRejections() {
         val cases = mapOf(
             "対象が無い" to (MoveFolder(folderId(99), ROOT, null) to NotAppliedReason.TargetNotFound),
             "新しい親が無い" to (MoveFolder(FOLDER_A, folderId(99), null) to NotAppliedReason.DestinationNotFound),
-            "対象が根" to (MoveFolder(ROOT, FOLDER_A, null) to NotAppliedReason.RootNotAllowed),
+            "対象がルートフォルダ" to (MoveFolder(ROOT, FOLDER_A, null) to NotAppliedReason.RootNotAllowed),
             "新しい親が対象そのもの" to
                 (MoveFolder(FOLDER_A, FOLDER_A, null) to NotAppliedReason.NewParentIsSelfOrDescendant),
             "新しい親が子" to
@@ -159,12 +159,12 @@ class ApplyFolderOperationsTest {
         assertTrue(result.changedFolderIds.isEmpty())
     }
 
-    // フォルダの名前の変更：対象が無い・根・名前が空のときは適用しない
+    // フォルダの名前の変更：対象が無い・ルートフォルダ・名前が空のときは適用しない
     @Test
     fun renameFolderRejections() {
         val cases = mapOf(
             "対象が無い" to (RenameFolder(folderId(99), "x") to NotAppliedReason.TargetNotFound),
-            "根" to (RenameFolder(ROOT, "x") to NotAppliedReason.RootNotAllowed),
+            "ルートフォルダ" to (RenameFolder(ROOT, "x") to NotAppliedReason.RootNotAllowed),
             "名前が空" to (RenameFolder(FOLDER_A, "") to NotAppliedReason.EmptyName),
         )
 
@@ -193,7 +193,7 @@ class ApplyFolderOperationsTest {
         assertTrue(result.changedFolderIds.isEmpty())
     }
 
-    // フォルダの削除：もう無ければ何もせず、報告もしない。根は消せない
+    // フォルダの削除：もう無ければ何もせず、報告もしない。ルートフォルダは消せない
     @Test
     fun deleteFolderIsIdempotentAndRefusesRoot() {
         val operation = DeleteFolder(FOLDER_A)

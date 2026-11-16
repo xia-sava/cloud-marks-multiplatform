@@ -8,7 +8,7 @@ import kotlin.time.Instant
 private const val TIMESTAMP_FRACTION_DIGITS = 3
 
 /**
- * 目録を JSONL の文字列にする。各行を LF で終え、最後の行も LF で終える。
+ * マニフェストを JSONL の文字列にする。各行を LF で終え、最後の行も LF で終える。
  *
  * 日時（`updatedAt`）はミリ秒未満を切り捨てて書く。書いた値と読み直した値を等しくするには、
  * 呼び出し側が [truncatedToMilliseconds] を通した値を渡す。
@@ -18,7 +18,7 @@ fun encodeManifest(manifest: Manifest): String =
         .toJsonl()
 
 /**
- * フォルダのファイルを JSONL の文字列にする。各行を LF で終え、最後の行も LF で終える。
+ * 項目ファイルを JSONL の文字列にする。各行を LF で終え、最後の行も LF で終える。
  *
  * 日時（`added`）はミリ秒未満を切り捨てて書く。書いた値と読み直した値を等しくするには、
  * 呼び出し側が [truncatedToMilliseconds] を通した値を渡す。

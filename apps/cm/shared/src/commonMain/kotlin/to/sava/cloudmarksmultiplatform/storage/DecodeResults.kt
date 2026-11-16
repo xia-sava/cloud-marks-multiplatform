@@ -13,7 +13,7 @@ data class StorageProblem(
     override fun toString(): String = line?.let { "$it 行目: $message" } ?: message
 }
 
-/** 目録を読んだ結果。 */
+/** マニフェストを読んだ結果。 */
 sealed interface ManifestDecodeResult {
     /** 読めた。読み書きできる（`version` が知っている版以下）。 */
     data class Readable(val manifest: Manifest) : ManifestDecodeResult
@@ -38,19 +38,19 @@ sealed interface ManifestDecodeResult {
     data class Corrupt(val problem: StorageProblem) : ManifestDecodeResult
 }
 
-/** フォルダのファイルを読んだ結果。 */
+/** 項目ファイルを読んだ結果。 */
 sealed interface ItemsFileDecodeResult {
     /** 読めた。 */
     data class Readable(val file: ItemsFile) : ItemsFileDecodeResult
 
-    /** 目録の `version` が知っている版より新しく、検証に失敗した。アプリの更新が要る。 */
+    /** マニフェストの `version` が知っている版より新しく、検証に失敗した。アプリの更新が要る。 */
     data class UpdateRequired(val cause: StorageProblem) : ItemsFileDecodeResult
 
     /** 壊れている。 */
     data class Corrupt(val problem: StorageProblem) : ItemsFileDecodeResult
 }
 
-/** 失敗を、目録の版に応じて「更新が要る」か「壊れている」に振り分ける。 */
+/** 失敗を、マニフェストの版に応じて「更新が要る」か「壊れている」に振り分ける。 */
 internal fun itemsFileFailure(
     problem: StorageProblem,
     manifestVersion: Int,

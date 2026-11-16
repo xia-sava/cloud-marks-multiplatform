@@ -17,11 +17,11 @@ dependencies {
 }
 
 // バージョンは配布時に -Pcloudmarks.versionCode / -Pcloudmarks.versionName で渡す。
-// 渡されない手元のビルドは既定値を使う。
+// 渡されないローカルのビルドは既定値を使う。
 val cloudMarksVersionCode = providers.gradleProperty("cloudmarks.versionCode").getOrElse("1")
 val cloudMarksVersionName = providers.gradleProperty("cloudmarks.versionName").getOrElse("0.0.0")
 
-// 配布用の署名鍵。設定が無ければ署名なしで組む。
+// 配布用の署名鍵。設定が無ければ署名なしでビルドする。
 val releaseKeystore = providers.environmentVariable("CLOUDMARKS_RELEASE_KEYSTORE").orNull
 
 android {

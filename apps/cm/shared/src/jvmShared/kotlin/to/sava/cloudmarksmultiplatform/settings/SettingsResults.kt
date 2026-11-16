@@ -3,7 +3,7 @@ package to.sava.cloudmarksmultiplatform.settings
 /**
  * 設定のファイルを読んだ結果。
  *
- * 失敗の `detail` は後から追うための短い文で、認証情報を含まない。
+ * 失敗の `detail` は後から調べるための短い文で、認証情報を含まない。
  */
 sealed interface SettingsReadResult {
     /** ファイルが無い。まだ設定していない。 */
@@ -25,7 +25,7 @@ sealed interface SettingsReadResult {
 /**
  * 設定のファイルを書いた結果。
  *
- * 失敗の `detail` は後から追うための短い文で、認証情報を含まない。
+ * 失敗の `detail` は後から調べるための短い文で、認証情報を含まない。
  */
 sealed interface SettingsWriteResult {
     /** 書けた。 */

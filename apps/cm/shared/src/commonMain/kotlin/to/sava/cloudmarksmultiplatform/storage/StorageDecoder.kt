@@ -3,9 +3,9 @@ package to.sava.cloudmarksmultiplatform.storage
 private const val FIRST_BODY_LINE = 2
 
 /**
- * JSONL の文字列を目録として読み、検証する。
+ * JSONL の文字列をマニフェストとして読み、検証する。
  *
- * 見出しを `format`、`version` と `readableBy`、残りの欄の順に確かめる。`readableBy` が [knownVersion] より新しければ、
+ * ヘッダーを `format`、`version` と `readableBy`、残りの欄の順に確かめる。`readableBy` が [knownVersion] より新しければ、
  * 残りは確かめず [ManifestDecodeResult.UpdateRequired] を返す。`version` が新しいときにほかの検証で失敗した場合も、
  * [ManifestDecodeResult.Corrupt] ではなく [ManifestDecodeResult.UpdateRequired] を返す。
  *
@@ -38,11 +38,11 @@ fun decodeManifest(
 }
 
 /**
- * JSONL の文字列をフォルダのファイルとして読み、検証する。
+ * JSONL の文字列を項目ファイルとして読み、検証する。
  *
  * @param keyFolderId キー `folders/<フォルダの ID>/...` のフォルダの ID
- * @param folder このファイルを指している、目録のフォルダの行。`id` と `count` を確かめる
- * @param manifestVersion 目録の `version`。知っている版より新しく、検証に失敗したときは
+ * @param folder このファイルを指している、マニフェストのフォルダの行。`id` と `count` を確かめる
+ * @param manifestVersion マニフェストの `version`。知っている版より新しく、検証に失敗したときは
  *   [ItemsFileDecodeResult.Corrupt] ではなく [ItemsFileDecodeResult.UpdateRequired] を返す
  * @param knownVersion このクライアントが知っている形式の版
  */
@@ -61,7 +61,7 @@ fun decodeItemsFile(
 
 private class ManifestVersions(val header: JsonlLine, val version: Int, val readableBy: Int)
 
-/** 見出しの `format`、`version`、`readableBy` を確かめる。 */
+/** ヘッダーの `format`、`version`、`readableBy` を確かめる。 */
 private fun readManifestVersions(header: JsonlLine): ManifestVersions {
     header.requireFormat(MANIFEST_FORMAT)
     val version = header.integer("version")
@@ -103,14 +103,14 @@ private fun readFolderEntry(line: JsonlLine): FolderEntry {
 /**
  * フォルダの行の並びを確かめる。`folders` は 2 行目から後ろの行を、`id` と `parent` を読んだ形で持つ。
  *
- * 2 行目が根（`parent` が null で名前が空）で、3 行目からの各行の `parent` が、
- * 直前の行から `parent` を辿って根へ向かう途中にあるフォルダ（直前の行を含む）の `id` であること。
- * 辿った道をスタックで持ち、1 回の走査で、親が先にあること・循環が無いこと・行きがけ順であることを確かめる。
+ * 2 行目がルートフォルダ（`parent` が null で名前が空）で、3 行目からの各行の `parent` が、
+ * 直前の行から `parent` を辿ってルートフォルダへ向かう途中にあるフォルダ（直前の行を含む）の `id` であること。
+ * 辿った経路をスタックで持ち、1 回の走査で、親が先にあること・循環が無いこと・行きがけ順であることを確かめる。
  */
 private fun checkFolderTree(folders: List<FolderEntry>) {
-    val root = folders.firstOrNull() ?: throwStorageProblem(FIRST_BODY_LINE, "根のフォルダの行が無い")
-    if (root.parent != null) throwStorageProblem(FIRST_BODY_LINE, "根のフォルダの `parent` が null でない")
-    if (root.name.isNotEmpty()) throwStorageProblem(FIRST_BODY_LINE, "根のフォルダの `name` が空でない")
+    val root = folders.firstOrNull() ?: throwStorageProblem(FIRST_BODY_LINE, "ルートフォルダの行が無い")
+    if (root.parent != null) throwStorageProblem(FIRST_BODY_LINE, "ルートフォルダの `parent` が null でない")
+    if (root.name.isNotEmpty()) throwStorageProblem(FIRST_BODY_LINE, "ルートフォルダの `name` が空でない")
 
     val seenIds = hashSetOf(root.id)
     val pathFromRoot = arrayListOf(root.id)
@@ -120,7 +120,7 @@ private fun checkFolderTree(folders: List<FolderEntry>) {
         if (folder.name.isEmpty()) throwStorageProblem(number, "`name` が空")
         val parentIndex = pathFromRoot.lastIndexOf(folder.parent ?: throwStorageProblem(number, "`parent` が null"))
         if (parentIndex < 0) {
-            throwStorageProblem(number, "`parent` が、直前の行から根へ向かう途中のフォルダの `id` でない: ${folder.parent}")
+            throwStorageProblem(number, "`parent` が、直前の行からルートフォルダへ向かう途中のフォルダの `id` でない: ${folder.parent}")
         }
         pathFromRoot.subList(parentIndex + 1, pathFromRoot.size).clear()
         pathFromRoot.add(folder.id)
@@ -132,7 +132,7 @@ private fun readItemsFile(rawLines: List<String>, keyFolderId: String, folder: F
     header.requireFormat(ITEMS_FORMAT)
     val folderId = header.string("folder")
     if (folderId != keyFolderId) header.fail("`folder` がキーのフォルダの ID と一致しない: $folderId")
-    if (folderId != folder.id) header.fail("`folder` が目録のフォルダの `id` と一致しない: $folderId")
+    if (folderId != folder.id) header.fail("`folder` がマニフェストのフォルダの `id` と一致しない: $folderId")
 
     val items = readBodyLines(rawLines).map(::readItem)
     val seenIds = hashSetOf<String>()
@@ -140,7 +140,7 @@ private fun readItemsFile(rawLines: List<String>, keyFolderId: String, folder: F
         if (!seenIds.add(item.id)) throwStorageProblem(index + FIRST_BODY_LINE, "`id` が重複している: ${item.id}")
     }
     if (items.size != folder.count) {
-        throwStorageProblem(null,"項目の行の数(${items.size})が目録の `count`(${folder.count}) と一致しない")
+        throwStorageProblem(null,"項目の行の数(${items.size})がマニフェストの `count`(${folder.count}) と一致しない")
     }
     return ItemsFile(ItemsFileHeader(folderId), items)
 }

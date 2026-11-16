@@ -25,11 +25,11 @@ export const BACKGROUND_FILE = "background.js"
 
 export const GECKO_ID = "cloud-marks-multiplatform@sava.to"
 
-// background の "type": "module" が使える最初の版。
+// background の "type": "module" が使える最初のバージョン。
 export const FIREFOX_MIN_VERSION = "112.0"
 
 /**
- * 共通部分にブラウザごとの差分を重ねた manifest を返す。
+ * 共通部分にブラウザごとの差分を加えた manifest を返す。
  * Chrome は background に service_worker を、Firefox は scripts を使う
  * （Firefox の MV3 は service worker を使えない）。
  */

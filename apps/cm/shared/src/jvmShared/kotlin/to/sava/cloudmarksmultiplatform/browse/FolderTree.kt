@@ -1,0 +1,43 @@
+package to.sava.cloudmarksmultiplatform.browse
+
+import to.sava.cloudmarksmultiplatform.operations.TreeState
+
+/**
+ * ツリーに描く 1 行。開いているノードの子だけを、ルートフォルダから深さ優先の行きがけ順に並べたものの 1 つ。
+ *
+ * @property name フォルダの名前。ルートフォルダは空
+ * @property depth ルートフォルダを 0 とする深さ
+ * @property hasChildren 子のフォルダがあるか。無ければ開閉のボタンを付けない
+ * @property expanded 開いていて、子の行が続くか
+ */
+data class FolderTreeRow(
+    val folderId: String,
+    val name: String,
+    val depth: Int,
+    val hasChildren: Boolean,
+    val expanded: Boolean,
+) {
+    /** ルートフォルダの行か。 */
+    val isRoot: Boolean get() = depth == 0
+}
+
+/**
+ * [tree] を、[expanded] のノードだけを開いた行の並びにする。並びはルートフォルダから深さ優先の行きがけ順で、兄弟の並びはマニフェストの行の順。
+ *
+ * ルートフォルダは必ず先頭に出る。閉じたノードの子孫は、開いていても出さない。[expanded] の中の、ツリーに無いフォルダは無視する。
+ */
+fun flattenFolderTree(tree: TreeState, expanded: Set<String>): List<FolderTreeRow> =
+    buildList {
+        fun visit(folderId: String, depth: Int) {
+            val node = tree.folders.getValue(folderId)
+            val hasChildren = node.children.isNotEmpty()
+            val open = hasChildren && folderId in expanded
+            add(FolderTreeRow(node.id, node.name, depth, hasChildren, open))
+            if (open) node.children.forEach { visit(it, depth + 1) }
+        }
+        visit(tree.rootId, depth = 0)
+    }
+
+/** [folderId] の祖先のフォルダの ID。親からルートフォルダへ向かう順。ルートフォルダと、ツリーに無いフォルダには空。 */
+fun TreeState.ancestorsOf(folderId: String): List<String> =
+    generateSequence(folders[folderId]?.parent) { folders[it]?.parent }.toList()

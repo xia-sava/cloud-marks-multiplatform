@@ -19,7 +19,7 @@ abstract class SyncCacheContractTest {
 
     private val body = byteArrayOf(0x1f, 0x8b.toByte(), 0, 1, 2, 3)
 
-    // 何も持たないとき、目録もフォルダのファイルも無い
+    // 何も持たないとき、マニフェストも項目ファイルも無い
     @Test
     fun emptyCacheHasNothing() = runTest {
         val cache = newCache()
@@ -28,7 +28,7 @@ abstract class SyncCacheContractTest {
         assertNull(cache.itemsFile("cloud_marks/folders/a/b.jsonl.gz"))
     }
 
-    // 目録は、本文と ETag が往復する。ETag は引用符もそのまま
+    // マニフェストは、本文と ETag が往復する。ETag は引用符もそのまま
     @Test
     fun manifestRoundTrips() = runTest {
         val cache = newCache()
@@ -40,7 +40,7 @@ abstract class SyncCacheContractTest {
         assertEquals("\"abc123\"", read.eTag)
     }
 
-    // 目録を持ち直すと、新しいほうに替わる
+    // マニフェストを持ち直すと、新しいほうに替わる
     @Test
     fun putManifestReplacesPrevious() = runTest {
         val cache = newCache()
@@ -65,7 +65,7 @@ abstract class SyncCacheContractTest {
         assertEquals("\"日本語\"", read.eTag)
     }
 
-    // フォルダのファイルは、キーごとに本文が往復する。別のキーのファイルとは混ざらない
+    // 項目ファイルは、キーごとに本文が往復する。別のキーのファイルとは混ざらない
     @Test
     fun itemsFilesRoundTripPerKey() = runTest {
         val cache = newCache()
@@ -78,7 +78,7 @@ abstract class SyncCacheContractTest {
         assertNull(cache.itemsFile("p/folders/a/3.jsonl.gz"))
     }
 
-    // 残すキーのファイルは残り、ほかのフォルダのファイルは消える。目録は変わらない
+    // 残すキーのファイルは残り、ほかの項目ファイルは消える。マニフェストは変わらない
     @Test
     fun retainKeepsListedItemsFilesAndRemovesOthers() = runTest {
         val cache = newCache()
@@ -96,7 +96,7 @@ abstract class SyncCacheContractTest {
         assertEquals("\"m\"", cache.manifest()?.eTag)
     }
 
-    // 空の集合を渡すと、フォルダのファイルはすべて消える
+    // 空の集合を渡すと、項目ファイルはすべて消える
     @Test
     fun retainWithEmptySetRemovesAllItemsFiles() = runTest {
         val cache = newCache()
@@ -109,7 +109,7 @@ abstract class SyncCacheContractTest {
         assertNull(cache.itemsFile("b"))
     }
 
-    // clear すると、目録もフォルダのファイルもすべて消える
+    // clear すると、マニフェストも項目ファイルもすべて消える
     @Test
     fun clearRemovesManifestAndAllItemsFiles() = runTest {
         val cache = newCache()

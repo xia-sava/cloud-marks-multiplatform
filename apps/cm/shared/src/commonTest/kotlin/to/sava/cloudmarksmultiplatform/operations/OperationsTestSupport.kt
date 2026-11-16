@@ -35,8 +35,8 @@ internal fun item(id: String, title: String = "title-$id", added: Instant? = nul
     Item(id, "https://example.com/$id", title, added)
 
 /**
- * 根 → A（→ A1）、B、C の木。根・A・B は項目を持つ。A1 と C は項目を持たない。
- * 並びは 根、A、A1、B、C の行きがけ順。
+ * ルートフォルダ → A（→ A1）、B、C のツリー。ルートフォルダ・A・B は項目を持つ。A1 と C は項目を持たない。
+ * 並びは ルートフォルダ、A、A1、B、C の行きがけ順。
  */
 internal val SAMPLE_MANIFEST = Manifest(
     header = ManifestHeader(1, 1, "30000000-0000-4000-8000-000000000001", ADDED, "test"),
@@ -49,7 +49,7 @@ internal val SAMPLE_MANIFEST = Manifest(
     ),
 )
 
-/** [SAMPLE_MANIFEST] の木の状態。項目は、根と A と B を読み込んだ状態。 */
+/** [SAMPLE_MANIFEST] のツリーの状態。項目は、ルートフォルダと A と B を読み込んだ状態。 */
 internal val SAMPLE_STATE: TreeState = SAMPLE_MANIFEST.toTreeState()
     .withLoadedItems(ROOT, listOf(item(ROOT_ITEM_1), item(ROOT_ITEM_2)))
     .withLoadedItems(FOLDER_A, listOf(item(A_ITEM_1), item(A_ITEM_2), item(A_ITEM_3)))

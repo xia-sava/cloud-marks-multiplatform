@@ -8,10 +8,10 @@ enum class NotAppliedReason {
     /** 対象のフォルダまたは項目が無い。 */
     TargetNotFound,
 
-    /** 入れる先・移す先・親・新しい親のフォルダが無い。 */
+    /** 挿入先・移動先・親・新しい親のフォルダが無い。 */
     DestinationNotFound,
 
-    /** 根は、名前の変更・移動・削除ができない。 */
+    /** ルートフォルダは、名前の変更・移動・削除ができない。 */
     RootNotAllowed,
 
     /** フォルダの新しい親が、対象そのものかその子孫である。 */
@@ -55,11 +55,11 @@ data class OperationResult(
 /**
  * 操作の並びを適用した結果。
  *
- * @property state 適用後の木の状態
+ * @property state 適用後のツリーの状態
  * @property changedFolderIds 項目の並びが変わったフォルダの ID。適用後に残っているフォルダに限る。
  * 新しく作って項目を入れたフォルダと、項目が無くなったフォルダを含む
- * @property itemsToWrite フォルダのファイルを置くフォルダの ID と、置く項目の並び。[changedFolderIds] のうち、
- * 項目が 1 件以上あるもの（項目が無くなったフォルダは含まない。ファイルを置かず、目録の `items` を null にする）
+ * @property itemsToWrite 項目ファイルを置くフォルダの ID と、置く項目の並び。[changedFolderIds] のうち、
+ * 項目が 1 件以上あるもの（項目が無くなったフォルダは含まない。項目ファイルを置かず、マニフェストの `items` を null にする）
  * @property treeChanged フォルダの構成・名前・並びが変わったか
  * @property results 操作ごとの結果。入力の順
  * @property unchanged 適用の前後で状態が同じか。同じなら書き込まない
@@ -212,7 +212,7 @@ private fun TreeState.moveFolder(operation: MoveFolder): Step {
     if (operation.newParentId in descendantsAndSelf(target.id)) {
         return notApplied(NotAppliedReason.NewParentIsSelfOrDescendant)
     }
-    val oldParentId = checkNotNull(target.parent) { "根以外のフォルダは親を持つ" }
+    val oldParentId = checkNotNull(target.parent) { "ルートフォルダ以外のフォルダは親を持つ" }
     val detached = withChildren(oldParentId) { it - target.id }
     val attached = detached.withChildren(operation.newParentId) {
         it.insertedBefore(listOf(target.id), operation.before) { id -> id }
@@ -232,13 +232,13 @@ private fun TreeState.renameFolder(operation: RenameFolder): Step {
 private fun TreeState.deleteFolder(operation: DeleteFolder): Step {
     val target = folders[operation.folderId] ?: return alreadyApplied()
     if (target.id == rootId) return notApplied(NotAppliedReason.RootNotAllowed)
-    val parentId = checkNotNull(target.parent) { "根以外のフォルダは親を持つ" }
+    val parentId = checkNotNull(target.parent) { "ルートフォルダ以外のフォルダは親を持つ" }
     val removedIds = descendantsAndSelf(target.id)
     val detached = withChildren(parentId) { it - target.id }
     return applied(detached.copy(folders = detached.folders - removedIds, items = detached.items - removedIds))
 }
 
-// 木の状態の操作
+// ツリーの状態の操作
 
 /** 項目を読み込んでいなければ、プログラムの誤りとして投げる。 */
 private fun TreeState.itemsOf(folderId: String): List<Item> =
@@ -262,7 +262,7 @@ private fun TreeState.withoutItems(refs: Set<ItemRef>): TreeState =
 
 /**
  * 対象を、見つかったものと見つからなかったものに分ける。入力の順を保ち、同じ対象は 1 つにする。
- * 木にあるフォルダの項目は読み込んでおく必要がある。
+ * ツリーにあるフォルダの項目は読み込んでおく必要がある。
  */
 private fun TreeState.resolve(targets: List<ItemRef>): Pair<List<Pair<ItemRef, Item>>, List<ItemRef>> {
     val resolved = targets.distinct().map { ref ->

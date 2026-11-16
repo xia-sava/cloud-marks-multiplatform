@@ -8,7 +8,7 @@ import kotlin.time.Instant
 
 private val BYTE_ORDER_MARK: Char = 0xFEFF.toChar()
 
-/** 小文字の 16 進で 8-4-4-4-12。版の桁は問わない。 */
+/** 小文字の 16 進で 8-4-4-4-12。バージョンの桁は問わない。 */
 private val UUID_PATTERN = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 /** JSON の整数の字句。先頭の `+`、先頭の 0、全角の数字、小数、指数は含まない。 */
@@ -19,14 +19,14 @@ private val EXCESS_FRACTION_PATTERN = Regex("(\\.[0-9]{9})[0-9]+")
 
 internal fun isUuidShape(value: String): Boolean = UUID_PATTERN.matches(value)
 
-/** 検証の失敗を、デコードの入口まで運ぶための内部の例外。入口で必ず捕まえて結果の値にする。 */
+/** 検証の失敗を、`decodeManifest` と `decodeItemsFile` まで運ぶための内部の例外。この 2 つで必ず捕まえて結果の値にする。 */
 internal class StorageProblemException(val problem: StorageProblem) : Exception(problem.toString())
 
 /** [line] 行目（ファイル全体に係る問題では null）の問題として検証の失敗を投げる。 */
 internal fun throwStorageProblem(line: Int?, message: String): Nothing =
     throw StorageProblemException(StorageProblem(line, message))
 
-/** JSONL の 1 行（JSON のオブジェクト）と、その欄を表の型で取り出す操作。 */
+/** JSONL の 1 行（JSON のオブジェクト）と、その欄を `docs/storage-format.md` の表にある型で取り出す操作。 */
 internal class JsonlLine(val number: Int, private val obj: JsonObject) {
     fun fail(message: String): Nothing = throwStorageProblem(number, message)
 
@@ -81,7 +81,7 @@ private fun parseObjectLine(number: Int, line: String): JsonObject {
     return element as? JsonObject ?: throwStorageProblem(number, "JSON のオブジェクトでない")
 }
 
-/** 見出し（1 行目）を読む。BOM は壊れているとみなす。 */
+/** ヘッダー（1 行目）を読む。BOM は壊れているとみなす。 */
 internal fun readHeaderLine(rawLines: List<String>): JsonlLine {
     val first = rawLines.first()
     if (first.startsWith(BYTE_ORDER_MARK)) throwStorageProblem(1, "BOM がある")

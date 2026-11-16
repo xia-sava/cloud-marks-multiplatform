@@ -17,7 +17,7 @@ import to.sava.cloudmarksmultiplatform.storage.manifestKey
 
 private const val UNEXPECTED_NOT_MODIFIED = "条件を付けていない GET に 304 が返った"
 
-/** 目録を読んだ結果。 */
+/** マニフェストを読んだ結果。 */
 internal sealed interface ManifestRead {
     /** 読めた。[readOnly] は、`version` が知っている版より新しく、読むだけにするとき。 */
     class Usable(val manifest: Manifest, val eTag: String, val readOnly: Boolean) : ManifestRead
@@ -26,12 +26,12 @@ internal sealed interface ManifestRead {
     class Unusable(val failure: SyncFailure) : ManifestRead
 }
 
-/** 目録とフォルダのファイルを、手元のキャッシュを使って読む。 */
+/** マニフェストと項目ファイルを、ローカルキャッシュを使って読む。 */
 internal class TreeReader(
     private val store: ObjectStore,
     private val cache: SyncCache,
 ) {
-    /** 目録を読み、[foldersToLoad] が返すフォルダの項目を読む。 */
+    /** マニフェストを読み、[foldersToLoad] が返すフォルダの項目を読む。 */
     suspend fun read(foldersToLoad: (TreeState) -> Set<String>): TreeReadResult =
         when (val manifest = readManifest()) {
             is ManifestRead.Usable -> readTree(manifest, rereadManifest = { readManifest() }, foldersToLoad = foldersToLoad)
@@ -39,21 +39,23 @@ internal class TreeReader(
         }
 
     /**
-     * 目録を読む（書き込みの手順 1）。
+     * マニフェストを読む（書き込みの手順 1）。
      *
-     * 手元に目録があれば `If-None-Match` を付けて GET し、`304` なら手元のものを使う。読んだ目録は検証し、版を確かめる。
-     * `304` でも手元の目録が目録として読めない（壊れている）ときは、手元のキャッシュを丸ごと消し、
-     * 条件を付けずに GET し直した結果を使う。
-     * `200` で返った目録は、読み書きできるか読むだけにするものなら、ETag と一緒に手元に持ち、その目録が指さない
-     * フォルダのファイルを手元から消す。
-     * `404` は、手元に目録が無ければ目録が無い、あれば目録が消されているとする。
+     * ローカルキャッシュにマニフェストがあれば `If-None-Match` を付けて GET し、`304` ならローカルキャッシュのものを使う。
+     * 読んだマニフェストは検証し、版を確かめる。
+     * `304` でもローカルキャッシュのマニフェストがマニフェストとして読めない（壊れている）ときは、
+     * ローカルキャッシュを丸ごと消し、条件を付けずに GET し直した結果を使う。
+     * `200` で返ったマニフェストは、読み書きできるか読むだけにするものなら、ETag と一緒にローカルキャッシュに持ち、
+     * そのマニフェストが指さない項目ファイルをローカルキャッシュから消す。
+     * `404` は、ローカルキャッシュにマニフェストが無ければマニフェストが無い、あればマニフェストが消されているとする。
      *
-     * @param useCache false なら、手元の目録を読まず、条件を付けずに GET する。手元の目録も替えない。`404` は目録が無いとする
+     * @param useCache false なら、ローカルキャッシュのマニフェストを読まず、条件を付けずに GET する。
+     * ローカルキャッシュのマニフェストも替えない。`404` はマニフェストが無いとする
      */
     suspend fun readManifest(useCache: Boolean = true): ManifestRead =
         getManifest(if (useCache) cache.manifest() else null, useCache)
 
-    /** 目録を GET して読む。[cached] があれば、その ETag を `If-None-Match` に付ける。 */
+    /** マニフェストを GET して読む。[cached] があれば、その ETag を `If-None-Match` に付ける。 */
     private suspend fun getManifest(cached: CachedManifest?, useCache: Boolean): ManifestRead =
         when (val response = store.get(manifestKey(store.prefix), cached?.eTag)) {
             is GetObjectResult.Found -> manifestReadOf(response.body, response.eTag).also { read ->
@@ -70,8 +72,8 @@ internal class TreeReader(
         }
 
     /**
-     * `304` を受けたときの、手元の目録 [cached] の読み。壊れていれば、手元のキャッシュを丸ごと消し、
-     * 手元に目録が無いものとして条件を付けずに GET し直す。
+     * `304` を受けたときの、ローカルキャッシュのマニフェスト [cached] の読み。壊れていれば、ローカルキャッシュを丸ごと消し、
+     * ローカルキャッシュにマニフェストが無いものとして条件を付けずに GET し直す。
      */
     private suspend fun readCachedManifest(cached: CachedManifest?, useCache: Boolean): ManifestRead {
         val read = cached?.let { manifestReadOf(it.body, it.eTag) }
@@ -83,14 +85,15 @@ internal class TreeReader(
     }
 
     /**
-     * [manifest] の木で、[foldersToLoad] が返すフォルダの項目を読む。項目を持たないフォルダと、木に無いフォルダは読まない。
+     * [manifest] のツリーで、[foldersToLoad] が返すフォルダの項目を読む。項目を持たないフォルダと、ツリーに無いフォルダは読まない。
      *
-     * いまの目録が指すフォルダのファイルが `404` を返したら、目録を一度だけ読み直し、読み直した目録の木で読み直す。
-     * 読み直した目録がまだ同じファイルを指していれば、そのフォルダは壊れているとみなす。読み直した目録の木で
-     * フォルダのファイルが `404` を返したときも、そのフォルダは壊れているとみなす。
-     * フォルダのファイルの GET が `200` と `404` 以外を返したら、読めなかったとする。
+     * いまのマニフェストが指す項目ファイルが `404` を返したら、マニフェストを一度だけ読み直し、
+     * 読み直したマニフェストのツリーで読み直す。
+     * 読み直したマニフェストがまだ同じファイルを指していれば、そのフォルダは壊れているとみなす。
+     * 読み直したマニフェストのツリーで項目ファイルが `404` を返したときも、そのフォルダは壊れているとみなす。
+     * 項目ファイルの GET が `200` と `404` 以外を返したら、読めなかったとする。
      *
-     * @param rereadManifest 目録を読み直す
+     * @param rereadManifest マニフェストを読み直す
      */
     suspend fun readTree(
         manifest: ManifestRead.Usable,
@@ -102,12 +105,30 @@ internal class TreeReader(
             is FolderLoad.Loaded -> load
         }
         if (first.missing.isEmpty()) return treeReadResult(manifest, first.state, first.broken)
+        return readAfterMissing(first.missing, rereadManifest, foldersToLoad)
+    }
 
+    /**
+     * 項目ファイルが `404` を返したあとに、マニフェストを [rereadManifest] で一度だけ読み直し、
+     * 読み直したマニフェストのツリーで [foldersToLoad] が返すフォルダの項目を読む。
+     *
+     * 読み直したマニフェストがまだ同じファイルを指しているフォルダは、GET せずに壊れているとみなす。
+     * 読み直したマニフェストのツリーで項目ファイルが `404` を返したときも、そのフォルダは壊れているとみなし、
+     * マニフェストをもう読み直さない。
+     *
+     * @param missing `404` を返したフォルダの ID と、そのファイルの ID
+     * @param rereadManifest マニフェストを読み直す
+     */
+    suspend fun readAfterMissing(
+        missing: Map<String, String>,
+        rereadManifest: suspend () -> ManifestRead,
+        foldersToLoad: (TreeState) -> Set<String>,
+    ): TreeReadResult {
         val reread = when (val read = rereadManifest()) {
             is ManifestRead.Unusable -> return TreeReadResult.Failed(read.failure)
             is ManifestRead.Usable -> read
         }
-        return when (val load = loadFolders(reread.manifest, foldersToLoad, missingBefore = first.missing)) {
+        return when (val load = loadFolders(reread.manifest, foldersToLoad, missingBefore = missing)) {
             is FolderLoad.Failed -> TreeReadResult.Failed(load.failure)
             is FolderLoad.Loaded ->
                 treeReadResult(reread, load.state, load.broken + load.missing.mapValues { (_, fileId) -> missingFileProblem(fileId) })
@@ -115,10 +136,10 @@ internal class TreeReader(
     }
 
     /**
-     * [manifest] の木で、フォルダの項目を読む。
+     * [manifest] のツリーで、フォルダの項目を読む。
      *
-     * @param missingBefore 目録を読み直す前に `404` を返したフォルダの ID と、そのファイルの ID。
-     * 目録がまだ同じファイルを指しているフォルダは、GET せずに無いとする
+     * @param missingBefore マニフェストを読み直す前に `404` を返したフォルダの ID と、そのファイルの ID。
+     * マニフェストがまだ同じファイルを指しているフォルダは、GET せずに無いとする
      */
     private suspend fun loadFolders(
         manifest: Manifest,
@@ -131,7 +152,7 @@ internal class TreeReader(
         val reads = buildMap {
             for (folderId in targets) {
                 val entry = entries.getValue(folderId)
-                val fileId = checkNotNull(entry.items) { "項目を持つフォルダは、フォルダのファイルを指す" }
+                val fileId = checkNotNull(entry.items) { "項目を持つフォルダは、項目ファイルを指す" }
                 val read = if (missingBefore[folderId] == fileId) {
                     ItemsFileRead.Missing(fileId)
                 } else {
@@ -151,9 +172,29 @@ internal class TreeReader(
     }
 
     /**
-     * フォルダのファイルを、手元にあって検証に通ればそれを、そうでなければ GET して読む。
-     * 手元の中身が検証に通らなければ、手元のキャッシュを丸ごと消してから GET する。
-     * GET して読めたものは手元に持つ。
+     * [manifest] のツリーで、フォルダ [folderId] の項目を読む。マニフェストは読まない。
+     *
+     * 項目を持たないフォルダは、読まずに空とする。項目ファイルの読み方と検証は [readTree] と同じ。
+     * `404` を返してもマニフェストを読み直さず、[FolderReadResult.Missing] で返す。
+     * マニフェストを読み直すのは [readAfterMissing]。
+     *
+     * @throws IllegalArgumentException [folderId] が [manifest] に無いとき
+     */
+    suspend fun readFolder(manifest: Manifest, folderId: String): FolderReadResult {
+        val entry = requireNotNull(manifest.folders.firstOrNull { it.id == folderId }) { "フォルダ $folderId はマニフェストに無い" }
+        val fileId = entry.items ?: return FolderReadResult.Loaded(emptyList())
+        return when (val read = readItemsFile(manifest, entry, fileId)) {
+            is ItemsFileRead.Loaded -> FolderReadResult.Loaded(read.items)
+            is ItemsFileRead.Broken -> FolderReadResult.Broken(read.problem)
+            is ItemsFileRead.Missing -> FolderReadResult.Missing
+            is ItemsFileRead.Failed -> FolderReadResult.Failed(read.failure)
+        }
+    }
+
+    /**
+     * 項目ファイルを、ローカルキャッシュにあって検証に通ればそれを、そうでなければ GET して読む。
+     * ローカルキャッシュの中身が検証に通らなければ、ローカルキャッシュを丸ごと消してから GET する。
+     * GET して読めたものはローカルキャッシュに持つ。
      */
     private suspend fun readItemsFile(manifest: Manifest, entry: FolderEntry, fileId: String): ItemsFileRead {
         val key = itemsFileKey(store.prefix, entry.id, fileId)
@@ -176,8 +217,8 @@ internal class TreeReader(
 /** フォルダの項目を読んだ結果。 */
 private sealed interface FolderLoad {
     /**
-     * @property broken フォルダのファイルが壊れていたフォルダの ID と、その問題
-     * @property missing フォルダのファイルが `404` を返したフォルダの ID と、そのファイルの ID
+     * @property broken 項目ファイルが壊れていたフォルダの ID と、その問題
+     * @property missing 項目ファイルが `404` を返したフォルダの ID と、そのファイルの ID
      */
     class Loaded(
         val state: TreeState,
@@ -188,11 +229,11 @@ private sealed interface FolderLoad {
     class Failed(val failure: SyncFailure) : FolderLoad
 }
 
-/** フォルダのファイルを 1 つ読んだ結果。 */
+/** 項目ファイルを 1 つ読んだ結果。 */
 private sealed interface ItemsFileRead {
     class Loaded(val items: List<Item>) : ItemsFileRead
 
-    /** 壊れている。目録が読むだけにするものなら、版が新しいために読めなかったものを含む。 */
+    /** 壊れている。マニフェストが読むだけにするものなら、版が新しいために読めなかったものを含む。 */
     class Broken(val problem: StorageProblem) : ItemsFileRead
 
     /** `404` を返した。 */
@@ -218,7 +259,7 @@ private fun itemsFileReadOf(body: ByteArray, manifest: Manifest, entry: FolderEn
     }
 
 private fun missingFileProblem(fileId: String): StorageProblem =
-    StorageProblem(line = null, message = "目録が指すフォルダのファイルが無い: $fileId")
+    StorageProblem(line = null, message = "マニフェストが指す項目ファイルが無い: $fileId")
 
 private fun treeReadResult(
     manifest: ManifestRead.Usable,

@@ -18,7 +18,7 @@ import kotlin.test.assertTrue
 class TreeReadTest {
     private val rootAndA: (TreeState) -> Set<String> = { setOf(ROOT_ID, FOLDER_A) }
 
-    // キャッシュが無いとき：条件を付けずに目録を GET し、求めたフォルダのファイルを読み、読んだものをキャッシュに持つ
+    // キャッシュが無いとき：条件を付けずにマニフェストを GET し、求めたフォルダの項目ファイルを読み、読んだものをキャッシュに持つ
     @Test
     fun readsWithoutCacheAndKeepsWhatItRead() = runTest {
         val fixture = SyncFixture().apply { store.seed() }
@@ -36,7 +36,7 @@ class TreeReadTest {
         assertNotNull(fixture.cache.itemsFile(fixture.itemsFileKey(FOLDER_A, A_FILE_ID)))
     }
 
-    // 求めないフォルダのファイルは読まない。項目を持たないフォルダは読まずに空として持つ
+    // 求めないフォルダの項目ファイルは読まない。項目を持たないフォルダは読まずに空として持つ
     @Test
     fun readsOnlyRequestedFoldersWithItems() = runTest {
         val fixture = SyncFixture().apply { store.seed() }
@@ -48,7 +48,7 @@ class TreeReadTest {
         assertEquals(listOf(fixture.manifestKey, fixture.itemsFileKey(FOLDER_A, A_FILE_ID)), fixture.store.requests.map { it.key })
     }
 
-    // 2 回目：手元の ETag を If-None-Match に付け、304 なら手元の目録を使う。手元にあるフォルダのファイルは GET しない
+    // 2 回目：ローカルキャッシュの ETag を If-None-Match に付け、304 ならローカルキャッシュのマニフェストを使う。ローカルキャッシュにある項目ファイルは GET しない
     @Test
     fun usesCachedManifestOnNotModifiedAndSkipsCachedFiles() = runTest {
         val fixture = SyncFixture().apply { store.seed() }
@@ -64,7 +64,7 @@ class TreeReadTest {
         )
     }
 
-    // 目録が替わっていれば 200 で読み直し、手元の目録と ETag を替える
+    // マニフェストが替わっていれば 200 で読み直し、ローカルキャッシュのマニフェストと ETag を替える
     @Test
     fun replacesCachedManifestWhenChanged() = runTest {
         val fixture = SyncFixture().apply { store.seed() }
@@ -77,8 +77,8 @@ class TreeReadTest {
         assertEquals(fixture.store.storedManifestETag(), fixture.cache.manifest()?.eTag)
     }
 
-    // 200 で受けた目録を手元に持つとき、その目録が指すフォルダのファイルのキーだけを残す。
-    // 目録が指さなくなったフォルダのファイルは手元から消え、指すものは残る
+    // 200 で受けたマニフェストをローカルキャッシュに持つとき、そのマニフェストが指す項目ファイルのキーだけを残す。
+    // マニフェストが指さなくなった項目ファイルはローカルキャッシュから消え、指すものは残る
     @Test
     fun retainsOnlyItemsFilesReferencedByNewManifest() = runTest {
         val fixture = SyncFixture().apply { store.seed() }
@@ -100,7 +100,7 @@ class TreeReadTest {
         assertNull(fixture.cache.itemsFile(folderAKey))
     }
 
-    // 読むだけにする目録（版が新しい）を 200 で読んだときも、その目録が指すフォルダのファイルのキーで retain を呼ぶ
+    // 読むだけにするマニフェスト（形式の版が新しい）を 200 で読んだときも、そのマニフェストが指す項目ファイルのキーで retain を呼ぶ
     @Test
     fun retainsItemsFilesWhenManifestIsReadOnly() = runTest {
         val fixture = SyncFixture().apply { store.seed(initialManifest(version = 2, readableBy = 1)) }
@@ -115,9 +115,9 @@ class TreeReadTest {
         assertEquals(fixture.store.storedManifestETag(), fixture.cache.manifest()?.eTag)
     }
 
-    // 手元のフォルダのファイルの中身が壊れていれば、手元のキャッシュを丸ごと消し、手元に何も無いものとして GET する。
-    // S3 の正しい中身が読め、壊れていないほかのフォルダのファイルと目録も手元から消え、
-    // 手元に残るのは S3 から読み直したフォルダのファイルだけになる
+    // ローカルキャッシュの項目ファイルの中身が壊れていれば、ローカルキャッシュを丸ごと消し、ローカルキャッシュに何も無いものとして GET する。
+    // S3 の正しい中身が読め、壊れていないほかの項目ファイルとマニフェストもローカルキャッシュから消え、
+    // ローカルキャッシュに残るのは S3 から読み直した項目ファイルだけになる
     @Test
     fun corruptCachedItemsFileClearsCacheAndIsReplacedByGet() = runTest {
         val fixture = SyncFixture().apply { store.seed() }
@@ -140,9 +140,9 @@ class TreeReadTest {
         assertContentEquals(assertNotNull(fixture.store.objectAt(aKey)).body, fixture.cache.itemsFile(aKey))
     }
 
-    // 手元の目録の中身が壊れていて 304 が返ったときは、手元のキャッシュを丸ごと消し、手元に目録が無いものとして
-    // 条件を付けずに GET し直す。S3 の目録が読め、手元に持っていたフォルダのファイルも消えているので GET し直し、
-    // 手元は S3 から読み直した目録とフォルダのファイルだけになる
+    // ローカルキャッシュのマニフェストの中身が壊れていて 304 が返ったときは、ローカルキャッシュを丸ごと消し、ローカルキャッシュにマニフェストが無いものとして
+    // 条件を付けずに GET し直す。S3 のマニフェストが読め、ローカルキャッシュに持っていた項目ファイルも消えているので GET し直し、
+    // ローカルキャッシュは S3 から読み直したマニフェストと項目ファイルだけになる
     @Test
     fun corruptCachedManifestOnNotModifiedClearsCacheAndIsReplacedByUnconditionalGet() = runTest {
         val fixture = SyncFixture().apply { store.seed() }
@@ -173,7 +173,7 @@ class TreeReadTest {
         assertContentEquals(assertNotNull(fixture.store.objectAt(aKey)).body, fixture.cache.itemsFile(aKey))
     }
 
-    // useCache = false のときは、手元の目録を読まず、条件を付けずに GET する。手元の目録は替えない
+    // useCache = false のときは、ローカルキャッシュのマニフェストを読まず、条件を付けずに GET する。ローカルキャッシュのマニフェストは替えない
     @Test
     fun readManifestWithoutCacheDoesNotReadCachedManifest() = runTest {
         val fixture = SyncFixture().apply { store.seed() }
@@ -188,7 +188,7 @@ class TreeReadTest {
         assertEquals(cached, fixture.cache.manifest())
     }
 
-    // 304 で手元の目録をそのまま使うときは、手元に持ち直さないので、フォルダのファイルも消さない
+    // 304 でローカルキャッシュのマニフェストをそのまま使うときは、ローカルキャッシュに持ち直さないので、項目ファイルも消さない
     @Test
     fun doesNotRetainWhenManifestIsNotModified() = runTest {
         val fixture = SyncFixture().apply { store.seed() }
@@ -200,7 +200,7 @@ class TreeReadTest {
         assertEquals(retainedBefore, fixture.cache.retained.size)
     }
 
-    // 目録が読めなかったとき（壊れている）は、手元のフォルダのファイルを消さない
+    // マニフェストが読めなかったとき（壊れている）は、ローカルキャッシュの項目ファイルを消さない
     @Test
     fun doesNotRetainWhenManifestIsUnusable() = runTest {
         val fixture = SyncFixture().apply { store.seed() }
@@ -211,7 +211,7 @@ class TreeReadTest {
         assertEquals(emptyList(), fixture.cache.retained)
     }
 
-    // キャッシュが無く目録が 404：「目録が無い」として返し、目録を作らない
+    // キャッシュが無くマニフェストが 404：「マニフェストが無い」として返し、マニフェストを作らない
     @Test
     fun missingManifestWithoutCacheIsNotFound() = runTest {
         val fixture = SyncFixture()
@@ -223,7 +223,7 @@ class TreeReadTest {
         assertEquals(emptySet(), fixture.store.keys)
     }
 
-    // キャッシュがあるのに目録が 404：失敗（目録が消されている）として返し、目録を作らない
+    // キャッシュがあるのにマニフェストが 404：失敗（マニフェストが消されている）として返し、マニフェストを作らない
     @Test
     fun missingManifestWithCacheIsDeleted() = runTest {
         val fixture = SyncFixture().apply { store.seed() }
@@ -236,7 +236,7 @@ class TreeReadTest {
         assertTrue(fixture.store.requests.none { it is Request.Put })
     }
 
-    // 版の 4 通り：version が知っている版以下なら読み書きできる、readableBy ≤ 知っている版 < version なら読むだけ、
+    // 形式の版の 4 通り：version が知っている版以下なら読み書きできる、readableBy ≤ 知っている版 < version なら読むだけ、
     // readableBy が新しければ更新が要る、検証に通らなければ壊れている
     @Test
     fun distinguishesFormatVersionsAndCorruption() = runTest {
@@ -263,7 +263,7 @@ class TreeReadTest {
         }
     }
 
-    // フォルダのファイルが 404：目録を一度だけ読み直し、まだ同じファイルを指していれば、そのファイルを GET し直さずに
+    // 項目ファイルが 404：マニフェストを一度だけ読み直し、まだ同じファイルを指していれば、そのファイルを GET し直さずに
     // 壊れているとみなす。ほかのフォルダは読める
     @Test
     fun missingItemsFileStillReferencedAfterRereadIsBroken() = runTest {
@@ -281,7 +281,7 @@ class TreeReadTest {
         assertEquals(1, fixture.store.gets { it == aKey }.size)
     }
 
-    // フォルダのファイルが 404 で、読み直した目録が別のファイルを指していれば、そのファイルを読む
+    // 項目ファイルが 404 で、読み直したマニフェストが別のファイルを指していれば、そのファイルを読む
     @Test
     fun missingItemsFileReplacedInRereadManifestIsRead() = runTest {
         val fixture = SyncFixture().apply { store.seed() }
@@ -290,17 +290,8 @@ class TreeReadTest {
         val newItems = listOf(item(30), item(31))
         fixture.store.remove(oldKey)
         fixture.store.onNextGet(
-            GetFault.RunBefore {
-                // ほかの書き手が A の中身を替え、古いファイルは消された
-                fixture.store.overwrite(fixture.itemsFileKey(FOLDER_A, newFileId), itemsFileBody(FOLDER_A, newItems))
-                val manifest = initialManifest().let { manifest ->
-                    manifest.copy(
-                        header = manifest.header.copy(commit = newId()),
-                        folders = manifest.folders.map { if (it.id == FOLDER_A) it.copy(items = newFileId, count = newItems.size) else it },
-                    )
-                }
-                fixture.store.overwrite(fixture.manifestKey, encodeManifestGzip(manifest))
-            },
+            // ほかの書き手が A の中身を替え、古いファイルは消された
+            GetFault.RunBefore { fixture.store.replaceItemsAsOtherWriter(FOLDER_A, newFileId, newItems) },
             key = { it == oldKey },
         )
 
@@ -312,11 +303,11 @@ class TreeReadTest {
         assertEquals(newFileId, tree.manifest.folders.single { it.id == FOLDER_A }.items)
     }
 
-    // フォルダのファイルが検証に通らなければ、そのフォルダを壊れているとして返し、ほかのフォルダは読める
+    // 項目ファイルが検証に通らなければ、そのフォルダを壊れているとして返し、ほかのフォルダは読める
     @Test
     fun corruptItemsFileIsReportedPerFolder() = runTest {
         val fixture = SyncFixture().apply { store.seed() }
-        // 目録の count（1）と項目の数が合わない
+        // マニフェストの count（1）と項目の数が合わない
         fixture.store.overwrite(fixture.itemsFileKey(FOLDER_A, A_FILE_ID), itemsFileBody(FOLDER_A, listOf(item(3), item(4))))
 
         val tree = assertIs<TreeReadResult.Readable>(fixture.sync.read(rootAndA)).tree
@@ -326,7 +317,7 @@ class TreeReadTest {
         assertEquals(null, fixture.cache.itemsFile(fixture.itemsFileKey(FOLDER_A, A_FILE_ID)))
     }
 
-    // 目録の GET が 5xx：S3 につながらない失敗
+    // マニフェストの GET が 5xx：S3 につながらない失敗
     @Test
     fun serverErrorOnManifestIsUnreachable() = runTest {
         val fixture = SyncFixture().apply { store.seed() }
@@ -337,7 +328,7 @@ class TreeReadTest {
         assertIs<SyncFailure.Unreachable>(assertIs<TreeReadResult.Failed>(result).failure)
     }
 
-    // フォルダのファイルの GET が 5xx：読めなかったとして失敗にし、残りのフォルダは GET しない
+    // 項目ファイルの GET が 5xx：読めなかったとして失敗にし、残りのフォルダは GET しない
     @Test
     fun serverErrorOnItemsFileFailsTheRead() = runTest {
         val fixture = SyncFixture().apply { store.seed() }
@@ -349,7 +340,7 @@ class TreeReadTest {
         assertEquals(0, fixture.store.gets(fixture.isItemsFileOf(FOLDER_A)).size)
     }
 
-    // 手元に持つ目録は GET で受けたバイト列そのもの
+    // ローカルキャッシュに持つマニフェストは GET で受けたバイト列そのもの
     @Test
     fun cachesManifestBodyAsReceived() = runTest {
         val fixture = SyncFixture().apply { store.seed() }
@@ -363,7 +354,7 @@ class TreeReadTest {
     }
 }
 
-/** [delegate] と同じに振る舞うが、手元の目録を読むと失敗にする。 */
+/** [delegate] と同じに振る舞うが、ローカルキャッシュのマニフェストを読むと失敗にする。 */
 private class ThrowingOnManifestRead(private val delegate: SyncCache) : SyncCache by delegate {
-    override suspend fun manifest(): CachedManifest? = error("手元の目録を読んではいけない")
+    override suspend fun manifest(): CachedManifest? = error("ローカルキャッシュのマニフェストを読んではいけない")
 }

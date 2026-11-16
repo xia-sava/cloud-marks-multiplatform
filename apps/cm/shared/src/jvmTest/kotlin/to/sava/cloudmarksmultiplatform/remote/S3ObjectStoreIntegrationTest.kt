@@ -14,17 +14,17 @@ import kotlin.time.Duration.Companion.hours
 
 private const val GZIP_CONTENT_TYPE = "application/gzip"
 
-/** 一覧のページングの試験で、1 ページに入れるキーの数の上限。これより多いキーを書いて、複数のページを通す。 */
+/** 一覧のページングのテストで、1 ページに入れるキーの数の上限。これより多いキーを書いて、複数のページを通す。 */
 private const val PAGE_SIZE = 2
 
 /**
- * 実際の S3 で、[S3ObjectStore] の条件付きの読み書きと、一覧・DELETE が期待どおりの結果に写ることを確かめる。
+ * 実際の S3 で、[S3ObjectStore] の条件付きの読み書きと、一覧・DELETE の応答が期待どおりの結果に対応づけられることを確かめる。
  *
  * 次の環境変数がすべてあるときだけ走る。無ければ飛ばす。
- * - `CMM_S3_IT_REGION`、`CMM_S3_IT_BUCKET`、`CMM_S3_IT_PREFIX`（書く先。試し用のプレフィックスにする）
+ * - `CMM_S3_IT_REGION`、`CMM_S3_IT_BUCKET`、`CMM_S3_IT_PREFIX`。書き込み先になるので、プレフィックスはテスト用のものにする
  * - `AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY`
  *
- * 試験は、書いたキーを終わりに自分で消す（DELETE の結果は見ない）。権限に `s3:PutObject`、`s3:GetObject`、
+ * テストは、書いたキーを終わりに自分で消す（DELETE の結果は見ない）。権限に `s3:PutObject`、`s3:GetObject`、
  * `s3:ListBucket`、`s3:DeleteObject` が要る。
  * 観察した結果（ETag の形、無いキーの GET の結果など）は標準出力へ出す。認証情報は出さない。
  */
@@ -51,7 +51,7 @@ class S3ObjectStoreIntegrationTest {
             maxKeys = maxKeys,
         )
 
-    /** 条件付きの PUT と GET の各応答が、`412`・`304`・`404` などの結果に写る。 */
+    /** 条件付きの PUT と GET の各応答が、`412`・`304`・`404` などの結果に対応づけられる。 */
     @Test
     fun conditionalRequestsMapToExpectedResults() = runTest {
         assumeEnvironment()
@@ -105,7 +105,7 @@ class S3ObjectStoreIntegrationTest {
      * 一覧と DELETE：3 キーを 1 ページ 2 キーまでで読み（2 ページに分かれる）、書いたキーがすべて一覧に出る。
      * 一覧の応答の `Date` が取れ（端末の時計に近い）、削除したキーが一覧から消える。無いキーの削除も成功になる。
      *
-     * 試験ごとの固有のプレフィックスの下に書く。
+     * テストごとの固有のプレフィックスの下に書く。
      */
     @Test
     fun listAndDeleteMapToExpectedResults() = runTest {

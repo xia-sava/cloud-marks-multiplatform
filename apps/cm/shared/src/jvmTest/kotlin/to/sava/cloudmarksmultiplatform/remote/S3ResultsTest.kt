@@ -28,7 +28,7 @@ private fun s3Exception(status: Int, errorCode: String? = null, message: String 
     }
 
 class S3ResultsTest {
-    // GET：S3 の応答は HTTP の状態で振り分ける。304・404・403 はそれぞれの結果、5xx は結果が分からない、そのほかは失敗
+    // GET：S3 の応答は HTTP の状態で振り分ける。304・404・403 はそれぞれの結果、5xx は結果が不明、そのほかは失敗
     @Test
     fun mapsGetStatuses() {
         assertEquals(GetObjectResult.NotModified, getResultOf(s3Exception(304)))
@@ -38,7 +38,7 @@ class S3ResultsTest {
         listOf(301, 400).forEach { status -> assertIs<GetObjectResult.Failed>(getResultOf(s3Exception(status)), "$status") }
     }
 
-    // PUT：412・409・404・403 はそれぞれの結果、5xx（503 SlowDown を含む）は結果が分からない、そのほかは失敗
+    // PUT：412・409・404・403 はそれぞれの結果、5xx（503 SlowDown を含む）は結果が不明、そのほかは失敗
     @Test
     fun mapsPutStatuses() {
         assertEquals(PutObjectResult.PreconditionFailed, putResultOf(s3Exception(412, "PreconditionFailed")))
@@ -49,7 +49,7 @@ class S3ResultsTest {
         listOf(301, 400).forEach { status -> assertIs<PutObjectResult.Failed>(putResultOf(s3Exception(status)), "$status") }
     }
 
-    // 一覧：403 は権限が無い、5xx は結果が分からない、そのほか（無いバケットの 404 を含む）は失敗
+    // 一覧：403 は権限が無い、5xx は結果が不明、そのほか（無いバケットの 404 を含む）は失敗
     @Test
     fun mapsListStatuses() {
         assertEquals(ListObjectsResult.Forbidden, listResultOf(s3Exception(403, "AccessDenied")))
@@ -57,7 +57,7 @@ class S3ResultsTest {
         listOf(301, 400, 404).forEach { status -> assertIs<ListObjectsResult.Failed>(listResultOf(s3Exception(status)), "$status") }
     }
 
-    // DELETE：403 は権限が無い、5xx は結果が分からない、そのほかは失敗
+    // DELETE：403 は権限が無い、5xx は結果が不明、そのほかは失敗
     @Test
     fun mapsDeleteStatuses() {
         assertEquals(DeleteObjectResult.Forbidden, deleteResultOf(s3Exception(403, "AccessDenied")))
@@ -65,7 +65,7 @@ class S3ResultsTest {
         listOf(301, 400, 404).forEach { status -> assertIs<DeleteObjectResult.Failed>(deleteResultOf(s3Exception(status)), "$status") }
     }
 
-    // 一覧と DELETE：応答を受けていない失敗と、エラーコードが RequestTimeout の 400 は結果が分からない
+    // 一覧と DELETE：応答を受けていない失敗と、エラーコードが RequestTimeout の 400 は結果が不明
     @Test
     fun listAndDeleteFailuresWithoutStatusAreUnknown() {
         listOf(
@@ -79,7 +79,7 @@ class S3ResultsTest {
         }
     }
 
-    // DELETE：S3 の応答でない、種類を知らない SDK の失敗は、消せたかどうかが分からない（一覧は失敗）
+    // DELETE：S3 の応答でない、種類を知らない SDK の失敗は、消せたかどうかが不明（一覧は失敗）
     @Test
     fun unclassifiedSdkFailuresAreUnknownForDeleteAndFailedForList() {
         listOf(ClientException("client failure"), SdkBaseException("unclassified failure")).forEach { e ->
@@ -96,7 +96,7 @@ class S3ResultsTest {
         assertNull(parseHttpDate(""))
     }
 
-    // エラーコードが RequestTimeout の 400 は、ほかの 400 と違い、結果が分からない
+    // エラーコードが RequestTimeout の 400 は、ほかの 400 と違い、結果が不明
     @Test
     fun requestTimeoutIsUnknown() {
         val e = s3Exception(400, "RequestTimeout")
@@ -106,7 +106,7 @@ class S3ResultsTest {
         assertIs<PutObjectResult.Failed>(putResultOf(s3Exception(400, "InvalidArgument")))
     }
 
-    // 応答を受けていない失敗（通信の失敗、タイムアウト）と、HTTP の状態が取れない S3 の例外は、結果が分からない
+    // 応答を受けていない失敗（通信の失敗、タイムアウト）と、HTTP の状態が取れない S3 の例外は、結果が不明
     @Test
     fun failuresWithoutStatusAreUnknown() {
         val cases = listOf(
@@ -122,7 +122,7 @@ class S3ResultsTest {
         }
     }
 
-    // S3 の応答でない、そのほかの SDK の失敗：GET は失敗、PUT は書けたかどうかが分からない
+    // S3 の応答でない、そのほかの SDK の失敗：GET は失敗、PUT は書けたかどうかが不明
     @Test
     fun otherSdkFailuresAreFailedForGetAndUnknownForPut() {
         val cases = listOf(

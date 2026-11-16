@@ -34,7 +34,7 @@ class ListPageOfTest {
     private fun failureDetail(result: ListPageResult): String =
         assertIs<ListObjectsResult.Failed>(assertIs<ListPageResult.Stopped>(result).failure).detail
 
-    // 切り詰められていて継続トークンがあれば、キーと最終更新を写し、次のページを読むトークンを返す
+    // 切り詰められていて継続トークンがあれば、キーと最終更新を引き継ぎ、次のページを読むトークンを返す
     @Test
     fun truncatedResponseWithTokenHasNextPage() {
         val page = assertIs<ListPageResult.Page>(

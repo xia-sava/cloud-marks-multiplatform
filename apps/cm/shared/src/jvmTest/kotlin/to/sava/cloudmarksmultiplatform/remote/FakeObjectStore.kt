@@ -9,7 +9,7 @@ import kotlin.time.Instant
  * - `If-None-Match: *` の PUT は、オブジェクトがあれば `412`
  * - `If-None-Match` の GET は、ETag が一致すれば `304`
  *
- * [onNextPut]、[onNextGet]、[onNextList]、[onNextDelete] で、次の要求に、失敗やほかの書き手の書き込みなどの事象を差し込める。
+ * [onNextPut]、[onNextGet]、[onNextList]、[onNextDelete] で、次のリクエストに、失敗やほかの書き手の書き込みなどの事象を差し込める。
  *
  * 一覧は、S3 と同じく、[listPageSize] 個のキーごとのページに分けて返し、[listAllPages] で最後まで読む。
  * 一覧の応答の時刻は [serverTime]、オブジェクトの `LastModified` は置いた時点の [serverTime]（[overwrite] では指定できる）。
@@ -19,14 +19,14 @@ class FakeObjectStore(override val prefix: String = "cm/data") : ObjectStore {
     /** 置いてあるオブジェクト。[contentType] は、条件を付けずに置いたものでは null。 */
     class StoredObject(val body: ByteArray, val eTag: String, val contentType: String?, val lastModified: Instant)
 
-    /** 受けた要求。 */
+    /** 受けたリクエスト。 */
     sealed interface Request {
         /** GET と PUT と DELETE ではキー、一覧ではキーのプレフィックス。 */
         val key: String
 
         data class Get(override val key: String, val ifNoneMatch: String?) : Request
 
-        /** 一覧の 1 ページの要求。[key] はキーのプレフィックス。 */
+        /** 一覧の 1 ページのリクエスト。[key] はキーのプレフィックス。 */
         data class ListPage(override val key: String, val continuationToken: String?) : Request
 
         data class Delete(override val key: String) : Request
@@ -41,13 +41,13 @@ class FakeObjectStore(override val prefix: String = "cm/data") : ObjectStore {
 
     /** PUT に差し込む事象。 */
     sealed interface PutFault {
-        /** 条件のとおりに扱ったうえで、[afterWrite] を走らせ、結果が分からないとして返す（応答が途中で切れた）。 */
+        /** 条件のとおりに扱ったうえで、[afterWrite] を走らせ、結果が不明として返す（応答が途中で切れた）。 */
         class WriteThenUnknown(val afterWrite: suspend () -> Unit = {}) : PutFault
 
-        /** 条件のとおりに扱ったうえで、`412` を返す（SDK が自分で送り直し、先に届いていた PUT のために `412` を受けた）。 */
+        /** 条件のとおりに扱ったうえで、`412` を返す（SDK が自分で再送し、先に届いていた PUT のために `412` を受けた）。 */
         data object WriteThenPreconditionFailed : PutFault
 
-        /** 書き込まずに、結果が分からないとして返す（要求が届かなかった）。 */
+        /** 書き込まずに、結果が不明として返す（リクエストが届かなかった）。 */
         data object UnknownWithoutWrite : PutFault
 
         /** 書き込まずに `409` を返す。 */
@@ -59,7 +59,7 @@ class FakeObjectStore(override val prefix: String = "cm/data") : ObjectStore {
         /** 書き込まずに `403` を返す。 */
         data object Forbidden : PutFault
 
-        /** 結果が分からないとして返し、書き込みは遅れて届く。遅れた書き込みは、次の PUT を受けたとき、その PUT より先に届く。 */
+        /** 結果が不明として返し、書き込みは遅れて届く。遅れた書き込みは、次の PUT を受けたとき、その PUT より先に届く。 */
         data object ArriveLate : PutFault
 
         /** 先に [action] を走らせてから、ふつうに扱う。 */
@@ -68,8 +68,11 @@ class FakeObjectStore(override val prefix: String = "cm/data") : ObjectStore {
 
     /** GET に差し込む事象。 */
     sealed interface GetFault {
-        /** `5xx` が返ったとして、結果が分からないとして返す。 */
+        /** `5xx` が返ったとして、結果が不明として返す。 */
         data object ServerError : GetFault
+
+        /** `403` が返ったとして返す。 */
+        data object Forbidden : GetFault
 
         /** 先に [action] を走らせてから、ふつうに扱う。 */
         class RunBefore(val action: suspend () -> Unit) : GetFault
@@ -80,7 +83,7 @@ class FakeObjectStore(override val prefix: String = "cm/data") : ObjectStore {
         /** `403` が返ったとして返す。 */
         data object Forbidden : ListFault
 
-        /** `5xx` が返ったとして、結果が分からないとして返す。 */
+        /** `5xx` が返ったとして、結果が不明として返す。 */
         data object ServerError : ListFault
     }
 
@@ -89,7 +92,7 @@ class FakeObjectStore(override val prefix: String = "cm/data") : ObjectStore {
         /** `403` が返ったとして返す。 */
         data object Forbidden : DeleteFault
 
-        /** `5xx` が返ったとして、結果が分からないとして返す。 */
+        /** `5xx` が返ったとして、結果が不明として返す。 */
         data object ServerError : DeleteFault
     }
 
@@ -110,7 +113,7 @@ class FakeObjectStore(override val prefix: String = "cm/data") : ObjectStore {
     /** 一覧の応答の `Date` として返す時刻。置いたオブジェクトの `LastModified` の既定でもある。 */
     var serverTime: Instant = Instant.parse("2026-11-16T12:00:00Z")
 
-    /** 受けた要求。受けた順。 */
+    /** 受けたリクエスト。受けた順。 */
     val requests: List<Request> get() = receivedRequests.toList()
 
     /** 置いてあるオブジェクトのキー。 */
@@ -138,11 +141,11 @@ class FakeObjectStore(override val prefix: String = "cm/data") : ObjectStore {
 
     fun objectAt(key: String): StoredObject? = objects[key]
 
-    /** 条件を付けずに置き、新しい ETag を返す。要求としては記録せず、差し込んだ事象も使わない。 */
+    /** 条件を付けずに置き、新しい ETag を返す。リクエストとしては記録せず、差し込んだ事象も使わない。 */
     fun overwrite(key: String, body: ByteArray, lastModified: Instant = serverTime): String =
         store(key, body, contentType = null, lastModified = lastModified)
 
-    /** 条件を付けずに消す。要求としては記録しない。 */
+    /** 条件を付けずに消す。リクエストとしては記録しない。 */
     fun remove(key: String) {
         objects.remove(key)
     }
@@ -156,6 +159,7 @@ class FakeObjectStore(override val prefix: String = "cm/data") : ObjectStore {
         receivedRequests += Request.Get(key, ifNoneMatch)
         when (val fault = takeFault(getFaults, key)) {
             GetFault.ServerError -> return GetObjectResult.Unknown("HTTP 500")
+            GetFault.Forbidden -> return GetObjectResult.Forbidden
             is GetFault.RunBefore -> fault.action()
             null -> Unit
         }
@@ -182,13 +186,13 @@ class FakeObjectStore(override val prefix: String = "cm/data") : ObjectStore {
                 evaluate(request)
                 return PutObjectResult.PreconditionFailed
             }
-            PutFault.UnknownWithoutWrite -> return PutObjectResult.Unknown("要求が届かなかった")
+            PutFault.UnknownWithoutWrite -> return PutObjectResult.Unknown("リクエストが届かなかった")
             PutFault.Conflict -> return PutObjectResult.Conflict
             PutFault.PreconditionFailed -> return PutObjectResult.PreconditionFailed
             PutFault.Forbidden -> return PutObjectResult.Forbidden
             PutFault.ArriveLate -> {
                 latePuts += request
-                return PutObjectResult.Unknown("要求が遅れている")
+                return PutObjectResult.Unknown("リクエストが遅れている")
             }
             is PutFault.RunBefore -> fault.action()
             null -> Unit

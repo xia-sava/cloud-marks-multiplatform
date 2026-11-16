@@ -14,11 +14,11 @@ import kotlin.time.Instant
 private const val FORBIDDEN_DETAIL = "HTTP 403"
 
 /**
- * 目録から参照されなくなったフォルダのファイルを消す。手順は `docs/storage-format.md` の「古いファイルの削除」のとおり。
+ * マニフェストから参照されなくなった項目ファイルを消す。手順は `docs/storage-format.md` の「古いファイルの削除」のとおり。
  *
- * 目録は手元のキャッシュを使わずに GET し、読み書きできるもののときだけ続ける。
+ * マニフェストはローカルキャッシュを使わずに GET し、読み書きできるもののときだけ続ける。
  * `<プレフィックス>/folders/` の一覧を最後まで読み、`folders/<UUID>/<UUID>.jsonl.gz` の形に厳密に合い、
- * 目録のどのフォルダの `<id>/<items>` の組とも一致せず、一覧の応答の `Date` と `LastModified` の差が猶予
+ * マニフェストのどのフォルダの `<id>/<items>` の組とも一致せず、一覧の応答の `Date` と `LastModified` の差が猶予
  * （[STALE_FILE_GRACE_PERIOD]）を過ぎたキーを、1 つずつ消す。
  */
 internal class StaleFileDeleter(

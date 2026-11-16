@@ -9,13 +9,13 @@ import java.nio.charset.CodingErrorAction
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
-/** 目録を、gzip で圧縮した UTF-8 のバイト列にする。 */
+/** マニフェストを、gzip で圧縮した UTF-8 のバイト列にする。 */
 fun encodeManifestGzip(manifest: Manifest): ByteArray = gzip(encodeManifest(manifest))
 
-/** フォルダのファイルを、gzip で圧縮した UTF-8 のバイト列にする。 */
+/** 項目ファイルを、gzip で圧縮した UTF-8 のバイト列にする。 */
 fun encodeItemsFileGzip(file: ItemsFile): ByteArray = gzip(encodeItemsFile(file))
 
-/** gzip で圧縮した目録を読む。展開できない、または UTF-8 として読めなければ壊れているとみなす。 */
+/** gzip で圧縮したマニフェストを読む。展開できない、または UTF-8 として読めなければ壊れているとみなす。 */
 fun decodeManifestGzip(
     bytes: ByteArray,
     knownVersion: Int = SUPPORTED_FORMAT_VERSION,
@@ -26,7 +26,7 @@ fun decodeManifestGzip(
         ManifestDecodeResult.Corrupt(e.problem)
     }
 
-/** gzip で圧縮したフォルダのファイルを読む。引数の意味は [decodeItemsFile] と同じ。 */
+/** gzip で圧縮した項目ファイルを読む。引数の意味は [decodeItemsFile] と同じ。 */
 fun decodeItemsFileGzip(
     bytes: ByteArray,
     keyFolderId: String,

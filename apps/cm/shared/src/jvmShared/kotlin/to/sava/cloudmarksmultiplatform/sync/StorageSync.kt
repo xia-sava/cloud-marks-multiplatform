@@ -20,15 +20,15 @@ import kotlin.time.Duration
 import kotlin.time.TimeSource
 
 /**
- * S3 上のデータを読み、操作を書き込み、目録を新しく作る。
+ * S3 上のデータを読み、操作を書き込み、マニフェストを新しく作る。
  *
- * 手順は `docs/storage-format.md` の「書き込みの手順」「キャッシュ」「目録を新しく作る」のとおり。
+ * 手順は `docs/storage-format.md` の「書き込みの手順」「キャッシュ」「マニフェストを新しく作る」のとおり。
  *
- * @param updatedBy 書き込む目録の見出しの `updatedBy`。`"android"`・`"desktop"`・`"host"` のどれか
- * @param timeSource 書き込みの手順 3 から手順 4 までの経過を測る、単調な時計。Android は端末の休止中も進む時計
+ * @param updatedBy 書き込むマニフェストのヘッダーの `updatedBy`。`"android"`・`"desktop"`・`"host"` のどれか
+ * @param timeSource 書き込みの手順 3 から手順 4 までの経過を測るモノトニッククロック。Android は端末の休止中も進む時計
  * （`SystemClock.elapsedRealtimeNanos()` を基にしたもの）を渡す。`System.nanoTime()` は休止中に止まりうる
- * @param clock 目録の見出しの `updatedAt` に使う時計
- * @param wait 送り直しと適用し直しの前に、与えた長さだけ間を空ける
+ * @param clock マニフェストのヘッダーの `updatedAt` に使う時計
+ * @param wait 再送と再適用の前に、与えた長さだけ間を空ける
  */
 class StorageSync(
     private val store: ObjectStore,
@@ -41,38 +41,71 @@ class StorageSync(
     private val reader = TreeReader(store, cache)
 
     /**
-     * 目録を読み、[foldersToLoad] が返すフォルダの項目を読む。
+     * マニフェストを読み、[foldersToLoad] が返すフォルダの項目を読む。
      *
-     * 目録は手元のキャッシュを使って条件付きで GET し、フォルダのファイルは手元にあれば GET しない。
-     * 目録が無くても作らない。
+     * マニフェストはローカルキャッシュを使って条件付きで GET し、項目ファイルはローカルキャッシュにあれば GET しない。
+     * マニフェストが無くても作らない。
      *
-     * @param foldersToLoad 読んだ目録の木を受け取り、項目を読むフォルダの ID を返す
+     * @param foldersToLoad 読んだマニフェストのツリーを受け取り、項目を読むフォルダの ID を返す
      */
     suspend fun read(foldersToLoad: (TreeState) -> Set<String> = { emptySet() }): TreeReadResult =
         reader.read(foldersToLoad)
 
     /**
+     * 読んである [tree] のマニフェストで、フォルダ [folderId] の項目を読む。マニフェストは GET しない。
+     *
+     * 項目ファイルは、ローカルキャッシュにあって検証に通ればそれを使い、無ければ GET してローカルキャッシュに持つ。項目を持たないフォルダは読まない。
+     * 項目ファイルが `404` を返してもマニフェストを読み直さず、[FolderReadResult.Missing] で返す。
+     * マニフェストを読み直すときは、続けて [readAfterMissing] を呼ぶ。
+     *
+     * @throws IllegalArgumentException [folderId] が [tree] のマニフェストに無いとき
+     */
+    suspend fun readFolder(tree: LoadedTree, folderId: String): FolderReadResult =
+        reader.readFolder(tree.manifest, folderId)
+
+    /**
+     * [readFolder] がフォルダ [folderId] で [FolderReadResult.Missing] を返したあとに、マニフェストを一度だけ読み直し、
+     * [foldersToLoad] が返すフォルダの項目を読む。マニフェストと項目ファイルの読み方は [read] と同じ。
+     *
+     * 読み直したマニフェストで [folderId] がまだ [tree] と同じファイルを指していれば、GET せずに、そのフォルダは壊れているとする。
+     * 読み直したマニフェストのツリーで項目ファイルが `404` を返したときも、そのフォルダは壊れているとし、マニフェストをもう読み直さない。
+     *
+     * @param tree [readFolder] に渡したツリー
+     * @throws IllegalArgumentException [folderId] が [tree] のマニフェストに無いか、項目ファイルを指していないとき
+     */
+    suspend fun readAfterMissing(
+        tree: LoadedTree,
+        folderId: String,
+        foldersToLoad: (TreeState) -> Set<String>,
+    ): TreeReadResult {
+        val fileId = requireNotNull(tree.state.folders[folderId]?.itemsFileId) {
+            "フォルダ $folderId は、マニフェストで項目ファイルを指していない"
+        }
+        return reader.readAfterMissing(mapOf(folderId to fileId), rereadManifest = { reader.readManifest() }, foldersToLoad)
+    }
+
+    /**
      * [operations] を、書き込みの手順で 1 回の書き込みとして書く。
      *
-     * 目録が読み書きできるものでないとき、目録が無いときは書かない。操作を適用した結果が読んだ状態と同じなら PUT しない。
-     * 書けたら、書いた目録と ETag、置いたフォルダのファイルを手元のキャッシュに持ち、
-     * 書いた目録が指さないフォルダのファイルを手元から消す。
+     * マニフェストが読み書きできるものでないとき、マニフェストが無いときは書かない。操作を適用した結果が読んだ状態と同じなら PUT しない。
+     * 書けたら、書いたマニフェストと ETag、置いた項目ファイルをローカルキャッシュに持ち、
+     * 書いたマニフェストが指さない項目ファイルをローカルキャッシュから消す。
      *
-     * 操作が項目を読む必要のあるフォルダのファイルが壊れていれば、ほかの操作も含めて書かず、
+     * 操作が項目を読む必要のあるフォルダの項目ファイルが壊れていれば、ほかの操作も含めて書かず、
      * [SyncFailure.FolderCorrupt] で返す。呼び出し側は [SyncFailure.FolderCorrupt.problems] のキーで操作を分けて書き直せる。
      *
      * キャンセルすると、書けたかどうかが分からないことがある。そのときは同じ操作の並びでもう一度 `write` する
      * （[WriteResult.Unconfirmed] と同じく、届いていた分は適用済みになり二重にならない）。
      * [WriteResult.Unconfirmed] を受けて同じ操作の並びでやり直した `write` が [WriteResult.Success] 以外で終わったら、
-     * 確かめられないままとして扱う。やり直しの [WriteResult.Failed] は、先の目録の PUT が届いていないことを示さない。
+     * 確かめられないままとして扱う。やり直しの [WriteResult.Failed] は、先のマニフェストの PUT が届いていないことを示さない。
      */
     suspend fun write(operations: List<Operation>): WriteResult =
         OperationWriter(store, cache, reader, operations, updatedBy, clock, timeSource, wait).write()
 
     /**
-     * 目録から参照されなくなったフォルダのファイルを消す（古いファイルの削除）。デスクトップのアプリだけが呼ぶ。1 日に 1 回程度。
+     * マニフェストから参照されなくなった項目ファイルを消す（古いファイルの削除）。デスクトップのアプリだけが呼ぶ。1 日に 1 回程度。
      *
-     * 目録は手元のキャッシュを使わずに GET する。`200` で検証に通り、`version` が知っている版以下のときだけ続け、
+     * マニフェストはローカルキャッシュを使わずに GET する。`200` で検証に通り、`version` が知っている版以下のときだけ続け、
      * それ以外（[SyncFailure.ReadOnly]・[SyncFailure.UpdateRequired]・[SyncFailure.ManifestCorrupt]・
      * [SyncFailure.ManifestNotFound]・GET の失敗）は何も消さずに [DeleteStaleFilesResult.Failed] で返す。
      * 一覧を読めなかったときも、何も消さずに [DeleteStaleFilesResult.Failed] で返す。
@@ -81,11 +114,11 @@ class StorageSync(
     suspend fun deleteStaleFiles(): DeleteStaleFilesResult = StaleFileDeleter(store, reader).delete()
 
     /**
-     * 目録を新しく作る。利用者が明示したとき（初期設定、既存の cloud-marks からの移行）だけ呼ぶ。
+     * マニフェストを新しく作る。利用者が明示したとき（初期設定、既存の cloud-marks からの移行）だけ呼ぶ。
      *
-     * 見出しと根のフォルダだけの目録を、`If-None-Match: *` を付けて PUT する。`409` と結果が分からないときは同じ PUT を
-     * 送り直す。`412` なら目録を 1 回読み、`commit` がこの目録のものなら、先の PUT が届いて作れていたとする。
-     * そうでなければ、または読めなければ、既に目録があるので作らない。
+     * ヘッダーとルートフォルダだけのマニフェストを、`If-None-Match: *` を付けて PUT する。`409` と結果が不明のときは同じ PUT を
+     * 再送する。`412` ならマニフェストを 1 回読み、`commit` がこのマニフェストのものなら、先の PUT が届いて作れていたとする。
+     * そうでなければ、または読めなければ、既にマニフェストがあるので作らない。
      */
     suspend fun createManifest(): CreateManifestResult {
         val manifest = Manifest(
@@ -101,7 +134,7 @@ class StorageSync(
         return sendNewManifest(manifest, encodeManifestGzip(manifest))
     }
 
-    /** 新しい目録を PUT する。送り直しが上限を超えたら [resendsExhausted] の失敗にする。[resends] は、ここまでに送り直した回数。 */
+    /** 新しいマニフェストを PUT する。再送が上限を超えたら [resendsExhausted] の失敗にする。[resends] は、ここまでに再送した回数。 */
     private suspend fun sendNewManifest(manifest: Manifest, body: ByteArray, resends: Int = 0): CreateManifestResult {
         if (resends > 0) wait(retryDelay(resends))
         val result = store.put(manifestKey(store.prefix), body, STORAGE_CONTENT_TYPE, PutCondition.IfNoneMatchAny)
@@ -124,8 +157,8 @@ class StorageSync(
     }
 
     /**
-     * `412` を受けたあと、目録を 1 回読む。`commit` が [manifest] のものなら、先の PUT が届いて作れていたとする。
-     * そうでなければ、または読めなければ、既に目録があるので作らなかったとする。
+     * `412` を受けたあと、マニフェストを 1 回読む。`commit` が [manifest] のものなら、先の PUT が届いて作れていたとする。
+     * そうでなければ、または読めなければ、既にマニフェストがあるので作らなかったとする。
      */
     private suspend fun existingManifestResult(manifest: Manifest): CreateManifestResult =
         (reader.readManifest() as? ManifestRead.Usable)

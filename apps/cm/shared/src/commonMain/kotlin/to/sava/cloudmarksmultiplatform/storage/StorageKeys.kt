@@ -10,10 +10,10 @@ private const val ITEMS_FILE_SUFFIX = ".jsonl.gz"
 /** プレフィックスの前後の `/` を除く。 */
 fun normalizePrefix(prefix: String): String = prefix.trim('/')
 
-/** 目録のキー。プレフィックスが空なら `manifest.jsonl.gz` から始まる。 */
+/** マニフェストのキー。プレフィックスが空なら `manifest.jsonl.gz` から始まる。 */
 fun manifestKey(prefix: String): String = joinKey(prefix, MANIFEST_FILE_NAME)
 
-/** フォルダのファイルのキー。 */
+/** 項目ファイルのキー。 */
 fun itemsFileKey(prefix: String, folderId: String, fileId: String): String =
     joinKey(prefix, "$FOLDERS_DIRECTORY/$folderId/$fileId$ITEMS_FILE_SUFFIX")
 
@@ -23,7 +23,7 @@ fun referencedItemsFileKeys(prefix: String, manifest: Manifest): Set<String> =
         .mapNotNull { folder -> folder.items?.let { itemsFileKey(prefix, folder.id, it) } }
         .toSet()
 
-/** すべてのフォルダのファイルのキーが共通で始まる部分（`<プレフィックス>/folders/`）。一覧のプレフィックスに使う。 */
+/** すべての項目ファイルのキーが共通で始まる部分（`<プレフィックス>/folders/`）。一覧のプレフィックスに使う。 */
 fun foldersKeyPrefix(prefix: String): String = joinKey(prefix, "$FOLDERS_DIRECTORY/")
 
 private fun joinKey(prefix: String, relativeKey: String): String =

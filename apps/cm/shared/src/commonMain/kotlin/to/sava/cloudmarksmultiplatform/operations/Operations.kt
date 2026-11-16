@@ -24,13 +24,13 @@ data class NewItem(
 }
 
 /**
- * データを変える操作。作るものの ID と追加した日時は操作が持ち、適用し直しても変わらない。
+ * データを変える操作。作るものの ID と追加した日時は操作が持ち、再適用しても変わらない。
  *
  * 位置（`before`）は、どの項目（フォルダ）の前かの ID。null、または並びに無い ID は末尾を表す。
  */
 sealed interface Operation
 
-/** 複数の URL を、根の子のフォルダの末尾に作る新しいフォルダにまとめて追加する。[name] は空でない。 */
+/** 複数の URL を、ルートフォルダの子のフォルダの末尾に作る新しいフォルダにまとめて追加する。[name] は空でない。 */
 data class AddFolder(
     val folderId: String,
     val name: String,
@@ -38,7 +38,7 @@ data class AddFolder(
     val added: Instant,
 ) : Operation
 
-/** URL を、根の項目の末尾に入力の順に追加する。 */
+/** URL を、ルートフォルダの項目の末尾に入力の順に追加する。 */
 data class AddBookmarks(
     val items: List<NewItem>,
     val added: Instant,
@@ -98,7 +98,7 @@ data class DeleteFolder(
 /**
  * [operation] の適用の前に、項目を読み込んでおく必要があるフォルダの ID。
  *
- * 木に無いフォルダは含まない（操作が作るフォルダは、作った時点で項目を読み込んだ状態になる）。
+ * ツリーに無いフォルダは含まない（操作が作るフォルダは、作った時点で項目を読み込んだ状態になる）。
  * 読み込み済みかどうかは見ない（呼び出し側が [TreeState.items] との差を取る）。
  */
 fun requiredFolders(state: TreeState, operation: Operation): Set<String> =

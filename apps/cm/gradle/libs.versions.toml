@@ -6,19 +6,25 @@ android-targetSdk = "36"
 androidx-activity = "1.13.0"
 aws-sdk-kotlin = "1.9.37"
 composeMultiplatform = "1.12.2"
-# デスクトップ（sharedのjvm()とdesktopApp）をコンパイル・テストし、動かすJDKの版。FFM（java.lang.foreign）を使うため22以上。
+# デスクトップ（sharedのjvm()とdesktopApp）をコンパイル・テストし、動かすJDKのバージョン。FFM（java.lang.foreign）を使うため22以上。
 desktop-jdk = "25"
 kotlin = "2.4.21"
 kotlinx-coroutines = "1.11.0"
 kotlinx-datetime = "0.8.0"
 kotlinx-serialization = "1.12.0"
 material3 = "1.12.0-alpha03"
+# 画面の幅の区分（WindowSizeClass）を判定する。
+material3-adaptive = "1.3.0"
+# JetBrains が出す Material Icons の最後のバージョン。メニュー・戻る・読み直す・設定・ホーム・開閉を示すアイコンに使う。
+material-icons-core = "1.7.3"
 
 [libraries]
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }
 aws-sdk-s3 = { module = "aws.sdk.kotlin:s3", version.ref = "aws-sdk-kotlin" }
 compose-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "composeMultiplatform" }
 compose-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "material3" }
+compose-material3Adaptive = { module = "org.jetbrains.compose.material3.adaptive:adaptive", version.ref = "material3-adaptive" }
+compose-materialIconsCore = { module = "org.jetbrains.compose.material:material-icons-core", version.ref = "material-icons-core" }
 compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "composeMultiplatform" }
 compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "composeMultiplatform" }
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }

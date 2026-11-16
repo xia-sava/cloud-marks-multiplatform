@@ -21,7 +21,7 @@ class ContractExampleTest {
     private fun itemsFileOf(folder: FolderEntry): File =
         exampleDirectory.resolve("folders/${folder.id}/${folder.items}.jsonl")
 
-    // 見本の目録が「読めた」になり、デコードしてエンコードし直すと見本のバイト列と完全に一致する
+    // 見本のマニフェストが「読めた」になり、デコードしてエンコードし直すと見本のバイト列と完全に一致する
     @Test
     fun manifestIsReadableAndRoundTripsByteForByte() {
         val manifest = readableManifest()
@@ -30,7 +30,7 @@ class ContractExampleTest {
         assertContentEquals(manifestBytes, encodeManifest(manifest).encodeToByteArray())
     }
 
-    // 見本のフォルダのファイルがすべて「読めた」になり、エンコードし直すと見本のバイト列と完全に一致する
+    // 見本の項目ファイルがすべて「読めた」になり、エンコードし直すと見本のバイト列と完全に一致する
     @Test
     fun itemsFilesAreReadableAndRoundTripByteForByte() {
         val manifest = readableManifest()
@@ -48,7 +48,7 @@ class ContractExampleTest {
         }
     }
 
-    // 目録が指すファイルと見本のファイルが過不足なく対応している（読み漏らしが無い）
+    // マニフェストが指すファイルと見本のファイルが過不足なく対応している（読み漏らしが無い）
     @Test
     fun everyExampleItemsFileIsReferencedByManifest() {
         val referenced = readableManifest().folders.filter { it.items != null }

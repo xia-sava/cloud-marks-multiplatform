@@ -37,12 +37,12 @@ private const val BODY_UNIT_SIZE = 2048
 
 private val HASH_NAME = Regex("[0-9a-f]{64}")
 
-/** 版 [version] の中身。全バイトが [version] で、長さが版ごとに違うため、途中までの中身や混ざった中身は版の中身にならない。 */
+/** バージョン [version] の中身。全バイトが [version] で、長さがバージョンごとに違うため、途中までの中身や混ざった中身はバージョンの中身にならない。 */
 private fun versionedBody(version: Int): ByteArray = ByteArray(BODY_UNIT_SIZE * (version + 1)) { version.toByte() }
 
 private fun versionedETag(version: Int): String = "\"etag-$version\""
 
-/** [bytes] が、いずれかの版の [versionedBody] と完全に一致するか。 */
+/** [bytes] が、いずれかのバージョンの [versionedBody] と完全に一致するか。 */
 private fun isVersionedBody(bytes: ByteArray): Boolean =
     bytes.isNotEmpty() && bytes[0] in 0 until CONCURRENT_VERSIONS && bytes.contentEquals(versionedBody(bytes[0].toInt()))
 
@@ -80,7 +80,7 @@ class FileSyncCacheTest {
         )
     }
 
-    // ディレクトリ名は、根の直下の、パスとして安全な固定長の 16 進
+    // ディレクトリ名は、ルートディレクトリの直下の、パスとして安全な固定長の 16 進
     @Test
     fun connectionDirectoryNameIsFixedLengthHexDirectlyUnderRoot() {
         val dangerous = connectionCacheDirectory(root, "..", "../../x\\y:*?")
@@ -133,7 +133,7 @@ class FileSyncCacheTest {
         assertEquals(emptyList(), failures)
     }
 
-    // 置き換えたあとに一時ファイルが残らない（目録とフォルダのファイルの両方）
+    // 置き換えたあとに一時ファイルが残らない（マニフェストと項目ファイルの両方）
     @Test
     fun replacingLeavesNoTemporaryFile() = runTest {
         val cache = cache()
@@ -148,7 +148,7 @@ class FileSyncCacheTest {
         assertEquals(emptyList(), failures)
     }
 
-    // 目録のファイルの形式が崩れていれば、null を返して通知する。ファイルが無いだけなら通知しない
+    // マニフェストのファイルの形式が崩れていれば、null を返して通知する。ファイルが無いだけなら通知しない
     @Test
     fun corruptManifestFileReadsAsNullAndIsReported() = runTest {
         val cache = cache()
@@ -173,7 +173,7 @@ class FileSyncCacheTest {
         }
     }
 
-    // 書けない（根がファイルになっている）とき、例外は出ず、通知の口が呼ばれる。読むと null
+    // 書けない（ルートディレクトリがファイルになっている）とき、例外は出ず、失敗を通知する処理が呼ばれる。読むと null
     @Test
     fun unwritableRootDoesNotThrowAndNotifies() = runTest {
         Files.createDirectories(root.parent)
@@ -191,6 +191,21 @@ class FileSyncCacheTest {
         assertNull(cache.manifest())
         assertNull(cache.itemsFile("k"))
         assertTrue(root.exists() && !root.isDirectory())
+    }
+
+    // I/O の失敗は、呼び出し元のスレッドではなく I/O 用のスレッドで通知する（UI のスレッドから呼んでも、そこでログを書かない）
+    @Test
+    fun failureIsReportedOffCallerThread() = runTest {
+        Files.createDirectories(root.parent)
+        Files.write(root, byteArrayOf(1))
+        val callerThread = Thread.currentThread()
+        val reportingThreads = mutableListOf<Thread>()
+        val cache = FileSyncCache(directory) { reportingThreads += Thread.currentThread() }
+
+        cache.putManifest(CachedManifest(BODY, "\"e\""))
+
+        assertTrue(reportingThreads.isNotEmpty())
+        assertTrue(reportingThreads.none { it == callerThread })
     }
 
     // 書けなかったとき、一時ファイルが残らない（置き換え先が中身のあるディレクトリ）

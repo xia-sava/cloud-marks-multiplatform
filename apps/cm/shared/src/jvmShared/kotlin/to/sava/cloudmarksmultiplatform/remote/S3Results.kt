@@ -15,8 +15,8 @@ private const val PRECONDITION_FAILED = 412
 private val SERVER_ERROR = 500..599
 
 /**
- * S3 が、要求を時間内に受け取りきれなかったときのエラーコード。`400` で返るが、SDK はこれを一時的な失敗として送り直す。
- * 送り直してもなお返ったものは、通信の失敗と同じく結果が分からないとする。
+ * S3 が、リクエストを時間内に受け取りきれなかったときのエラーコード。`400` で返るが、SDK はこれを一時的な失敗として再送する。
+ * 再送してもなお返ったものは、通信の失敗と同じく結果が不明とする。
  */
 private const val REQUEST_TIMEOUT_CODE = "RequestTimeout"
 
@@ -24,7 +24,7 @@ private const val REQUEST_TIMEOUT_CODE = "RequestTimeout"
  * GET で SDK が投げた例外を、結果にする。
  *
  * S3 が返した応答は HTTP の状態で振り分ける。`5xx` と、エラーコードが `RequestTimeout` のものと、状態の取れない応答と、
- * 通信の失敗・タイムアウトは、結果が分からないとする。
+ * 通信の失敗・タイムアウトは、結果が不明とする。
  */
 internal fun getResultOf(e: SdkBaseException): GetObjectResult =
     when (e.httpStatus()) {
@@ -62,7 +62,7 @@ internal fun putResultOf(e: SdkBaseException): PutObjectResult =
  * 一覧で SDK が投げた例外を、結果にする。
  *
  * S3 が返した応答は HTTP の状態で振り分ける。`5xx` と、エラーコードが `RequestTimeout` のものと、状態の取れない応答と、
- * 通信の失敗・タイムアウトは、結果が分からないとする。
+ * 通信の失敗・タイムアウトは、結果が不明とする。
  */
 internal fun listResultOf(e: SdkBaseException): ListObjectsResult =
     when {
@@ -86,9 +86,9 @@ internal fun deleteResultOf(e: SdkBaseException): DeleteObjectResult =
     }
 
 /**
- * 失敗を、後から追うための短い文にする。
+ * 失敗を、後から調べるための短い文にする。
  *
- * 例外の種類、HTTP の状態、S3 のエラーコード、通信の失敗の種類だけを使う。例外のメッセージは、接続先や要求の中身を
+ * 例外の種類、HTTP の状態、S3 のエラーコード、通信の失敗の種類だけを使う。例外のメッセージは、接続先やリクエストの中身を
  * 含みうるため使わない。
  */
 internal fun describeFailure(e: Exception): String =
@@ -104,7 +104,7 @@ private fun SdkBaseException.httpStatus(): Int? =
     ((this as? ServiceException)?.sdkErrorMetadata?.protocolResponse as? HttpResponse)?.status?.value
 
 /**
- * 結果が分からない失敗か。S3 の応答なら `5xx`、エラーコードが `RequestTimeout`、または状態が取れないもの。
+ * 結果が不明な失敗か。S3 の応答なら `5xx`、エラーコードが `RequestTimeout`、または状態が取れないもの。
  * そうでなければ通信の失敗・タイムアウト。
  */
 private fun SdkBaseException.isIndeterminate(): Boolean =

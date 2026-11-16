@@ -14,7 +14,7 @@ on:
       - ".github/workflows/cm.yml"
 
 env:
-  # デスクトップ（sharedのjvm()とdesktopApp）をコンパイル・テストするJDKの版。
+  # デスクトップ（sharedのjvm()とdesktopApp）をコンパイル・テストするJDKのバージョン。
   # apps/cm/gradle/libs.versions.tomlのdesktop-jdkと揃え、Gradleがツールチェーンとして見つけられるようにする。
   JAVA_VERSION: "25"
 
@@ -48,8 +48,8 @@ jobs:
           ./gradlew check :shared:compileAndroidMain :androidApp:compileDebugKotlin
           --console=plain
 
-      # 落ちたときに何が起きたかを残す。ログへ出るのは結果だけで、
-      # 手元で再現しない失敗はこれが無いと辿れない。
+      # 失敗したときに何が起きたかを残す。ログへ出るのは結果だけで、
+      # ローカルで再現しない失敗はこれが無いと辿れない。
       - uses: actions/upload-artifact@v7
         if: failure()
         with:

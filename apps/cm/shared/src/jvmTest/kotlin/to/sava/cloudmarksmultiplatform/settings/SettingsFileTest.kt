@@ -41,7 +41,7 @@ class SettingsFileTest {
     private fun encryptedCredentials(json: String): String =
         Base64.encode(FakeSecretProtector().protect(json.encodeToByteArray(), EXPECTED_CREDENTIALS_ENTROPY))
 
-    /** 例の設定を、書く形の JSON のオブジェクトにする。 */
+    /** SETTINGS と CREDENTIALS を、ファイルに書かれる形の JSON のオブジェクトにする。 */
     private fun validStoredSettings(): JsonObject = buildJsonObject {
         put("region", SETTINGS.region)
         put("bucket", SETTINGS.bucket)

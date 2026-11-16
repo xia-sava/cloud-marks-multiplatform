@@ -13,7 +13,7 @@ internal const val ITEM_1 = "20000000-0000-4000-8000-000000000001"
 internal const val ITEM_2 = "20000000-0000-4000-8000-000000000002"
 internal const val COMMIT_ID = "30000000-0000-4000-8000-000000000001"
 
-/** バイト順マーク（U+FEFF）。 */
+/** バイトオーダーマーク（U+FEFF）。 */
 internal val BOM: String = 0xFEFF.toChar().toString()
 
 /** 満たさない規則を 1 つだけ持つ入力。[mention] は、失敗の理由に含まれるべき語（欄の名前など）。 */
@@ -56,14 +56,14 @@ internal fun itemsHeaderLine(folder: String = FOLDER_A): String =
 internal fun itemLine(id: String = ITEM_1, url: String = "https://example.com/", title: String = "t"): String =
     """{"id":"$id","url":"$url","title":"$title"}"""
 
-/** 目録が壊れているとして返ってきたこと、その行番号、理由に [mention] を含むことを確かめる。 */
+/** マニフェストが壊れているとして返ってきたこと、その行番号、理由に [mention] を含むことを確かめる。 */
 internal fun assertManifestCorrupt(text: String, line: Int?, message: String = text, mention: String? = null) {
     val result = decodeManifest(text)
     val corrupt = assertIs<ManifestDecodeResult.Corrupt>(result, message)
     assertProblem(corrupt.problem, line, mention, message)
 }
 
-/** フォルダのファイルが壊れているとして返ってきたこと、その行番号、理由に [mention] を含むことを確かめる。 */
+/** 項目ファイルが壊れているとして返ってきたこと、その行番号、理由に [mention] を含むことを確かめる。 */
 internal fun assertItemsCorrupt(
     text: String,
     line: Int?,

@@ -21,7 +21,7 @@ class StorageKeysTest {
         expectations.forEach { (input, expected) -> assertEquals(expected, normalizePrefix(input), input) }
     }
 
-    // 目録のキーは、プレフィックスが空なら manifest.jsonl.gz から始まり、あれば `/` でつなぐ
+    // マニフェストのキーは、プレフィックスが空なら manifest.jsonl.gz から始まり、あれば `/` でつなぐ
     @Test
     fun buildsManifestKey() {
         assertEquals("manifest.jsonl.gz", manifestKey(""))
@@ -29,14 +29,14 @@ class StorageKeysTest {
         assertEquals("marks/manifest.jsonl.gz", manifestKey("/marks/"))
     }
 
-    // フォルダのファイルのキーは folders/<フォルダの ID>/<ファイルの ID>.jsonl.gz
+    // 項目ファイルのキーは folders/<フォルダの ID>/<ファイルの ID>.jsonl.gz
     @Test
     fun buildsItemsFileKey() {
         assertEquals("folders/$FOLDER_A/$FILE_ID.jsonl.gz", itemsFileKey("", FOLDER_A, FILE_ID))
         assertEquals("a/b/folders/$FOLDER_A/$FILE_ID.jsonl.gz", itemsFileKey("a/b/", FOLDER_A, FILE_ID))
     }
 
-    // 新しい ID は小文字・ハイフン区切りの UUID（版 4）の形で、毎回違う
+    // 新しい ID は小文字・ハイフン区切りの UUID（バージョン 4）の形で、毎回違う
     @Test
     fun generatesLowercaseVersion4Uuid() {
         val ids = List(20) { newId() }

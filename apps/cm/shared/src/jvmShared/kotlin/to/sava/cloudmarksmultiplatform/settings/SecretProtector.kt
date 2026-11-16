@@ -15,5 +15,5 @@ interface SecretProtector {
     fun unprotect(data: ByteArray, entropy: ByteArray): ByteArray
 }
 
-/** 暗号化または復号ができなかった。[message] は後から追うための短い文で、秘密のバイト列を含まない。 */
+/** 暗号化または復号ができなかった。[message] は後から調べるための短い文で、秘密のバイト列を含まない。 */
 class SecretProtectionException(override val message: String) : Exception(message)

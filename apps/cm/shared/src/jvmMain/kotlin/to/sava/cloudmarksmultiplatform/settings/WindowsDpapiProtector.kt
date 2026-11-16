@@ -34,7 +34,7 @@ private const val PB_DATA = "pbData"
 private const val OS_NAME = "os.name"
 private const val WINDOWS_OS_NAME_PREFIX = "Windows"
 
-/** 往復できるかを確かめるための固定のバイト列。秘密ではない。 */
+/** 暗号化して復号すると元に戻るかを確かめるための固定のバイト列。秘密ではない。 */
 private val PROBE_DATA = "to.sava.cloudmarksmultiplatform/probe".encodeToByteArray()
 private val PROBE_ENTROPY = "to.sava.cloudmarksmultiplatform/probe-entropy".encodeToByteArray()
 
@@ -45,8 +45,8 @@ private val PROBE_ENTROPY = "to.sava.cloudmarksmultiplatform/probe-entropy".enco
  * 利用者へ何も尋ねない（`CRYPTPROTECT_UI_FORBIDDEN`）。説明の文字列は渡さない。
  *
  * 関数は FFM（`java.lang.foreign`）で呼ぶ。警告を出さずに呼ぶには、JVM の起動引数に `--enable-native-access=ALL-UNNAMED` が要る。
- * 最初に使うときに一度だけ DLL を読み込み、往復できるかを確かめる。Windows でない、DLL を読み込めない、往復できない
- * のいずれかなら使えないものとし、以後の暗号化・復号はどれも [SecretProtectionException] になる。
+ * 最初に使うときに一度だけ DLL を読み込み、暗号化して復号すると元に戻るかを確かめる。Windows でない、DLL を読み込めない、
+ * 元に戻らない、のいずれかなら使えないものとし、以後の暗号化・復号はどれも [SecretProtectionException] になる。
  */
 object WindowsDpapiProtector : SecretProtector {
     private val availability: Availability by lazy { probe() }
@@ -69,7 +69,7 @@ private sealed interface Availability {
     class Unavailable(val reason: String) : Availability
 }
 
-/** DLL を読み込み、往復できるかを確かめる。 */
+/** DLL を読み込み、暗号化して復号すると元に戻るかを確かめる。 */
 private fun probe(): Availability {
     if (!System.getProperty(OS_NAME).orEmpty().startsWith(WINDOWS_OS_NAME_PREFIX)) {
         return Availability.Unavailable("Windows でない")
@@ -170,20 +170,20 @@ private class Dpapi {
             takeBytes(output)
         }
 
-    /** [bytes] を写した `DATA_BLOB` を、この [Arena] の中に作る。 */
+    /** [bytes] をコピーした `DATA_BLOB` を、この [Arena] の中に作る。 */
     private fun Arena.blobOf(bytes: ByteArray): MemorySegment =
         allocate(dataBlob).also { blob ->
             blob.set(JAVA_INT, cbDataOffset, bytes.size)
             blob.set(ADDRESS, pbDataOffset, allocateFrom(JAVA_BYTE, *bytes))
         }
 
-    /** 出力の `DATA_BLOB` が指すバイト列を写し取り、DPAPI が確保したバッファを `LocalFree` で解放する。 */
+    /** 出力の `DATA_BLOB` が指すバイト列をコピーし、DPAPI が確保したバッファを `LocalFree` で解放する。 */
     private fun takeBytes(blob: MemorySegment): ByteArray {
         val buffer = blob.get(ADDRESS, pbDataOffset)
         return try {
             buffer.reinterpret(Integer.toUnsignedLong(blob.get(JAVA_INT, cbDataOffset))).toArray(JAVA_BYTE)
         } finally {
-            // 解放の失敗は、写し取ったバイト列に響かないため問わない
+            // 解放の失敗は、コピーしたバイト列に影響しないため問わない
             localFree.invoke(buffer)
         }
     }

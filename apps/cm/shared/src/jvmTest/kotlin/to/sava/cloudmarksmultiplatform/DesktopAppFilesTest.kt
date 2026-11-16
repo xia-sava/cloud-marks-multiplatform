@@ -22,7 +22,7 @@ class DesktopAppFilesTest {
         }
     }
 
-    // 設定のファイルはディレクトリの直下の settings.json、手元のキャッシュはその下の cache
+    // 設定のファイルはディレクトリの直下の settings.json、ローカルキャッシュはその下の cache、ログはその下の logs
     @Test
     fun filesAreInDirectory() {
         val directory = Path.of(localAppData, "CloudMarks")
@@ -31,5 +31,6 @@ class DesktopAppFilesTest {
 
         assertEquals(directory.resolve("settings.json"), files.settingsFile)
         assertEquals(directory.resolve("cache"), files.cacheDirectory)
+        assertEquals(directory.resolve("logs"), files.logDirectory)
     }
 }

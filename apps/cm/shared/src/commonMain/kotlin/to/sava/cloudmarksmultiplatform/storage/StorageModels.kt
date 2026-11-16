@@ -9,7 +9,7 @@ internal const val MANIFEST_FORMAT = "cloud-marks-manifest"
 internal const val ITEMS_FORMAT = "cloud-marks-items"
 
 /**
- * 目録の見出し（1 行目）。`format` は定数なので持たない。
+ * マニフェストのヘッダー（1 行目）。`format` は定数なので持たない。
  *
  * @property version データを書いた形式の版
  * @property readableBy このデータを読むのに要る最低の版
@@ -25,10 +25,10 @@ data class ManifestHeader(
 )
 
 /**
- * 目録のフォルダの行（2 行目から）。
+ * マニフェストのフォルダの行（2 行目から）。
  *
- * @property parent 親のフォルダの ID。根だけが null
- * @property items このフォルダの項目を持つフォルダのファイルの ID。項目が無ければ null
+ * @property parent 親のフォルダの ID。ルートフォルダだけが null
+ * @property items このフォルダの項目ファイルの ID。項目が無ければ null
  * @property count 項目の数。`items` が null のときだけ 0
  */
 data class FolderEntry(
@@ -39,18 +39,18 @@ data class FolderEntry(
     val count: Int,
 )
 
-/** 目録。`folders` は根から深さ優先の行きがけ順で、先頭が根。 */
+/** マニフェスト。`folders` はルートフォルダから深さ優先の行きがけ順で、先頭がルートフォルダ。 */
 data class Manifest(
     val header: ManifestHeader,
     val folders: List<FolderEntry>,
 )
 
-/** フォルダのファイルの見出し（1 行目）。`format` は定数なので持たない。 */
+/** 項目ファイルのヘッダー（1 行目）。`format` は定数なので持たない。 */
 data class ItemsFileHeader(
     val folder: String,
 )
 
-/** フォルダのファイルの項目。`added` は取り込んだ項目など、無いことがある。 */
+/** 項目ファイルの項目。`added` は取り込んだ項目など、無いことがある。 */
 data class Item(
     val id: String,
     val url: String,
@@ -58,7 +58,7 @@ data class Item(
     val added: Instant? = null,
 )
 
-/** フォルダのファイル。`items` の並びが表示の並び順になる。 */
+/** 項目ファイル。`items` の並びが表示の並び順になる。 */
 data class ItemsFile(
     val header: ItemsFileHeader,
     val items: List<Item>,

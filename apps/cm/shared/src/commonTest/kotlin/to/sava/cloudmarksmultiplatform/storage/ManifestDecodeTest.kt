@@ -21,7 +21,7 @@ class ManifestDecodeTest {
     private fun nonJsonIntegerLiterals(digit: Int): List<String> =
         listOf("+$digit", "0$digit", (0xFF10 + digit).toChar().toString(), "$digit.0", "${digit}e0")
 
-    // 根だけの目録が読めて、見出しと根の行が欄どおりに取り出せる
+    // ルートフォルダだけのマニフェストが読めて、ヘッダーとルートフォルダの行が欄どおりに取り出せる
     @Test
     fun readsMinimalManifest() {
         val manifest = readable(jsonl(header, root))
@@ -49,7 +49,7 @@ class ManifestDecodeTest {
         assertEquals(listOf(ROOT_ID, FOLDER_A, FOLDER_B, FOLDER_C, folderD), readable(text).folders.map { it.id })
     }
 
-    // 知らない欄は、見出しにも行にあっても無視して読める
+    // 知らない欄は、ヘッダーにも行にあっても無視して読める
     @Test
     fun ignoresUnknownFields() {
         val text = jsonl(
@@ -93,15 +93,15 @@ class ManifestDecodeTest {
         }
     }
 
-    // 満たさない最小の入力が、それぞれ壊れているになり、行番号が合って、理由が原因の欄を挙げる
+    // 満たさない最小の入力が、それぞれ「壊れている」になり、行番号が合って、理由が原因の欄を挙げる
     @Test
     fun rejectsEachViolatedRuleAsCorrupt() {
         val d = "00000000-0000-4000-8000-00000000000d"
         val cases = listOf(
             CorruptCase("id の重複", jsonl(header, root, folderA, folderLine(FOLDER_A, ROOT_ID, "b")), 4, "`id`"),
-            CorruptCase("根と同じ id", jsonl(header, root, folderLine(ROOT_ID, ROOT_ID, "x")), 3, "`id`"),
-            CorruptCase("2 行目が根でない（parent がある）", jsonl(header, folderLine(ROOT_ID, FOLDER_A, "")), 2, "`parent`"),
-            CorruptCase("2 行目が根でない（name が空でない）", jsonl(header, folderLine(ROOT_ID, null, "r")), 2, "`name`"),
+            CorruptCase("ルートフォルダと同じ id", jsonl(header, root, folderLine(ROOT_ID, ROOT_ID, "x")), 3, "`id`"),
+            CorruptCase("2 行目がルートフォルダでない（parent がある）", jsonl(header, folderLine(ROOT_ID, FOLDER_A, "")), 2, "`parent`"),
+            CorruptCase("2 行目がルートフォルダでない（name が空でない）", jsonl(header, folderLine(ROOT_ID, null, "r")), 2, "`name`"),
             CorruptCase("2 行目が無い", jsonl(header), 2),
             CorruptCase("3 行目以降の parent が null", jsonl(header, root, folderLine(FOLDER_A, null, "a")), 3, "`parent`"),
             CorruptCase(
@@ -111,9 +111,9 @@ class ManifestDecodeTest {
                 "`parent`",
             ),
             CorruptCase("自分自身を指す parent", jsonl(header, root, folderLine(FOLDER_A, FOLDER_A, "a")), 3, "`parent`"),
-            CorruptCase("目録に無い parent", jsonl(header, root, folderLine(FOLDER_A, d, "a")), 3, "`parent`"),
+            CorruptCase("マニフェストに無い parent", jsonl(header, root, folderLine(FOLDER_A, d, "a")), 3, "`parent`"),
             CorruptCase(
-                "行きがけ順でない並び（A, B が根の子、C が A の子）",
+                "行きがけ順でない並び（A, B がルートフォルダの子、C が A の子）",
                 jsonl(
                     header,
                     root,
@@ -149,11 +149,11 @@ class ManifestDecodeTest {
             CorruptCase("JSON として読めない行", jsonl(header, root, "{broken"), 3, "JSON"),
             CorruptCase("オブジェクトでない行", jsonl(header, root, "[]"), 3, "オブジェクト"),
             CorruptCase("欄が無い（count）", jsonl(header, root.replace(",\"count\":0", "")), 2, "`count`"),
-            CorruptCase("根の parent の欄が無い", jsonl(header, root.replace("\"parent\":null,", "")), 2, "`parent`"),
-            CorruptCase("根の items の欄が無い", jsonl(header, root.replace("\"items\":null,", "")), 2, "`items`"),
+            CorruptCase("ルートフォルダの parent の欄が無い", jsonl(header, root.replace("\"parent\":null,", "")), 2, "`parent`"),
+            CorruptCase("ルートフォルダの items の欄が無い", jsonl(header, root.replace("\"items\":null,", "")), 2, "`items`"),
             CorruptCase("count が文字列", jsonl(header, root.replace("\"count\":0", "\"count\":\"0\"")), 2, "`count`"),
             CorruptCase("count が小数", jsonl(header, root.replace("\"count\":0", "\"count\":0.5")), 2, "`count`"),
-            CorruptCase("根の name が文字列でない", jsonl(header, root.replace("\"name\":\"\"", "\"name\":1")), 2, "`name`"),
+            CorruptCase("ルートフォルダの name が文字列でない", jsonl(header, root.replace("\"name\":\"\"", "\"name\":1")), 2, "`name`"),
             CorruptCase("3 行目の name が文字列でない", jsonl(header, root, folderA.replace("\"name\":\"a\"", "\"name\":1")), 3, "`name`"),
             CorruptCase("version が 0", jsonl(manifestHeaderLine(version = 0, readableBy = 0), root), 1, "`version`"),
             CorruptCase("version が文字列", jsonl(header.replace("\"version\":1", "\"version\":\"1\""), root), 1, "`version`"),
@@ -205,7 +205,7 @@ class ManifestDecodeTest {
         }
     }
 
-    // 見出しの format・version・readableBy の検証は版によらず先に行い、失敗すれば壊れている
+    // ヘッダーの format・version・readableBy の検証は版によらず先に行い、失敗すれば壊れている
     @Test
     fun headerRulesAreCheckedBeforeVersionDecision() {
         val wrongFormat = manifestHeaderLine(version = 2, readableBy = 1).replace("cloud-marks-manifest", "other")

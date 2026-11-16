@@ -1,10 +1,10 @@
 package to.sava.cloudmarksmultiplatform.settings
 
-/** [S3Credentials.toString] が値の代わりに出す文字列。 */
-private const val REDACTED = "<redacted>"
+/** 認証情報を出さない `toString`（[S3Credentials.toString]・[SettingsForm.toString]）が、値の代わりに出す文字列。 */
+internal const val REDACTED = "<redacted>"
 
 /**
- * S3 の接続先と認証情報。手元に保存する設定。
+ * S3 の接続先と認証情報。端末に保存する設定。
  *
  * @property prefix キーの前に付けるプレフィックス。空ならバケットの直下
  */

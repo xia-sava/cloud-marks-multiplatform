@@ -6,12 +6,13 @@ import java.nio.file.Path
 internal const val SETTINGS_FILE_NAME = "settings.json"
 
 /**
- * アプリが手元に置くファイルの場所。
+ * アプリが端末に置くファイルの場所。
  *
- * 場所の決め方はプラットフォームごとに違い、それぞれのアプリの入口で作って渡す。
+ * 場所の決め方はプラットフォームごとに違い、それぞれのアプリのエントリポイントで作って渡す。
  * パスを持つだけで、ディレクトリは作らない。作るのは書く側。
  *
  * @property settingsFile 設定のファイル
- * @property cacheDirectory 手元のキャッシュの根。接続先ごとのディレクトリはこの下に作る
+ * @property cacheDirectory ローカルキャッシュのルートディレクトリ。接続先ごとのディレクトリはこの下に作る
+ * @property logDirectory ログのファイルを置くディレクトリ
  */
-class AppFiles(val settingsFile: Path, val cacheDirectory: Path)
+class AppFiles(val settingsFile: Path, val cacheDirectory: Path, val logDirectory: Path)

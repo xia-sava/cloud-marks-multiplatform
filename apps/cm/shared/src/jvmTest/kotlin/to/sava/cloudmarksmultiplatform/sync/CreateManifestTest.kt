@@ -11,7 +11,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
 class CreateManifestTest {
-    // 目録が無ければ、見出しと根のフォルダだけの目録を If-None-Match: * で置き、ETag と一緒にキャッシュに持つ
+    // マニフェストが無ければ、ヘッダーとルートフォルダだけのマニフェストを If-None-Match: * で置き、ETag と一緒にキャッシュに持つ
     @Test
     fun createsManifestWithOnlyRootWhenNone() = runTest {
         val fixture = SyncFixture()
@@ -31,11 +31,11 @@ class CreateManifestTest {
         assertEquals(listOf(PutCondition.IfNoneMatchAny), fixture.store.puts(fixture.isManifest).map { it.condition })
         assertEquals(fixture.store.storedManifestETag(), tree.eTag)
         assertEquals(fixture.store.storedManifestETag(), fixture.cache.manifest()?.eTag)
-        // 根のフォルダは項目を持たないので、手元に残すフォルダのファイルは無い
+        // ルートフォルダは項目を持たないので、ローカルキャッシュに残す項目ファイルは無い
         assertEquals(listOf(emptySet()), fixture.cache.retained)
     }
 
-    // 目録が既にあれば 412 になり、目録を 1 回読んで、commit がほかのものなので作らない。置いてある目録は変わらない
+    // マニフェストが既にあれば 412 になり、マニフェストを 1 回読んで、commit がほかのものなので作らない。置いてあるマニフェストは変わらない
     @Test
     fun doesNotCreateWhenManifestExists() = runTest {
         val fixture = SyncFixture().apply { store.seed() }
@@ -48,7 +48,7 @@ class CreateManifestTest {
         assertEquals(1, fixture.store.gets(fixture.isManifest).size)
     }
 
-    // PUT の応答が切れ（実は作れていた）、送り直しが 412：目録を読み、commit がこの目録のものなので作れたとする
+    // PUT の応答が切れ（実は作れていた）、再送が 412：マニフェストを読み、commit がこのマニフェストのものなので作れたとする
     @Test
     fun ownManifestAfterLostResponseIsCreated() = runTest {
         val fixture = SyncFixture()
@@ -63,7 +63,7 @@ class CreateManifestTest {
         assertEquals(2, fixture.store.puts(fixture.isManifest).size)
     }
 
-    // 412 のあとの目録の GET が失敗した：自分の作った目録かを確かめられないので、作らなかったとする
+    // 412 のあとのマニフェストの GET が失敗した：自分の作ったマニフェストかを確かめられないので、作らなかったとする
     @Test
     fun failedReadAfterPreconditionFailedIsAlreadyExists() = runTest {
         val fixture = SyncFixture().apply { store.seed() }
@@ -74,7 +74,7 @@ class CreateManifestTest {
         assertEquals(CreateManifestResult.AlreadyExists, result)
     }
 
-    // PUT が 409 なら、同じ PUT を間を空けて送り直す
+    // PUT が 409 なら、同じ PUT を間を空けて再送する
     @Test
     fun resendsOnConflict() = runTest {
         val fixture = SyncFixture()

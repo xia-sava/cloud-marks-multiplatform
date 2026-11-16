@@ -7,7 +7,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class RequiredFoldersTest {
-    // 操作ごとに、適用の前に項目を読み込んでおくフォルダを求める。木に無いフォルダは含まない
+    // 操作ごとに、適用の前に項目を読み込んでおくフォルダを求める。ツリーに無いフォルダは含まない
     @Test
     fun requiredFoldersPerOperation() {
         val newItem = NewItem(itemId(401), "https://example.com/", "t")
@@ -18,9 +18,9 @@ class RequiredFoldersTest {
                 DeleteItems(listOf(ItemRef(FOLDER_A, A_ITEM_1), ItemRef(FOLDER_A, A_ITEM_2), ItemRef(FOLDER_B, B_ITEM_1))) to
                     setOf(FOLDER_A, FOLDER_B)
                 ),
-            "項目の削除（木に無いフォルダ）" to (DeleteItems(listOf(ItemRef(folderId(99), itemId(1)))) to emptySet()),
+            "項目の削除（ツリーに無いフォルダ）" to (DeleteItems(listOf(ItemRef(folderId(99), itemId(1)))) to emptySet()),
             "項目の挿入" to (InsertItems(FOLDER_A, listOf(item(itemId(501))), null) to setOf(FOLDER_A)),
-            "項目の挿入（木に無いフォルダ）" to (InsertItems(folderId(99), listOf(item(itemId(501))), null) to emptySet()),
+            "項目の挿入（ツリーに無いフォルダ）" to (InsertItems(folderId(99), listOf(item(itemId(501))), null) to emptySet()),
             "項目の移動" to (
                 MoveItems(listOf(ItemRef(FOLDER_A, A_ITEM_1), ItemRef(FOLDER_B, B_ITEM_1)), FOLDER_C, null) to
                     setOf(FOLDER_A, FOLDER_B, FOLDER_C)
@@ -53,8 +53,8 @@ class RequiredFoldersTest {
         assertEquals(setOf(ROOT, FOLDER_B), requiredFolders(SAMPLE_STATE, operations))
     }
 
-    // 根と A の項目だけを読み込めば、根と A だけに係る操作の並びを適用できる。
-    // 項目を持つ B は読み込まなくてよく、B を消す操作も通る
+    // ルートフォルダと A の項目だけを読み込めば、ルートフォルダと A だけに係る操作の並びを適用できる。
+    // 項目を持つ B は読み込まなくてよく、B を消す操作も適用できる
     @Test
     fun applyingNeedsOnlyRequiredFolders() {
         val operations = listOf(

@@ -10,7 +10,7 @@ plugins {
     alias(libs.plugins.kotlinSerialization)
 }
 
-/** デスクトップ（`jvm()`）のコンパイルとテストに使うJDKの版。 */
+/** デスクトップ（`jvm()`）のコンパイルとテストに使うJDKのバージョン。 */
 private val DESKTOP_JDK_VERSION = libs.versions.desktop.jdk.get().toInt()
 
 /**
@@ -22,7 +22,7 @@ private val ENABLE_NATIVE_ACCESS = "--enable-native-access=ALL-UNNAMED"
 /**
  * デスクトップのJDK。`jvm()`のコンパイルと`jvmTest`だけに使い、Androidのコンパイルとホストのテストは既定のJDKのまま動かす。
  *
- * `kotlin.jvmToolchain`はプロジェクト全体に効き、Androidの側まで移る。
+ * `kotlin.jvmToolchain`はプロジェクト全体に適用され、Androidにも及ぶ。
  */
 private val desktopJdkSpec = Action<JavaToolchainSpec> {
     languageVersion.set(JavaLanguageVersion.of(DESKTOP_JDK_VERSION))
@@ -57,11 +57,14 @@ kotlin {
     }
 
     sourceSets {
-        // jvmMainとandroidMainの双方から使うJVMの実装を置く場所。S3へのアクセス、gzipの読み書き、設定のファイルの読み書きを置く。
+        // jvmMainとandroidMainの双方から使うJVMの実装を置く場所。S3へのアクセス、gzipの読み書き、設定のファイルの読み書き、
+        // 画面とその状態を置く。
         val jvmShared = create("jvmShared") {
             dependsOn(commonMain.get())
             dependencies {
                 implementation(libs.aws.sdk.s3)
+                implementation(libs.compose.material3Adaptive)
+                implementation(libs.compose.materialIconsCore)
             }
         }
 

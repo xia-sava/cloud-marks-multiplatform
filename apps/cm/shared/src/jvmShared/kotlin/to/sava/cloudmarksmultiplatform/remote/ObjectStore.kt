@@ -47,7 +47,7 @@ sealed interface PutCondition {
 /**
  * GET の結果。
  *
- * 失敗の `detail` は後から追うための短い文で、秘密情報を含まない。
+ * 失敗の `detail` は後から調べるための短い文で、秘密情報を含まない。
  */
 sealed interface GetObjectResult {
     /** 見つかった（`200`）。 */
@@ -62,7 +62,7 @@ sealed interface GetObjectResult {
     /** 権限が無い（`403`）。 */
     data object Forbidden : GetObjectResult
 
-    /** 結果が分からない。通信の失敗、タイムアウト、`5xx`（`503 SlowDown` を含む）。 */
+    /** 結果が不明。通信の失敗、タイムアウト、`5xx`（`503 SlowDown` を含む）。 */
     data class Unknown(val detail: String) : GetObjectResult
 
     /** そのほかの失敗。 */
@@ -72,7 +72,7 @@ sealed interface GetObjectResult {
 /**
  * PUT の結果。
  *
- * 失敗の `detail` は後から追うための短い文で、秘密情報を含まない。
+ * 失敗の `detail` は後から調べるための短い文で、秘密情報を含まない。
  */
 sealed interface PutObjectResult {
     /** 書けた（`200`）。[eTag] は書いたオブジェクトの ETag。 */
@@ -90,7 +90,7 @@ sealed interface PutObjectResult {
     /** 権限が無い（`403`）。 */
     data object Forbidden : PutObjectResult
 
-    /** 結果が分からない。書けたかどうかが分からない。通信の失敗、タイムアウト、`5xx`（`503 SlowDown` を含む）。 */
+    /** 結果が不明。書けたかどうかが分からない。通信の失敗、タイムアウト、`5xx`（`503 SlowDown` を含む）。 */
     data class Unknown(val detail: String) : PutObjectResult
 
     /** そのほかの失敗。書いていない。 */
@@ -103,7 +103,7 @@ data class ListedObject(val key: String, val lastModified: Instant)
 /**
  * 一覧の結果。
  *
- * 失敗の `detail` は後から追うための短い文で、秘密情報を含まない。
+ * 失敗の `detail` は後から調べるための短い文で、秘密情報を含まない。
  */
 sealed interface ListObjectsResult {
     /**
@@ -118,7 +118,7 @@ sealed interface ListObjectsResult {
     /** 権限が無い（`403`）。 */
     data object Forbidden : ListObjectsResult
 
-    /** 結果が分からない。通信の失敗、タイムアウト、`5xx`（`503 SlowDown` を含む）。 */
+    /** 結果が不明。通信の失敗、タイムアウト、`5xx`（`503 SlowDown` を含む）。 */
     data class Unknown(val detail: String) : ListObjectsResult
 
     /** そのほかの失敗。 */
@@ -128,7 +128,7 @@ sealed interface ListObjectsResult {
 /**
  * DELETE の結果。
  *
- * 失敗の `detail` は後から追うための短い文で、秘密情報を含まない。
+ * 失敗の `detail` は後から調べるための短い文で、秘密情報を含まない。
  */
 sealed interface DeleteObjectResult {
     /** 消せた、または元から無かった（`204`）。 */
@@ -137,7 +137,7 @@ sealed interface DeleteObjectResult {
     /** 権限が無い（`403`）。 */
     data object Forbidden : DeleteObjectResult
 
-    /** 結果が分からない。消せたかどうかが分からない。通信の失敗、タイムアウト、`5xx`（`503 SlowDown` を含む）。 */
+    /** 結果が不明。消せたかどうかが分からない。通信の失敗、タイムアウト、`5xx`（`503 SlowDown` を含む）。 */
     data class Unknown(val detail: String) : DeleteObjectResult
 
     /** そのほかの失敗。消していない。 */

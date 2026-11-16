@@ -8,7 +8,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.time.Instant
 
-/** 書き込みの手順の試験が頼る、偽のストレージの条件付きの読み書きが S3 と同じであること。 */
+/** 書き込みの手順のテストが前提にする、偽のストレージの条件付きの読み書きが S3 と同じであること。 */
 class FakeObjectStoreTest {
     private val key = "cm/data/manifest.jsonl.gz"
     private val body = byteArrayOf(1, 2, 3)
@@ -68,7 +68,7 @@ class FakeObjectStoreTest {
         assertContentEquals(byteArrayOf(4), store.objectAt(key)?.body)
     }
 
-    // 一覧：プレフィックスに合うキーだけを、ページに分けて最後まで返す。ページごとに要求し、時刻は一覧の応答の時刻
+    // 一覧：プレフィックスに合うキーだけを、ページに分けて最後まで返す。ページごとにリクエストし、時刻は一覧の応答の時刻
     @Test
     fun listReadsAllPagesOfMatchingKeys() = runTest {
         val store = FakeObjectStore().apply { listPageSize = 2 }
@@ -95,7 +95,7 @@ class FakeObjectStoreTest {
         assertEquals(2, store.requests.count { it is FakeObjectStore.Request.ListPage })
     }
 
-    // 一覧：差し込んだ失敗は、一覧全体の失敗として返る（403 と結果が分からないもの）
+    // 一覧：差し込んだ失敗は、一覧全体の失敗として返る（403 と結果が不明のもの）
     @Test
     fun listReturnsInjectedFailures() = runTest {
         val store = FakeObjectStore().apply { overwrite("a/1", body) }

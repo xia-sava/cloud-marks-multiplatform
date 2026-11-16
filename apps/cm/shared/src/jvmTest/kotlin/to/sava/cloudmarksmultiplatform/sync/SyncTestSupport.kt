@@ -50,7 +50,7 @@ internal fun item(n: Int): Item = Item(itemId(n), "https://example.com/$n", "tit
 internal val ROOT_ITEMS = listOf(item(1), item(2))
 internal val A_ITEMS = listOf(item(3))
 
-/** 根（項目 2 つ）→ A（項目 1 つ）、B（項目なし）の目録。 */
+/** ルートフォルダ（項目 2 つ）→ A（項目 1 つ）、B（項目なし）のマニフェスト。 */
 internal fun initialManifest(version: Int = 1, readableBy: Int = 1): Manifest =
     Manifest(
         header = ManifestHeader(version, readableBy, INITIAL_COMMIT, Instant.parse("2026-11-01T00:00:00.000Z"), "android"),
@@ -105,47 +105,61 @@ internal class SyncFixture {
 
     fun itemsFileKey(folderId: String, fileId: String): String = itemsFileKey(store.prefix, folderId, fileId)
 
-    /** フォルダ [folderId] のフォルダのファイルのキーか。 */
+    /** フォルダ [folderId] の項目ファイルのキーか。 */
     fun isItemsFileOf(folderId: String): (String) -> Boolean = { key -> key.startsWith("${store.prefix}/folders/$folderId/") }
 
-    /** 目録のキーか。 */
+    /** マニフェストのキーか。 */
     val isManifest: (String) -> Boolean get() = { key -> key == manifestKey }
 }
 
 internal fun itemsFileBody(folderId: String, items: List<Item>): ByteArray =
     encodeItemsFileGzip(ItemsFile(ItemsFileHeader(folderId), items))
 
-/** [manifest] と、[initialManifest] の根と A のフォルダのファイルを、条件を付けずに置く。 */
+/** [manifest] と、[initialManifest] のルートフォルダと A の項目ファイルを、条件を付けずに置く。 */
 internal fun FakeObjectStore.seed(manifest: Manifest = initialManifest()) {
     overwrite(itemsFileKey(prefix, ROOT_ID, ROOT_FILE_ID), itemsFileBody(ROOT_ID, ROOT_ITEMS))
     overwrite(itemsFileKey(prefix, FOLDER_A, A_FILE_ID), itemsFileBody(FOLDER_A, A_ITEMS))
     overwrite(manifestKey(prefix), encodeManifestGzip(manifest))
 }
 
-/** 置いてある目録。読み書きできる目録でなければ失敗にする。 */
+/** 置いてあるマニフェスト。読み書きできるマニフェストでなければ失敗にする。 */
 internal fun FakeObjectStore.storedManifest(): Manifest {
-    val stored = assertNotNull(objectAt(manifestKey(prefix)), "目録が無い")
+    val stored = assertNotNull(objectAt(manifestKey(prefix)), "マニフェストが無い")
     return assertIs<ManifestDecodeResult.Readable>(decodeManifestGzip(stored.body)).manifest
 }
 
-/** 置いてある目録の ETag。 */
+/** 置いてあるマニフェストの ETag。 */
 internal fun FakeObjectStore.storedManifestETag(): String = assertNotNull(objectAt(manifestKey(prefix))).eTag
 
 /** [manifest] が指す、フォルダ [folderId] の項目。 */
 internal fun FakeObjectStore.storedItems(manifest: Manifest, folderId: String): List<Item> {
     val entry = manifest.folders.single { it.id == folderId }
     val fileId = entry.items ?: return emptyList()
-    val stored = assertNotNull(objectAt(itemsFileKey(prefix, folderId, fileId)), "フォルダ $folderId のファイルが無い")
+    val stored = assertNotNull(objectAt(itemsFileKey(prefix, folderId, fileId)), "フォルダ $folderId の項目ファイルが無い")
     val decoded = decodeItemsFileGzip(stored.body, folderId, entry, manifest.header.version)
     return assertIs<ItemsFileDecodeResult.Readable>(decoded).file.items
 }
 
-/** ほかの書き手として、根の子のフォルダの末尾に、項目を持たないフォルダ [folderId] を足す。目録の `commit` と ETag が替わる。 */
+/** ほかの書き手として、ルートフォルダの子のフォルダの末尾に、項目を持たないフォルダ [folderId] を足す。マニフェストの `commit` と ETag が替わる。 */
 internal fun FakeObjectStore.addFolderAsOtherWriter(folderId: String) {
     val current = storedManifest()
     val updated = Manifest(
         header = current.header.copy(commit = newId(), updatedBy = "android"),
         folders = current.folders + FolderEntry(folderId, current.folders.first().id, "other", null, 0),
+    )
+    overwrite(manifestKey(prefix), encodeManifestGzip(updated))
+}
+
+/**
+ * ほかの書き手として、フォルダ [folderId] の項目を [items] に替える。[items] を新しい項目ファイル [fileId] に置き、
+ * マニフェストをそのファイルを指すものに替える。マニフェストの `commit` と ETag が替わる。古い項目ファイルは残す。
+ */
+internal fun FakeObjectStore.replaceItemsAsOtherWriter(folderId: String, fileId: String, items: List<Item>) {
+    overwrite(itemsFileKey(prefix, folderId, fileId), itemsFileBody(folderId, items))
+    val current = storedManifest()
+    val updated = Manifest(
+        header = current.header.copy(commit = newId(), updatedBy = "android"),
+        folders = current.folders.map { if (it.id == folderId) it.copy(items = fileId, count = items.size) else it },
     )
     overwrite(manifestKey(prefix), encodeManifestGzip(updated))
 }
@@ -156,5 +170,5 @@ internal fun FakeObjectStore.puts(matches: (String) -> Boolean): List<FakeObject
 internal fun FakeObjectStore.gets(matches: (String) -> Boolean): List<FakeObjectStore.Request.Get> =
     requests.filterIsInstance<FakeObjectStore.Request.Get>().filter { matches(it.key) }
 
-/** フォルダのファイルのキーから、ファイルの ID を取り出す。 */
+/** 項目ファイルのキーから、ファイルの ID を取り出す。 */
 internal fun fileIdOfKey(key: String): String = key.substringAfterLast('/').removeSuffix(".jsonl.gz")

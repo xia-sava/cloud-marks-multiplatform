@@ -11,7 +11,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 
 class TreeStateTest {
-    // 目録 → 木 → フォルダの行：変更が無ければ元の folders と等しい（項目を読み込んでいない状態でも、読み込んでいても）
+    // マニフェスト → ツリー → フォルダの行：変更が無ければ元の folders と等しい（項目を読み込んでいない状態でも、読み込んでいても）
     @Test
     fun manifestRoundTripKeepsFolders() {
         val unloaded = applyOperations(SAMPLE_MANIFEST.toTreeState(), emptyList())
@@ -21,7 +21,7 @@ class TreeStateTest {
         assertEquals(SAMPLE_MANIFEST.folders, loaded.toFolderEntries(emptyMap()))
     }
 
-    // 目録 → 木：子の並びは行の順。項目を持たないフォルダは、最初から項目を読み込んだ状態（空）になる
+    // マニフェスト → ツリー：子の並びは行の順。項目を持たないフォルダは、最初から項目を読み込んだ状態（空）になる
     @Test
     fun toTreeStateBuildsChildrenInRowOrderAndPreloadsEmptyFolders() {
         val state = SAMPLE_MANIFEST.toTreeState()
@@ -73,7 +73,7 @@ class TreeStateTest {
         }
     }
 
-    // 余計な ID（変わっていないフォルダ、項目が無くなったフォルダ、木に無いフォルダ）を渡すと例外になる
+    // 余計な ID（変わっていないフォルダ、項目が無くなったフォルダ、ツリーに無いフォルダ）を渡すと例外になる
     @Test
     fun toFolderEntriesFailsWhenGivenExtraFileIds() {
         val reordered = applyOne(
@@ -88,7 +88,7 @@ class TreeStateTest {
         assertFailsWith<IllegalArgumentException>("項目が無くなったフォルダ") {
             emptied.toFolderEntries(mapOf(FOLDER_B to fileId(91)))
         }
-        assertFailsWith<IllegalArgumentException>("木に無いフォルダ") {
+        assertFailsWith<IllegalArgumentException>("ツリーに無いフォルダ") {
             reordered.toFolderEntries(mapOf(FOLDER_A to fileId(90), folderId(99) to fileId(91)))
         }
     }
@@ -112,7 +112,7 @@ class TreeStateTest {
         )
     }
 
-    // フォルダの移動・作成・削除のあと、行は深さ優先の行きがけ順になり、目録として読める
+    // フォルダの移動・作成・削除のあと、行は深さ優先の行きがけ順になり、マニフェストとして読める
     @Test
     fun entriesAfterTreeChangesAreDepthFirstPreOrderAndDecodable() {
         val operations = listOf(
@@ -133,7 +133,7 @@ class TreeStateTest {
         assertDecodable(entries)
     }
 
-    // フォルダの削除のあとの行も、親が先にある順で、目録として読める
+    // フォルダの削除のあとの行も、親が先にある順で、マニフェストとして読める
     @Test
     fun entriesAfterDeleteAreDecodable() {
         val result = applyOperations(SAMPLE_STATE, listOf(DeleteFolder(FOLDER_A), DeleteFolder(FOLDER_C)))

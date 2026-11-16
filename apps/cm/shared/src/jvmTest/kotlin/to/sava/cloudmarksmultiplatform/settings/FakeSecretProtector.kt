@@ -1,18 +1,18 @@
 package to.sava.cloudmarksmultiplatform.settings
 
-/** 各バイトに XOR で掛ける値。 */
+/** 各バイトと XOR する値。 */
 private const val MASK = 0x5a
 
 private const val DEFAULT_OWNER: Byte = 1
 
 /**
- * テスト用の [SecretProtector]。暗号化は、[owner] とエントロピーを前に付け、各バイトを XOR で変える。
+ * テスト用の [SecretProtector]。暗号化は、[owner] とエントロピーを前に付け、各バイトを XOR で変換する。
  *
  * 復号は、先頭が自分の [owner] と渡されたエントロピーでなければ失敗する。ほかのユーザーが暗号化したものや、
- * エントロピーの違うものを復号できないことを真似る。
+ * エントロピーの違うものを復号できないことを模擬する。
  *
  * @param owner 暗号化したユーザーの代わりの値
- * @param available false なら、暗号化も復号も失敗する。暗号化の仕組みが使えない環境を真似る
+ * @param available false なら、暗号化も復号も失敗する。暗号化の仕組みが使えない環境を模擬する
  */
 internal class FakeSecretProtector(
     private val owner: Byte = DEFAULT_OWNER,

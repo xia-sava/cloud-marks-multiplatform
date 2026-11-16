@@ -32,7 +32,7 @@ private fun success(
 
 /** 古いファイルの削除（`docs/storage-format.md` の「古いファイルの削除」）。 */
 class StaleFileDeleteTest {
-    /** [age] だけ前に最終更新されたフォルダのファイルを、フォルダ [folderId] の下に置いて、そのキーを返す。 */
+    /** [age] だけ前に最終更新された項目ファイルを、フォルダ [folderId] の下に置いて、そのキーを返す。 */
     private fun SyncFixture.putFile(folderId: String, fileId: String, age: Duration): String =
         itemsFileKey(folderId, fileId).also { key -> store.overwrite(key, BODY, lastModified = store.serverTime - age) }
 
@@ -44,13 +44,13 @@ class StaleFileDeleteTest {
 
     private fun SyncFixture.deleteRequests(): List<Request.Delete> = store.requests.filterIsInstance<Request.Delete>()
 
-    /** [initialManifest] と、それが指す 2 つのフォルダのファイル（根と A）を、[age] だけ前に置く。 */
+    /** [initialManifest] と、それが指す 2 つの項目ファイル（ルートフォルダと A）を、[age] だけ前に置く。 */
     private fun SyncFixture.seedReferenced(age: Duration): List<String> {
         store.seed()
         return listOf(putFile(ROOT_ID, ROOT_FILE_ID, age), putFile(FOLDER_A, A_FILE_ID, age))
     }
 
-    // 目録が参照しているファイルは、猶予を過ぎていても消さない
+    // マニフェストが参照しているファイルは、猶予を過ぎていても消さない
     @Test
     fun keepsReferencedFilesEvenWhenOld() = runTest {
         val fixture = SyncFixture()
@@ -63,7 +63,7 @@ class StaleFileDeleteTest {
         assertTrue(fixture.deleteRequests().isEmpty())
     }
 
-    // 古いファイルの削除は手元のキャッシュを使わない。手元のフォルダのファイルも消さない
+    // 古いファイルの削除はローカルキャッシュを使わない。ローカルキャッシュの項目ファイルも消さない
     @Test
     fun doesNotTouchCacheItemsFiles() = runTest {
         val fixture = SyncFixture()
@@ -74,7 +74,7 @@ class StaleFileDeleteTest {
         assertEquals(emptyList(), fixture.cache.retained)
     }
 
-    // 目録に参照されておらず、猶予を過ぎたファイルは消す。参照されているファイルは残す
+    // マニフェストに参照されておらず、猶予を過ぎたファイルは消す。参照されているファイルは残す
     @Test
     fun deletesUnreferencedFilesPastGrace() = runTest {
         val fixture = SyncFixture()
@@ -175,7 +175,7 @@ class StaleFileDeleteTest {
         assertTrue(referenced.all { fixture.exists(it) })
     }
 
-    // 目録に無いフォルダの ID の下のファイルは、目録のどのフォルダとも組にならないので消す
+    // マニフェストに無いフォルダの ID の下のファイルは、マニフェストのどのフォルダとも組にならないので消す
     @Test
     fun deletesFileUnderFolderMissingFromManifest() = runTest {
         val fixture = SyncFixture()
@@ -206,7 +206,7 @@ class StaleFileDeleteTest {
         assertEquals(stale.sorted(), fixture.deleteRequests().map { it.key }.sorted())
     }
 
-    // 目録が読み書きできるものでないとき（読むだけ・更新が要る・壊れている・無い・GET の失敗）は、一覧も読まず、何も消さない
+    // マニフェストが読み書きできるものでないとき（読むだけ・更新が要る・壊れている・無い・GET の失敗）は、一覧も読まず、何も消さない
     @Test
     fun deletesNothingUnlessManifestIsReadable() = runTest {
         val cases: List<Pair<(SyncFixture) -> Unit, SyncFailure>> = listOf(
@@ -233,7 +233,7 @@ class StaleFileDeleteTest {
         }
     }
 
-    // 目録が壊れているとき（gzip でない）は、壊れているとして返し、何も消さない
+    // マニフェストが壊れているとき（gzip でない）は、壊れているとして返し、何も消さない
     @Test
     fun deletesNothingWhenManifestIsCorrupt() = runTest {
         val fixture = SyncFixture()
@@ -248,8 +248,8 @@ class StaleFileDeleteTest {
         assertTrue(fixture.deleteRequests().isEmpty())
     }
 
-    // 目録は手元のキャッシュを使わず、条件を付けずに GET する。キャッシュは替えない。
-    // 手元の目録が古く、新しい目録だけが指すファイルを、古い目録を信じて消さない
+    // マニフェストはローカルキャッシュを使わず、条件を付けずに GET する。キャッシュは替えない。
+    // ローカルキャッシュのマニフェストが古く、新しいマニフェストだけが指すファイルを、古いマニフェストを信じて消さない
     @Test
     fun readsManifestWithoutUsingTheCache() = runTest {
         val fixture = SyncFixture()
@@ -292,7 +292,7 @@ class StaleFileDeleteTest {
         assertTrue(fixture.deleteRequests().isEmpty())
     }
 
-    // 一覧の結果が分からない（5xx）：何も消さず、つながらない失敗として返す
+    // 一覧の結果が不明（5xx）：何も消さず、つながらない失敗として返す
     @Test
     fun deletesNothingWhenListIsUnknown() = runTest {
         val fixture = SyncFixture()

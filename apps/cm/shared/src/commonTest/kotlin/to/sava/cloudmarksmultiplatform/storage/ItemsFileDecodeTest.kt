@@ -43,7 +43,7 @@ class ItemsFileDecodeTest {
         assertIs<ItemsFileDecodeResult.Readable>(decode(text))
     }
 
-    // 満たさない最小の入力が、それぞれ壊れているになり、行番号が合って、理由が原因の欄を挙げる
+    // 満たさない最小の入力が、それぞれ「壊れている」になり、行番号が合って、理由が原因の欄を挙げる
     @Test
     fun rejectsEachViolatedRuleAsCorrupt() {
         val one = FolderEntry(FOLDER_A, ROOT_ID, "a", FILE_ID, count = 1)
@@ -82,13 +82,13 @@ class ItemsFileDecodeTest {
 
         cases.forEach { assertItemsCorrupt(it.text, it.line, folder = folder, message = it.name, mention = it.mention) }
 
-        // 目録のフォルダの id、count との不一致も壊れている
+        // マニフェストのフォルダの id、count との不一致も壊れている
         assertItemsCorrupt(jsonl(header, item1), null, folder = one.copy(count = 2), message = "count 不一致", mention = "`count`")
-        assertItemsCorrupt(jsonl(header, item1), 1, folder = one.copy(id = FOLDER_B), message = "目録の id と不一致", mention = "`id`")
+        assertItemsCorrupt(jsonl(header, item1), 1, folder = one.copy(id = FOLDER_B), message = "マニフェストの id と不一致", mention = "`id`")
         assertItemsCorrupt(jsonl(header, item1), 1, keyFolderId = FOLDER_B, folder = one, message = "キーの id と不一致", mention = "キー")
     }
 
-    // 目録の version が新しいとき、検証に失敗しても「壊れている」でなく「アプリの更新が要る」として返り、通れば読める
+    // マニフェストの version が新しいとき、検証に失敗しても「壊れている」でなく「アプリの更新が要る」として返り、通れば読める
     @Test
     fun newerManifestVersionTurnsFailureIntoUpdateRequired() {
         val bad = jsonl(header, "{\"unknown\":1}")
