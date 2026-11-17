@@ -3,6 +3,7 @@ package to.sava.cloudmarksmultiplatform.ui
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
@@ -21,8 +22,11 @@ import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import to.sava.cloudmarksmultiplatform.browse.MoveSubject
+import to.sava.cloudmarksmultiplatform.browser.Browser
 
 /**
  * 要素が押されたときの様子。
@@ -102,7 +106,8 @@ internal fun rememberContextMenuState(): ContextMenuState = remember { ContextMe
 
 /**
  * 項目とフォルダの、右クリックのメニュー。メニューを出す要素の中に置く。メニューは要素の下端の、右クリックした位置の横に出す。
- * メニューの外を押すなどして、項目を選ばずに閉じたら、[state] を閉じる。
+ * メニューの外を押すなどして、項目を選ばずに閉じたら、[state] を閉じる。メニューの行は、画面全体と同じ表示の大きさで描く
+ * （[ScaledPopupContent]）。
  */
 @Composable
 internal fun ContextMenu(state: ContextMenuState, content: @Composable ColumnScope.() -> Unit) {
@@ -111,8 +116,9 @@ internal fun ContextMenu(state: ContextMenuState, content: @Composable ColumnSco
         expanded = state.expanded,
         onDismissRequest = state::close,
         offset = DpOffset(x, 0.dp),
-        content = content,
-    )
+    ) {
+        ScaledPopupContent { content() }
+    }
 }
 
 /**
@@ -151,6 +157,86 @@ internal fun FolderMenuItems(
     MenuItem(RENAME_FOLDER_LABEL, enabled, onRename)
     MenuItem(MOVE_LABEL, enabled, onMove)
     MenuItem(DELETE_LABEL, enabled, onDelete)
+}
+
+/**
+ * フォルダ [folderId] の右クリックのメニュー。ツリーの行とリストの子のフォルダの行が、行の中に置く。
+ * ブラウザで開く行（[OpenInBrowserMenuItems]。そのフォルダの直下の項目を開く）と、フォルダのメニューの中身（[FolderMenuItems]）を並べる。
+ *
+ * @param name フォルダの名前
+ * @param isRoot ルートフォルダか
+ * @param itemCount フォルダの直下の項目の数（マニフェストの `count`）
+ */
+@Composable
+internal fun FolderContextMenu(
+    state: ContextMenuState,
+    folderId: String,
+    name: String,
+    isRoot: Boolean,
+    itemCount: Int,
+    actions: OperationActions,
+    browserActions: BrowserActions,
+) {
+    ContextMenu(state) {
+        OpenInBrowserMenuItems(browserActions.browsers, itemCount) { browser ->
+            state.close()
+            browserActions.onOpenFolderItems(folderId, browser)
+        }
+        val open = { dialog: OperationDialog ->
+            state.close()
+            actions.onOpenDialog(dialog)
+        }
+        FolderMenuItems(
+            isRoot = isRoot,
+            enabled = actions.canWrite,
+            onNewFolder = { open(OperationDialog.NewFolder(folderId)) },
+            onRename = { open(OperationDialog.RenameFolder(folderId, name)) },
+            onMove = { open(OperationDialog.Move(MoveSubject.Folder(folderId))) },
+            onDelete = { open(OperationDialog.DeleteFolder(folderId, name)) },
+        )
+    }
+}
+
+/** [itemCount] 個の項目を開くとき、[browser] では拡張機能が要るのに、入っていると分かっていないか。 */
+private fun extensionRequired(browser: Browser, itemCount: Int): Boolean = itemCount > 1 && !browser.opensMultipleItems
+
+/**
+ * メニューに並べるブラウザの順。押せる行を先に、そのなかで既定のブラウザを先頭に、残りを名前の順に並べる。
+ * まとめて開けないため押せない行（[extensionRequired]）は、最後に名前の順に並べる。
+ */
+internal fun browsersInMenuOrder(browsers: List<Browser>, itemCount: Int): List<Browser> =
+    browsers.sortedWith(
+        compareBy<Browser> { extensionRequired(it, itemCount) }
+            .thenBy { !it.isDefault }
+            .thenBy(String.CASE_INSENSITIVE_ORDER) { it.name },
+    )
+
+/**
+ * 項目とフォルダのメニューの、ブラウザで開く行。[browsersInMenuOrder] の順に 1 行ずつ「<ブラウザの名前> で開く」を並べ、
+ * 既定のブラウザの行を太字にする。行があれば、その下に区切りの線を引く。押した行のブラウザを [onOpen] に渡す。メニューを閉じるのは呼ぶ側。
+ *
+ * 開く項目が無ければ、どの行も押せない。2 つ以上なら、まとめて開けないブラウザ（[Browser.opensMultipleItems] が偽）の行を押せなくし、
+ * 押せない理由（[EXTENSION_REQUIRED_NOTICE]）をツールチップに出す。
+ *
+ * @param itemCount 開く項目の数
+ */
+@Composable
+internal fun OpenInBrowserMenuItems(browsers: List<Browser>, itemCount: Int, onOpen: (Browser) -> Unit) {
+    if (browsers.isEmpty()) return
+    browsersInMenuOrder(browsers, itemCount).forEach { browser ->
+        val extensionRequired = extensionRequired(browser, itemCount)
+        val item = @Composable {
+            DropdownMenuItem(
+                text = {
+                    Text(openInBrowserLabel(browser.name), fontWeight = if (browser.isDefault) FontWeight.Bold else null)
+                },
+                onClick = { onOpen(browser) },
+                enabled = itemCount > 0 && !extensionRequired,
+            )
+        }
+        if (extensionRequired) WithTooltip(EXTENSION_REQUIRED_NOTICE, item) else item()
+    }
+    HorizontalDivider()
 }
 
 @Composable

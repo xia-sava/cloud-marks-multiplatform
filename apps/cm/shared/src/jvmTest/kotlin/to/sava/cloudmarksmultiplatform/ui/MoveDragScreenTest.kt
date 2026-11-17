@@ -8,7 +8,6 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isRoot
@@ -17,13 +16,13 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performMouseInput
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
 import to.sava.cloudmarksmultiplatform.app.ControllerFixture
+import to.sava.cloudmarksmultiplatform.settings.DeviceSettings
+import to.sava.cloudmarksmultiplatform.settings.DeviceSettingsFile
 import to.sava.cloudmarksmultiplatform.settings.DisplayScale
-import to.sava.cloudmarksmultiplatform.settings.DisplaySettingsFile
 import to.sava.cloudmarksmultiplatform.storage.FolderEntry
 import to.sava.cloudmarksmultiplatform.storage.Manifest
 import to.sava.cloudmarksmultiplatform.sync.A_ITEMS
@@ -232,10 +231,8 @@ class MoveDragScreenTest {
             DragCase(
                 "選んだ 1 と 2 を 4 の下半分へ",
                 {
-                    itemRow(1).performMouseInput { click() }
-                    onRoot().performKeyInput { keyDown(Key.ShiftLeft) }
-                    itemRow(2).performMouseInput { click() }
-                    onRoot().performKeyInput { keyUp(Key.ShiftLeft) }
+                    clickItemRowWithKey(1, Key.CtrlLeft)
+                    clickItemRowWithKey(2, Key.ShiftLeft)
                     dragWithMouse(itemRow(2).spot(RowSpot.MIDDLE), itemRow(4).spot(RowSpot.BOTTOM_EDGE))
                 },
             ) {
@@ -274,10 +271,8 @@ class MoveDragScreenTest {
     // ドラッグしているあいだは、移しているものの札（3 つの項目なら「3 件の項目」）を出す。落とすと消える
     @Test
     fun dragLabelIsShownWhileDragging() = runCloudMarksScreenTest(temporaryFolder, arrange = threeFoldersAndFiveItems) { fixture ->
-        itemRow(1).performMouseInput { click() }
-        onRoot().performKeyInput { keyDown(Key.ShiftLeft) }
-        itemRow(3).performMouseInput { click() }
-        onRoot().performKeyInput { keyUp(Key.ShiftLeft) }
+        clickItemRowWithKey(1, Key.CtrlLeft)
+        clickItemRowWithKey(3, Key.ShiftLeft)
         val label = draggedItemsLabel(3)
         // 落とせるところのない、AppBar の真ん中で離す
         val outside = Offset(onRoot().fetchSemanticsNode().size.width / 2f, APP_BAR_Y)
@@ -308,7 +303,7 @@ class MoveDragScreenTest {
         temporaryFolder,
         arrange = {
             threeFoldersAndFiveItems(it)
-            DisplaySettingsFile(it.appFiles.displaySettingsFile) {}.write(NARROW_SCALE)
+            DeviceSettingsFile(it.appFiles.deviceSettingsFile) {}.write(DeviceSettings(displayScale = NARROW_SCALE))
         },
     ) { fixture ->
         onNodeWithContentDescription(TREE_PANE_DESCRIPTION).performClick()
@@ -409,7 +404,7 @@ class MoveDragScreenTest {
         temporaryFolder,
         arrange = {
             longRootItems(it)
-            DisplaySettingsFile(it.appFiles.displaySettingsFile) {}.write(NARROW_SCALE)
+            DeviceSettingsFile(it.appFiles.deviceSettingsFile) {}.write(DeviceSettings(displayScale = NARROW_SCALE))
         },
     ) { fixture ->
         onNodeWithContentDescription(TREE_PANE_DESCRIPTION).performClick()

@@ -10,7 +10,10 @@ import to.sava.cloudmarksmultiplatform.sync.TreeReadResult
 
 /** リストで項目を選ぶときの、選び方。 */
 enum class SelectionMode {
-    /** その項目だけを選ぶ。ふつうのクリックと、タッチで選んでいる項目が無いときの押下。 */
+    /**
+     * その項目だけを選ぶ。選んでいない項目の右クリックとドラッグ、タッチで選んでいる項目が無いときの押下、キーボードでの押下。
+     * マウスのふつうのクリックは、選ばずに項目を開く。
+     */
     SINGLE,
 
     /**

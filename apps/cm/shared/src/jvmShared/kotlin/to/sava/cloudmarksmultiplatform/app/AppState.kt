@@ -1,10 +1,14 @@
 package to.sava.cloudmarksmultiplatform.app
 
 import to.sava.cloudmarksmultiplatform.browse.BrowseState
+import to.sava.cloudmarksmultiplatform.browser.Browser
+import to.sava.cloudmarksmultiplatform.settings.DeviceSettings
 import to.sava.cloudmarksmultiplatform.settings.DisplayScale
 import to.sava.cloudmarksmultiplatform.settings.SettingsField
 import to.sava.cloudmarksmultiplatform.settings.SettingsForm
 import to.sava.cloudmarksmultiplatform.settings.SettingsReadResult
+import to.sava.cloudmarksmultiplatform.settings.TabLoading
+import to.sava.cloudmarksmultiplatform.storage.StorageProblem
 import to.sava.cloudmarksmultiplatform.sync.SyncFailure
 
 /** 出す画面。 */
@@ -30,8 +34,8 @@ sealed interface SettingsStatus {
     /** 設定を書き、続けてマニフェストを読んでいる。 */
     data object Saving : SettingsStatus
 
-    /** 認証情報を暗号化する仕組みが使えないので、保存しなかった。 */
-    data class ProtectionUnavailable(val detail: String) : SettingsStatus
+    /** 認証情報を暗号化する仕組みが使えないので、保存しなかった。使えない理由はログにだけ書く。 */
+    data object ProtectionUnavailable : SettingsStatus
 
     /** 設定のファイルを書けなかった。 */
     data class WriteFailed(val detail: String) : SettingsStatus
@@ -66,11 +70,33 @@ data class SettingsScreenState(
     val canReturn: Boolean = false,
 )
 
+/** 項目をブラウザで開こうとして、利用者に伝えること。 */
+sealed interface BrowserNotice {
+    /** ブラウザの一覧に既定のブラウザが無く、Windows に既定のブラウザで開かせようとして、開けなかった。 */
+    data object DefaultBrowserLaunchFailed : BrowserNotice
+
+    /** ブラウザ [browserName] を起動できなかった。[detail] は詳細の行に出す文。無ければ null。 */
+    data class LaunchFailed(val browserName: String, val detail: String?) : BrowserNotice
+
+    /** ブラウザ [browserName] へまとめて開くように渡したコマンドが、拡張機能に届かなかったかもしれない。 */
+    data class CommandUndelivered(val browserName: String) : BrowserNotice
+
+    /** 開くフォルダの項目を読めなかった。 */
+    data class FolderReadFailed(val failure: SyncFailure) : BrowserNotice
+
+    /** 開くフォルダの項目ファイルが壊れている。 */
+    data class FolderBroken(val problem: StorageProblem) : BrowserNotice
+}
+
 /**
  * 画面全体の状態。
  *
  * @property write データを変える操作の、書き込みの進み具合と結果
  * @property displayScale 画面全体の表示の大きさ。端末ごとの設定で、どの画面でも同じ
+ * @property tabLoading 2 つ以上の項目をまとめてブラウザで開くときの、タブの読み込み方。端末ごとの設定
+ * @property opensMultipleItems 2 つ以上の項目をまとめてブラウザで開けるプラットフォームか。偽なら、[tabLoading] の欄を出さない
+ * @property browsers PC に入っているブラウザ。項目とフォルダのメニューに、ブラウザで開く行として並べる
+ * @property browserNotice 項目をブラウザで開こうとして、利用者に伝えること。無いか、閉じたら null
  */
 data class AppState(
     val screen: Screen = Screen.STARTING,
@@ -78,7 +104,14 @@ data class AppState(
     val settings: SettingsScreenState = SettingsScreenState(),
     val write: WriteState = WriteState(),
     val displayScale: DisplayScale = DisplayScale.DEFAULT,
+    val tabLoading: TabLoading = TabLoading(),
+    val opensMultipleItems: Boolean = false,
+    val browsers: List<Browser> = emptyList(),
+    val browserNotice: BrowserNotice? = null,
 ) {
+    /** 端末ごとの設定。 */
+    val deviceSettings: DeviceSettings get() = DeviceSettings(displayScale, tabLoading)
+
     /**
      * 戻る操作でできることがあるか。設定の画面では、メインの画面へ戻れて、保存の最中でないとき。
      * メインの画面では、[BrowseState.canGoBack]。

@@ -9,6 +9,7 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import org.junit.rules.TemporaryFolder
 import to.sava.cloudmarksmultiplatform.AppFiles
+import to.sava.cloudmarksmultiplatform.browser.FakeBrowserOpener
 import to.sava.cloudmarksmultiplatform.remote.FakeObjectStore
 import to.sava.cloudmarksmultiplatform.remote.FakeObjectStore.GetFault
 import to.sava.cloudmarksmultiplatform.settings.ConnectionSettings
@@ -52,6 +53,7 @@ internal class TestClock(var current: Instant) : Clock {
  * @param clock 古いファイルの削除の経過を測る時計
  * @param directory ファイルを置くディレクトリ。前のフィクスチャと同じものを渡すと、そのファイルを読むコントローラを作り直せる。
  * 渡さなければ、[temporaryFolder] の中に新しく作る
+ * @param browserOpener コントローラが項目をブラウザで開く仕組み。ブラウザを起動せず、頼まれたことを記録する
  */
 internal class ControllerFixture(
     scope: CoroutineScope,
@@ -61,6 +63,7 @@ internal class ControllerFixture(
     deletesStaleFiles: Boolean = false,
     clock: Clock = Clock.System,
     val directory: Path = temporaryFolder.newFolder().toPath(),
+    val browserOpener: FakeBrowserOpener = FakeBrowserOpener(),
 ) {
     /**
      * コントローラの処理を [scope] の `backgroundScope` で走らせ、`runCurrent` で進める（`advanceUntilIdle` は
@@ -73,6 +76,7 @@ internal class ControllerFixture(
         deletesStaleFiles: Boolean = false,
         clock: Clock = Clock.System,
         directory: Path = temporaryFolder.newFolder().toPath(),
+        browserOpener: FakeBrowserOpener = FakeBrowserOpener(),
     ) : this(
         scope = scope.backgroundScope,
         ioDispatcher = StandardTestDispatcher(scope.testScheduler),
@@ -81,6 +85,7 @@ internal class ControllerFixture(
         deletesStaleFiles = deletesStaleFiles,
         clock = clock,
         directory = directory,
+        browserOpener = browserOpener,
     )
 
     val appFiles = AppFiles(
@@ -88,7 +93,8 @@ internal class ControllerFixture(
         cacheDirectory = directory.resolve("cache"),
         logDirectory = directory.resolve("logs"),
         stateDirectory = directory.resolve("state"),
-        displaySettingsFile = directory.resolve("display.json"),
+        deviceSettingsFile = directory.resolve("device.json"),
+        commandDirectory = directory.resolve("commands"),
     )
     val store = FakeObjectStore()
     private val storesByBucket = mutableMapOf<String, FakeObjectStore>()
@@ -127,6 +133,7 @@ internal class ControllerFixture(
         scope = scope,
         storageChanges = storageChanges,
         deletesStaleFiles = deletesStaleFiles,
+        browserOpener = browserOpener,
         ioDispatcher = ioDispatcher,
         clock = clock,
     )

@@ -8,9 +8,11 @@ export interface ExtensionManifest {
   name: string
   version: string
   permissions: string[]
+  icons: Record<string, string>
   action: {
     default_popup: string
     default_title: string
+    default_icon: Record<string, string>
   }
   key?: string
   background: {
@@ -34,6 +36,22 @@ export const GECKO_ID = "cloud-marks-multiplatform@sava.to"
 /** バンドル後のポップアップのファイル名（dist/<target>/ 直下）。 */
 export const POPUP_FILE = "popup.html"
 
+/** バンドル後の仮のページのファイル名（dist/<target>/ 直下）。 */
+export const PLACEHOLDER_FILE = "placeholder.html"
+
+/** アイコンの大きさ（px）。 */
+export const ICON_SIZES = [16, 32, 48, 128] as const
+
+/** アイコンのファイルの、拡張の直下からのパス。ビルドが icons/ を dist/<target>/icons/ に写す。 */
+export function iconPath(size: number): string {
+  return `icons/icon-${size}.png`
+}
+
+/** manifest の icons と action.default_icon に書く、大きさごとのアイコン。 */
+function iconSet(): Record<string, string> {
+  return Object.fromEntries(ICON_SIZES.map((size) => [String(size), iconPath(size)]))
+}
+
 /** Chrome の拡張の ID。`CHROME_KEY` から決まり、Native Messaging のホストの登録（allowed_origins）が指す。 */
 export const CHROME_EXTENSION_ID = "laeogpkfjeccgfkedalbkcbenakkefpl"
 
@@ -55,7 +73,8 @@ export function buildManifest(target: BrowserTarget, version: string): Extension
     name: "Cloud Marks",
     version,
     permissions: ["tabs", "nativeMessaging", "storage"],
-    action: { default_popup: POPUP_FILE, default_title: MESSAGES.defaultActionTitle },
+    icons: iconSet(),
+    action: { default_popup: POPUP_FILE, default_title: MESSAGES.defaultActionTitle, default_icon: iconSet() },
   } as const
 
   if (target === "chrome") {

@@ -46,7 +46,6 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
@@ -61,7 +60,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.max
@@ -74,7 +72,6 @@ import to.sava.cloudmarksmultiplatform.app.Screen
 import to.sava.cloudmarksmultiplatform.app.UndoableDelete
 import to.sava.cloudmarksmultiplatform.app.WriteState
 import to.sava.cloudmarksmultiplatform.browse.BrowseState
-import to.sava.cloudmarksmultiplatform.settings.DisplayScale
 
 /** 広い画面での、ツリーの枠の幅の初め。 */
 private val DEFAULT_TREE_PANE_WIDTH = 280.dp
@@ -109,8 +106,9 @@ private data class MainPaneState(
 
 /**
  * Cloud Marks の画面。[controller] の状態を描き、利用者の操作を [controller] へ渡す。
- * 画面全体を、表示の大きさ（[AppState.displayScale]）で拡大縮小して描く。メインの画面と設定の画面の上で、Ctrl を押しながらホイールを
- * 縦に回すと、表示の大きさを 1 段ずつ替える（[displayScaleWheel]）。
+ * 画面全体を、表示の大きさ（[AppState.displayScale]）で拡大縮小して描く（[ScaledDensity]。ダイアログ・メニュー・ツールチップの中身は
+ * [ScaledPopupContent]）。メインの画面と設定の画面の上で、Ctrl を押しながらホイールを縦に回すと、表示の大きさを 1 段ずつ替える
+ * （[displayScaleWheel]）。
  *
  * [controller] は呼ぶ側が `createCloudMarksController` で組み立て、[CloudMarksController.start] で動かし始め、
  * 使い終えたら [CloudMarksController.close] で閉じる。
@@ -131,14 +129,6 @@ fun CloudMarksApp(controller: CloudMarksController) {
             }
         }
     }
-}
-
-/** [content] を、いまの画面の密度に [scale] の倍率を掛けた密度で描く。文字の大きさの倍率はそのまま。 */
-@Composable
-private fun ScaledDensity(scale: DisplayScale, content: @Composable () -> Unit) {
-    val density = LocalDensity.current
-    val scaled = remember(density, scale) { Density(density.density * scale.factor, density.fontScale) }
-    CompositionLocalProvider(LocalDensity provides scaled, content = content)
 }
 
 /**
@@ -165,6 +155,16 @@ private fun CloudMarksScreen(state: AppState, controller: CloudMarksController, 
             onMove = controller::moveTo,
         )
     }
+    // 同じく、PC に入っているブラウザの並びが替わったときだけ作り直す
+    val browserActions = remember(state.browsers, controller) {
+        BrowserActions(
+            browsers = state.browsers,
+            onOpenItem = controller::openItem,
+            onOpenSelectedItems = controller::openSelectedItems,
+            onOpenFolderItems = controller::openFolderItems,
+            onMenuOpen = controller::refreshBrowsers,
+        )
+    }
     UndoDeleteNotice(
         undoable = state.write.undoableDelete,
         visible = state.screen == Screen.MAIN,
@@ -174,7 +174,7 @@ private fun CloudMarksScreen(state: AppState, controller: CloudMarksController, 
     )
     Box(Modifier.fillMaxSize().moveDragTracker(dragState, onDrop = operations.onMove)) {
         if (state.screen == Screen.MAIN && !wide) {
-            NarrowMainScreen(state, controller, panes, operations)
+            NarrowMainScreen(state, controller, panes, operations, browserActions)
         } else {
             Column(Modifier.fillMaxSize()) {
                 CloudMarksTopBar(state, controller, operations)
@@ -183,14 +183,16 @@ private fun CloudMarksScreen(state: AppState, controller: CloudMarksController, 
                     Screen.SETTINGS -> SettingsScreen(
                         settings = state.settings,
                         displayScale = state.displayScale,
+                        tabLoading = state.tabLoading.takeIf { state.opensMultipleItems },
                         onEdit = controller::editSettings,
                         onSave = controller::saveSettings,
                         onCreateManifest = controller::createManifest,
                         onDisplayScaleChange = controller::setDisplayScale,
+                        onTabLoadingChange = controller::setTabLoading,
                     )
                     Screen.MAIN -> {
                         MainBanners(state, controller)
-                        WideMainBody(state.browse, controller, panes, operations)
+                        WideMainBody(state.browse, controller, panes, operations, browserActions)
                     }
                 }
             }
@@ -246,6 +248,7 @@ private fun NarrowMainScreen(
     controller: CloudMarksController,
     panes: MainPaneState,
     operations: OperationActions,
+    browserActions: BrowserActions,
 ) {
     val browse = state.browse
     val drawerState = rememberDrawerState(if (browse.drawerOpen) DrawerValue.Open else DrawerValue.Closed)
@@ -269,6 +272,7 @@ private fun NarrowMainScreen(
                     browse = browse,
                     listState = panes.treeListState,
                     actions = operations,
+                    browserActions = browserActions,
                     onOpen = controller::openFolder,
                     onToggle = controller::toggleExpanded,
                     modifier = Modifier.fillMaxSize(),
@@ -283,8 +287,10 @@ private fun NarrowMainScreen(
                 browse = browse,
                 listState = panes.itemListState,
                 actions = operations,
+                browserActions = browserActions,
                 onOpenFolder = controller::openFolder,
                 onSelectItem = controller::selectItem,
+                onClearSelection = controller::clearSelection,
             )
         }
     }
@@ -314,6 +320,7 @@ private fun WideMainBody(
     controller: CloudMarksController,
     panes: MainPaneState,
     operations: OperationActions,
+    browserActions: BrowserActions,
 ) {
     var paneWidth by panes.treePaneWidth
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -324,6 +331,7 @@ private fun WideMainBody(
                     browse = browse,
                     listState = panes.treeListState,
                     actions = operations,
+                    browserActions = browserActions,
                     onOpen = controller::openFolder,
                     onToggle = controller::toggleExpanded,
                     modifier = Modifier.width(paneWidth.coerceIn(MIN_TREE_PANE_WIDTH, maxPaneWidth)).fillMaxHeight(),
@@ -337,8 +345,10 @@ private fun WideMainBody(
                 browse = browse,
                 listState = panes.itemListState,
                 actions = operations,
+                browserActions = browserActions,
                 onOpenFolder = controller::openFolder,
                 onSelectItem = controller::selectItem,
+                onClearSelection = controller::clearSelection,
                 modifier = Modifier.weight(1f).fillMaxHeight(),
             )
         }
@@ -364,11 +374,15 @@ private fun PaneDivider(onDrag: (Dp) -> Unit) {
     }
 }
 
-/** メインの画面の、AppBar の下に並べる帯。マニフェストを読んだ様子（[BrowseBanners]）と、操作を書いた様子（[WriteBanner]）。 */
+/**
+ * メインの画面の、AppBar の下に並べる帯。マニフェストを読んだ様子（[BrowseBanners]）と、操作を書いた様子（[WriteBanner]）と、
+ * 項目をブラウザで開こうとして伝えること（[AppState.browserNotice]。[CLOSE_LABEL] を押すと閉じる）。
+ */
 @Composable
 private fun MainBanners(state: AppState, controller: CloudMarksController) {
     BrowseBanners(state.browse, onDismissFailure = controller::dismissReadFailure)
     WriteBanner(state.write, onDismissOutcome = controller::dismissWriteOutcome)
+    state.browserNotice?.let { Banner(describeBrowserNotice(it), onDismiss = controller::dismissBrowserNotice) }
 }
 
 /**

@@ -1,6 +1,6 @@
 # Cloud Marks ブラウザ拡張
 
-Chrome と Firefox の両方で動く WebExtension（Manifest V3）。ツールバーのボタンを押すとポップアップが開き、現在のウィンドウで選択しているタブの URL とタイトルを、Native Messaging でデスクトップ側のホストへ渡す。S3 や保存形式のロジックは拡張に持たない。
+Chrome と Firefox の両方で動く WebExtension（Manifest V3）。ツールバーのボタンを押すとポップアップが開き、現在のウィンドウで選択しているタブの URL とタイトルを、Native Messaging でデスクトップ側のホストへ渡す。また、デスクトップのアプリからのコマンドをホストを通じて受け取り、そのとおりにタブを開く（`docs/native-messaging.md` の「アプリからのコマンド（ブラウザで開く）」）。S3 や保存形式のロジックは拡張に持たない。
 
 ## ビルドとテスト
 

@@ -9,7 +9,7 @@ import java.nio.ByteOrder
 private const val LENGTH_BYTES = Int.SIZE_BYTES
 
 /** 1 MiB のバイト数。 */
-private const val MEBIBYTE = 1024 * 1024
+internal const val MEBIBYTE = 1024 * 1024
 
 /**
  * 受け付けるメッセージの長さ（バイト数）の上限。Chrome が拡張からホストへ送るメッセージの上限（64 MiB）と同じ。

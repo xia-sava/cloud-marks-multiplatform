@@ -62,7 +62,7 @@ private const val DISABLED_CONTENT_ALPHA = 0.38f
  * ルートフォルダは最上段に、家のアイコンと「トップ」で出す。開いているフォルダの行を強調し、開いているフォルダが替わったら、
  * その行が見える位置までスクロールする。
  *
- * 行を右クリックするとフォルダのメニュー（[FolderMenuItems]）を出す。[dragsToMove] のプラットフォームでは、ルートフォルダ以外の行を
+ * 行を右クリックするとフォルダのメニュー（[FolderContextMenu]）を出す。[dragsToMove] のプラットフォームでは、ルートフォルダ以外の行を
  * ドラッグして、別の行へ落とせる（[treeDrop]）。行の上の端に落とすとその行の前へ、下の端に落とすとその行の後ろへ（開いていて子のある
  * 行なら、その先頭の子の前へ）並べ替え、真ん中に落とすと、その行のフォルダの子のフォルダの末尾へ移す。リストの項目とフォルダを
  * ドラッグしてきたときも同じ（項目は行のどこでも中へ）。最後の行より下の空いたところに落とすと、フォルダはルートフォルダの子の末尾へ、
@@ -72,6 +72,7 @@ private const val DISABLED_CONTENT_ALPHA = 0.38f
  *
  * @param listState スクロール位置
  * @param actions データを変える操作の入口
+ * @param browserActions 項目をブラウザで開く操作の入口
  * @param onOpen 行を押したときに、そのフォルダを開く
  * @param onToggle 開閉ボタンを押したときに、そのノードを開く、または閉じる
  */
@@ -80,6 +81,7 @@ internal fun FolderTreePane(
     browse: BrowseState,
     listState: LazyListState,
     actions: OperationActions,
+    browserActions: BrowserActions,
     onOpen: (String) -> Unit,
     onToggle: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -102,7 +104,9 @@ internal fun FolderTreePane(
         OperableFolderTreeRow(
             row = row,
             current = row.folderId == browse.currentFolderId,
+            itemCount = tree.folders[row.folderId]?.count ?: 0,
             actions = actions,
+            browserActions = browserActions,
             onOpen = { onOpen(row.folderId) },
             onToggle = { onToggle(row.folderId) },
         )
@@ -154,12 +158,15 @@ private fun LazyListState.isFullyVisible(key: String?): Boolean {
  * 強調し、この行の端が挿入する位置なら、その端に、挿入先の深さの行と同じだけ字下げした線を引く。
  *
  * @param current 開いているフォルダの行か
+ * @param itemCount 行のフォルダの直下の項目の数（マニフェストの `count`）
  */
 @Composable
 private fun OperableFolderTreeRow(
     row: FolderTreeRow,
     current: Boolean,
+    itemCount: Int,
     actions: OperationActions,
+    browserActions: BrowserActions,
     onOpen: () -> Unit,
     onToggle: () -> Unit,
 ) {
@@ -183,23 +190,22 @@ private fun OperableFolderTreeRow(
             onOpen = onOpen,
             onToggle = onToggle,
             modifier = Modifier
-                .onPointerPress { press -> if (press.secondary) menu.open(press.position) }
+                .onPointerPress { press ->
+                    if (!press.secondary) return@onPointerPress
+                    browserActions.onMenuOpen()
+                    menu.open(press.position)
+                }
                 .then(dragSource),
         )
-        ContextMenu(menu) {
-            val open = { dialog: OperationDialog ->
-                menu.close()
-                actions.onOpenDialog(dialog)
-            }
-            FolderMenuItems(
-                isRoot = row.isRoot,
-                enabled = actions.canWrite,
-                onNewFolder = { open(OperationDialog.NewFolder(row.folderId)) },
-                onRename = { open(OperationDialog.RenameFolder(row.folderId, row.name)) },
-                onMove = { open(OperationDialog.Move(MoveSubject.Folder(row.folderId))) },
-                onDelete = { open(OperationDialog.DeleteFolder(row.folderId, row.name)) },
-            )
-        }
+        FolderContextMenu(
+            state = menu,
+            folderId = row.folderId,
+            name = row.name,
+            isRoot = row.isRoot,
+            itemCount = itemCount,
+            actions = actions,
+            browserActions = browserActions,
+        )
     }
 }
 

@@ -35,6 +35,8 @@ AppPublisher=sava.to
 VersionInfoVersion={#FileVersion}
 UninstallDisplayName={#AppDisplayName}
 UninstallDisplayIcon={app}\{#AppExe}
+; ISCCは相対パスを、このスクリプトのあるディレクトリから解決する。
+SetupIconFile=..\icons\cloudmarks.ico
 ; 設定も認証情報も端末ごとに持つ単一ユーザー向けのアプリなので、インストールと更新に管理者権限を要求しない。
 ; `{autopf}`はこの指定のもとで`%LOCALAPPDATA%\Programs`になる。
 PrivilegesRequired=lowest

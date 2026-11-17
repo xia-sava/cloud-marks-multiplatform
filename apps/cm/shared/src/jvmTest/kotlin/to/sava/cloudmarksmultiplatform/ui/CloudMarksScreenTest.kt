@@ -2,7 +2,6 @@ package to.sava.cloudmarksmultiplatform.ui
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.MouseInjectionScope
 import androidx.compose.ui.test.assertIsDisplayed
@@ -18,31 +17,33 @@ import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.rightClick
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
-import to.sava.cloudmarksmultiplatform.app.ControllerFixture
 import to.sava.cloudmarksmultiplatform.app.WriteOutcome
 import to.sava.cloudmarksmultiplatform.browse.SelectionMode
+import to.sava.cloudmarksmultiplatform.browser.CHROME
 import to.sava.cloudmarksmultiplatform.remote.FakeObjectStore.GetFault
 import to.sava.cloudmarksmultiplatform.remote.FakeObjectStore.PutFault
 import to.sava.cloudmarksmultiplatform.sync.FOLDER_B
 import to.sava.cloudmarksmultiplatform.sync.ROOT_ID
 import to.sava.cloudmarksmultiplatform.sync.ROOT_ITEMS
 import to.sava.cloudmarksmultiplatform.sync.SyncFailure
-import to.sava.cloudmarksmultiplatform.sync.fileId
-import to.sava.cloudmarksmultiplatform.sync.item
-import to.sava.cloudmarksmultiplatform.sync.replaceItemsAsOtherWriter
+import to.sava.cloudmarksmultiplatform.sync.initialManifest
+import to.sava.cloudmarksmultiplatform.sync.seed
 import to.sava.cloudmarksmultiplatform.sync.storedManifest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 
-/** 範囲で選ぶ場合を確かめるための、ルートフォルダの 5 つの項目。 */
-private val FIVE_ITEMS = (1..5).map { item(it) }
+/** 知っている版より新しい、読むだけにするマニフェストの `version`。 */
+private const val NEWER_VERSION = 2
 
-/** ルートフォルダの項目を [FIVE_ITEMS] にする、起動の前の用意。 */
-private val fiveRootItems: (ControllerFixture) -> Unit = { it.store.replaceItemsAsOtherWriter(ROOT_ID, fileId(30), FIVE_ITEMS) }
+/** 項目の行を押したあと、行の外（下の行のさらに下）へポインターを動かす距離（画素）。項目の行の高さの 2 倍より長い。 */
+private const val OUTSIDE_ROW_DISTANCE = 120f
 
 /**
  * クリックのあいだに、マウスをわずかに動かす量（画素。テストの画面の密度は 1 なので dp と同じ）。
@@ -57,14 +58,6 @@ private fun MouseInjectionScope.clickWithJitter() {
     press()
     moveBy(JITTER)
     release()
-}
-
-/** リストの項目 [n] を、[key] を押しながら、マウスでクリックする。 */
-@OptIn(ExperimentalTestApi::class)
-private fun ComposeUiTest.clickItemWithKey(n: Int, key: Key) {
-    onRoot().performKeyInput { keyDown(key) }
-    onNodeWithText(item(n).title).performMouseInput { click() }
-    onRoot().performKeyInput { keyUp(key) }
 }
 
 @OptIn(ExperimentalTestApi::class)
@@ -124,31 +117,17 @@ class CloudMarksScreenTest {
         onNodeWithText(EMPTY_NAME_NOTICE).assertDoesNotExist()
     }
 
-    // リストの項目をマウスで押すとその項目だけを選び、Ctrl を押しながらで足し、Shift を押しながらで、起点（直前に足した項目）からの範囲を選ぶ
-    @Test
-    fun mouseClicksSelectSingleToggleAndRange() = runCloudMarksScreenTest(temporaryFolder, arrange = fiveRootItems) { fixture ->
-        fun selected() = fixture.state.browse.selectedItemIds
-
-        onNodeWithText(item(1).title).performMouseInput { click() }
-        assertEquals(setOf(item(1).id), selected())
-
-        clickItemWithKey(3, Key.CtrlLeft)
-        assertEquals(setOf(item(1).id, item(3).id), selected())
-
-        clickItemWithKey(5, Key.ShiftLeft)
-        assertEquals(setOf(item(3).id, item(4).id, item(5).id), selected())
-
-        onNodeWithText(item(2).title).performMouseInput { click() }
-        assertEquals(setOf(item(2).id), selected())
-    }
-
     // マウスを押してから離すまでにわずかに動いても（ドラッグを始める閾値まで）、クリックとして扱う。
-    // Ctrl を押しながらなら項目を足し（ドラッグになると、掴んだ項目だけを選び直す）、ツリーのフォルダは開く
+    // 項目は既定のブラウザで開き、Ctrl を押しながらなら選ぶ項目を足し（ドラッグになると、掴んだ項目だけを選び直す）、ツリーのフォルダは開く
     @Test
     fun slightMouseMoveStillClicks() = runCloudMarksScreenTest(temporaryFolder) { fixture ->
-        onNodeWithText(ROOT_ITEMS[0].title).performMouseInput { click() }
+        val openedFirst = listOf(CHROME.name to listOf(ROOT_ITEMS[0].url))
+        onNodeWithText(ROOT_ITEMS[0].title).performMouseInput { clickWithJitter() }
+        waitForIdle()
+        assertEquals(openedFirst, fixture.browserOpener.openedUrls)
 
         onRoot().performKeyInput { keyDown(Key.CtrlLeft) }
+        onNodeWithText(ROOT_ITEMS[0].title).performMouseInput { clickWithJitter() }
         onNodeWithText(ROOT_ITEMS[1].title).performMouseInput { clickWithJitter() }
         onRoot().performKeyInput { keyUp(Key.CtrlLeft) }
 
@@ -158,6 +137,52 @@ class CloudMarksScreenTest {
         waitForIdle()
 
         assertEquals(FOLDER_B, fixture.state.browse.currentFolderId)
+        assertEquals(openedFirst, fixture.browserOpener.openedUrls)
+    }
+
+    // 押してから閾値を越えて動かして離すと、ドラッグを始めない読むだけのツリーでも、項目を開かない。動かさずに離せば開く
+    @Test
+    fun movingBeyondThresholdDoesNotOpen() = runCloudMarksScreenTest(
+        temporaryFolder,
+        arrange = { it.store.seed(initialManifest(version = NEWER_VERSION)) },
+    ) { fixture ->
+        assertTrue(fixture.state.browse.readOnly)
+
+        onNodeWithText(ROOT_ITEMS[0].title).performMouseInput {
+            moveTo(center)
+            press()
+            moveBy(BEYOND_THRESHOLD)
+            release()
+        }
+        waitForIdle()
+        assertEquals(emptyList(), fixture.browserOpener.openedUrls)
+
+        onNodeWithText(ROOT_ITEMS[0].title).performMouseInput { click() }
+        waitForIdle()
+        assertEquals(listOf(CHROME.name to listOf(ROOT_ITEMS[0].url)), fixture.browserOpener.openedUrls)
+        assertEquals(emptySet(), fixture.state.browse.selectedItemIds)
+    }
+
+    // マウスで押して、行の外へ動かして離した（クリックにならなかった）あとでも、キーボードで項目を押すと、その項目だけを選ぶ
+    @Test
+    fun keyboardPressAfterCancelledMousePressSelects() = runCloudMarksScreenTest(
+        temporaryFolder,
+        arrange = { it.store.seed(initialManifest(version = NEWER_VERSION)) },
+    ) { fixture ->
+        onNodeWithText(ROOT_ITEMS[0].title).performMouseInput {
+            moveTo(center)
+            press()
+            moveBy(Offset(0f, OUTSIDE_ROW_DISTANCE))
+            release()
+        }
+        waitForIdle()
+
+        onNodeWithText(ROOT_ITEMS[0].title).requestFocus()
+        onNodeWithText(ROOT_ITEMS[0].title).performKeyInput { pressKey(Key.Enter) }
+        waitForIdle()
+
+        assertEquals(setOf(ROOT_ITEMS[0].id), fixture.state.browse.selectedItemIds)
+        assertEquals(emptyList(), fixture.browserOpener.openedUrls)
     }
 
     // マウスで項目を押し、閾値を越えて動かしてからツリーのフォルダの上で離すと、そのフォルダの項目の末尾へ移す

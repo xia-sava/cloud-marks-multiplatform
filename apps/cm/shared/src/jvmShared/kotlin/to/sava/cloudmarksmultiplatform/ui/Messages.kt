@@ -1,5 +1,6 @@
 package to.sava.cloudmarksmultiplatform.ui
 
+import to.sava.cloudmarksmultiplatform.app.BrowserNotice
 import to.sava.cloudmarksmultiplatform.app.SettingsStatus
 import to.sava.cloudmarksmultiplatform.app.WriteOutcome
 import to.sava.cloudmarksmultiplatform.settings.DisplayScale
@@ -94,6 +95,56 @@ internal const val DISPLAY_SCALE_LABEL = "表示の大きさ"
 /** 表示の大きさの段 [scale] の表記。`80%` のように、百分率の数字に `%` を付ける。 */
 internal fun displayScaleLabel(scale: DisplayScale): String = "${scale.percent}%"
 
+/** 設定の画面の、まとめてブラウザで開くときの欄の見出し。 */
+internal const val OPEN_IN_BROWSER_SECTION_TITLE = "ブラウザで開くとき"
+
+/** 設定の画面の、同時に読み込むタブの数の欄の題。 */
+internal const val LOAD_AT_ONCE_LABEL = "同時に読み込むタブの数"
+
+/** 設定の画面の、先に読み込むタブの数の欄の題。 */
+internal const val LOAD_AHEAD_LABEL = "先に読み込むタブの数"
+
+/** 設定の画面の、先に読み込むタブの数の欄の下に、入力が正しいときに添える文。 */
+internal const val LOAD_AHEAD_HINT = "これより後ろのタブは、表示したときに読み込みます。0 にすると、すべてのタブを順に読み込みます。"
+
+/** 設定の画面の、同時に読み込むタブの数の欄に 1 以上の整数でないものを入れたときに、欄の下に添える文。 */
+internal const val TAB_COUNT_INVALID_NOTICE = "1 以上の数を入力してください。"
+
+/** 設定の画面の、先に読み込むタブの数の欄に 0 以上の整数でないものを入れたときに、[LOAD_AHEAD_HINT] の代わりに欄の下に添える文。 */
+internal const val LOAD_AHEAD_INVALID_NOTICE = "0 以上の数を入力してください。"
+
+/** 拡張機能が入っていると分かっていないブラウザの、まとめて開く行の、押せない理由のツールチップ。 */
+internal const val EXTENSION_REQUIRED_NOTICE =
+    "このブラウザに Cloud Marks の拡張機能が入っていることを確認できていないため、まとめて開けません。" +
+        "拡張機能を入れてから、ブラウザを起動し直してください。"
+
+/** 既定のブラウザを起動できなかったことを伝える文。 */
+internal const val DEFAULT_BROWSER_LAUNCH_FAILED = "ブラウザを起動できませんでした。"
+
+/** フォルダのメニューからブラウザで開こうとして、そのフォルダの項目ファイルが壊れていたことを伝える文。詳細の行に壊れ方を出す。 */
+internal const val FOLDER_BROKEN_FOR_BROWSER_NOTICE = "フォルダのデータが壊れているため、ブラウザで開けません。"
+
+/** 項目とフォルダのメニューの、ブラウザ [browserName] で開く行。 */
+internal fun openInBrowserLabel(browserName: String): String = "$browserName で開く"
+
+/** 選んだブラウザ [browserName] を起動できなかったことを伝える文。 */
+internal fun browserLaunchFailed(browserName: String): String = "$browserName を起動できませんでした。"
+
+/** ブラウザ [browserName] へまとめて開くように渡したコマンドが、拡張機能に届かなかったかもしれないことを伝える文。 */
+internal fun commandUndeliveredNotice(browserName: String): String =
+    "$browserName でタブを開けなかった可能性があります。" +
+        "$browserName に Cloud Marks の拡張機能が入っていて、有効になっているか確認してください。"
+
+/** 項目をブラウザで開こうとして伝えることを、利用者に見せる文にする。フォルダの項目を読めなかったときは、読めなかった理由の文にする。 */
+internal fun describeBrowserNotice(notice: BrowserNotice): UiMessage =
+    when (notice) {
+        BrowserNotice.DefaultBrowserLaunchFailed -> UiMessage(DEFAULT_BROWSER_LAUNCH_FAILED)
+        is BrowserNotice.LaunchFailed -> UiMessage(browserLaunchFailed(notice.browserName), notice.detail)
+        is BrowserNotice.CommandUndelivered -> UiMessage(commandUndeliveredNotice(notice.browserName))
+        is BrowserNotice.FolderReadFailed -> describeSyncFailure(notice.failure)
+        is BrowserNotice.FolderBroken -> UiMessage(FOLDER_BROKEN_FOR_BROWSER_NOTICE, notice.problem.toString())
+    }
+
 /** 項目を [count] 件消したあとの、お知らせの本文。 */
 internal fun deletedItemsNotice(count: Int): String = "$count 件の項目を削除しました。"
 
@@ -149,7 +200,10 @@ internal fun describeSyncFailure(failure: SyncFailure): UiMessage =
 internal fun describeBrokenFolder(problem: StorageProblem): UiMessage =
     UiMessage("このフォルダのデータが壊れているため、表示できません。", problem.toString())
 
-/** 起動したときに設定を読めなかった理由を、利用者に見せる文にする。読めたときは null。 */
+/**
+ * 起動したときに設定を読めなかった理由を、利用者に見せる文にする。読めたときは null。
+ * 認証情報を復号できなかったときは、詳細を付けない（暗号化の仕組みが返した文は、ログにだけ書く）。
+ */
 internal fun describeSettingsReadProblem(problem: SettingsReadResult): UiMessage? =
     when (problem) {
         SettingsReadResult.NotFound -> UiMessage("データを保存する S3 のバケットと、アクセスキーを入力してください。")
@@ -159,20 +213,21 @@ internal fun describeSettingsReadProblem(problem: SettingsReadResult): UiMessage
             UiMessage(
                 "保存されているアクセスキーを読み込めませんでした。" +
                     "別のユーザーや別の PC で保存した設定は使えないため、もう一度入力して保存してください。",
-                problem.detail,
             )
         is SettingsReadResult.Failed -> UiMessage("設定ファイルを読み込めませんでした。", problem.detail)
         is SettingsReadResult.Found -> null
     }
 
-/** 設定の画面の、保存の進み具合と結果を、利用者に見せる文にする。入力しているときは null。 */
+/**
+ * 設定の画面の、保存の進み具合と結果を、利用者に見せる文にする。入力しているときは null。
+ * 暗号化の仕組みが使えなかったときは、詳細を付けない（暗号化の仕組みが返した文は、ログにだけ書く）。
+ */
 internal fun describeSettingsStatus(status: SettingsStatus): UiMessage? =
     when (status) {
         SettingsStatus.Editing -> null
         is SettingsStatus.Incomplete -> UiMessage("未入力の項目があります。")
         SettingsStatus.Saving -> UiMessage("保存して、S3 に接続しています…")
-        is SettingsStatus.ProtectionUnavailable ->
-            UiMessage("この環境ではアクセスキーを暗号化できないため、保存しませんでした。", status.detail)
+        SettingsStatus.ProtectionUnavailable -> UiMessage("この環境ではアクセスキーを暗号化できないため、保存しませんでした。")
         is SettingsStatus.WriteFailed -> UiMessage("設定を保存できませんでした。", status.detail)
         SettingsStatus.ManifestNotFound -> UiMessage("保存しました。この保存先にはまだデータがありません。新しく作成しますか？")
         SettingsStatus.CreatingManifest -> UiMessage("データを作成しています…")

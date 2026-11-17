@@ -40,6 +40,9 @@ internal class SequentialIds {
     fun next(): String = hostId(next++)
 }
 
+/** 見本 `take-command.json` のトークン。 */
+internal const val TOKEN = "0123456789abcdef0123456789abcdef"
+
 /** 場合の名前と、取り決めに合わない要求の本体。検証の規則（`docs/native-messaging.md`）ごとに 1 つ以上。 */
 internal val INVALID_REQUESTS: List<Pair<String, String>> = listOf(
     "protocol が 2" to """{"protocol":2,"type":"addBookmarks","tabs":[{"url":"https://example.com/","title":"t"}]}""",
@@ -62,6 +65,19 @@ internal val INVALID_REQUESTS: List<Pair<String, String>> = listOf(
     "url が空" to """{"protocol":1,"type":"addBookmarks","tabs":[{"url":"https://example.com/","title":"t"},{"url":"","title":"t"}]}""",
     "title が無い" to """{"protocol":1,"type":"addBookmarks","tabs":[{"url":"https://example.com/"}]}""",
     "title が文字列でない" to """{"protocol":1,"type":"addBookmarks","tabs":[{"url":"https://example.com/","title":null}]}""",
+    "extensionPresent の protocol が 2" to """{"protocol":2,"type":"extensionPresent"}""",
+    "takeCommand の protocol が無い" to """{"type":"takeCommand","token":"$TOKEN"}""",
+    "takeCommand の token が無い" to """{"protocol":1,"type":"takeCommand"}""",
+    "takeCommand の token が文字列でない" to """{"protocol":1,"type":"takeCommand","token":1}""",
+    "takeCommand の token が空" to """{"protocol":1,"type":"takeCommand","token":""}""",
+    "takeCommand の token が大文字" to """{"protocol":1,"type":"takeCommand","token":"${TOKEN.uppercase()}"}""",
+    "takeCommand の token が 31 文字" to """{"protocol":1,"type":"takeCommand","token":"${TOKEN.dropLast(1)}"}""",
+    "takeCommand の token が 33 文字" to """{"protocol":1,"type":"takeCommand","token":"${TOKEN}0"}""",
+    "takeCommand の token が 16 進でない文字を含む" to """{"protocol":1,"type":"takeCommand","token":"${TOKEN.dropLast(1)}g"}""",
+    "takeCommand の token が .. を含む" to """{"protocol":1,"type":"takeCommand","token":"..${TOKEN.drop(2)}"}""",
+    "takeCommand の token が / を含む" to """{"protocol":1,"type":"takeCommand","token":"a/${TOKEN.drop(2)}"}""",
+    "takeCommand の token がバックスラッシュを含む" to """{"protocol":1,"type":"takeCommand","token":"a\\${TOKEN.drop(2)}"}""",
+    "takeCommand の token の後ろに改行" to """{"protocol":1,"type":"takeCommand","token":"${TOKEN.dropLast(1)}\n"}""",
     "JSON として読めない" to """{"protocol":1,"type":"addBookmarks",""",
     "JSON のオブジェクトでない" to """[{"protocol":1}]""",
 )

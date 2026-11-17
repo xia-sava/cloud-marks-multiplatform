@@ -13,8 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
- * アイコンのボタン。ボタンの説明 [contentDescription] と同じ文を、ツールチップにも出す。
- * ツールチップは、デスクトップではマウスを載せたとき、タッチでは長押ししたときに、ボタンの下に出す。
+ * アイコンのボタン。ボタンの説明 [contentDescription] と同じ文を、ツールチップにも出す（[WithTooltip]）。
  *
  * @param modifier ボタンに付ける修飾
  * @param enabled 押せるか
@@ -27,13 +26,23 @@ internal fun TooltipIconButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    TooltipBox(
-        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Below),
-        tooltip = { PlainTooltip { Text(contentDescription) } },
-        state = rememberTooltipState(),
-    ) {
+    WithTooltip(contentDescription) {
         IconButton(onClick = onClick, modifier = modifier, enabled = enabled) {
             Icon(imageVector = imageVector, contentDescription = contentDescription)
         }
     }
+}
+
+/**
+ * [content] に、[text] を出すツールチップを付ける。ツールチップは、デスクトップではマウスを載せたとき、タッチでは長押ししたときに、
+ * [content] の下に出す。[content] が押せなくても出す。ツールチップは、画面全体と同じ表示の大きさで描く（[ScaledPopupContent]）。
+ */
+@Composable
+internal fun WithTooltip(text: String, content: @Composable () -> Unit) {
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Below),
+        tooltip = { ScaledPopupContent { PlainTooltip { Text(text) } } },
+        state = rememberTooltipState(),
+        content = content,
+    )
 }

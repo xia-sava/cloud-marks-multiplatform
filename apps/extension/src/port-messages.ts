@@ -1,4 +1,4 @@
-import type { AddRequest, Outcome } from "./protocol"
+import { isRecord, type AddRequest, type Outcome } from "./protocol"
 
 /** ポップアップがバックグラウンドへつなぐポートの名前。 */
 export const POPUP_PORT_NAME = "popup"
@@ -13,10 +13,6 @@ export interface SubmitMessage {
 export interface ResultMessage {
   type: "result"
   outcome: Outcome
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
 }
 
 export function isSubmitMessage(value: unknown): value is SubmitMessage {

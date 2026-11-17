@@ -36,7 +36,11 @@ internal typealias OpenConnection =
 /**
  * Native Messaging のホスト。拡張から届いたメッセージを 1 つ処理し、応答を返す（`docs/native-messaging.md`）。
  *
- * 要求を検証し、アプリの設定を読み、操作を組み立てて 1 回の書き込みとして S3 へ書く。書けたかどうかを確かめられなければ、
+ * 拡張が入っていることの知らせ（`extensionPresent`）は、ブラウザの実行ファイルを [AppFiles.browsersWithExtensionFile] に書き足す。
+ * コマンドの受け取り（`takeCommand`）は、[AppFiles.commandDirectory] のコマンドのファイルを読んで消し、中身を返す。
+ * この 2 つは、アプリの設定を読まず、S3 に接続しない。
+ *
+ * 追加は、要求を検証し、アプリの設定を読み、操作を組み立てて 1 回の書き込みとして S3 へ書く。書けたかどうかを確かめられなければ、
  * 同じ操作でもう一度だけ書く。マニフェストのヘッダーの `updatedBy` は [HOST_UPDATED_BY]。
  * キャッシュはメモリの中だけに持ち、ローカルキャッシュは読みも書きもしない。
  * 書けたとき、または書けたかどうかを確かめられなかったときは、[AppFiles.storageChangedFile] を書き換えて、
@@ -44,11 +48,14 @@ internal typealias OpenConnection =
  *
  * 失敗は、その詳細を [log] に書く。認証情報と、要求の中の URL・タイトルは書かない。
  *
- * @param appFiles アプリと同じファイルの場所。設定のファイル、S3 へ書いたことを知らせるファイルを使う
+ * @param appFiles アプリと同じファイルの場所。設定のファイル、S3 へ書いたことを知らせるファイル、
+ * 拡張が入っているブラウザの記録、コマンドのディレクトリを使う
  * @param protector 設定の認証情報を復号する仕組み。アプリと同じもの
  * @param openConnection 設定から S3 への接続を作る
  * @param clock 追加した日時と、S3 へ書いたことを知らせるファイルの中身に使う時計
  * @param generateId フォルダと項目の ID を振る
+ * @param ancestorExecutables ホストを起動したプロセスの祖先の実行ファイルのパス。拡張が入っていることの知らせで、ブラウザを見つけるのに使う
+ * @param ownExecutable このプロセス自身の実行ファイルのパス。祖先のうち、同じ名前のものはブラウザではないとして飛ばす
  */
 internal class NativeMessagingHost(
     private val appFiles: AppFiles,
@@ -57,6 +64,8 @@ internal class NativeMessagingHost(
     private val openConnection: OpenConnection = ::openS3Connection,
     private val clock: Clock = Clock.System,
     private val generateId: () -> String = ::newId,
+    private val ancestorExecutables: AncestorExecutables = ::processAncestorExecutables,
+    private val ownExecutable: () -> String? = ::processOwnExecutable,
 ) {
     private val settingsFile = SettingsFile(appFiles.settingsFile, protector)
 
@@ -83,6 +92,24 @@ internal class NativeMessagingHost(
             is HostRequestParseResult.Valid -> parsed.request
             is HostRequestParseResult.Invalid -> return failed(INVALID_REQUEST_ERROR, "要求を受け付けなかった: ${parsed.reason}")
         }
+        return when (request) {
+            is HostRequest.Add -> add(request)
+            HostRequest.ExtensionPresent -> recordExtensionPresent()
+            is HostRequest.TakeCommand -> HostResponse.CommandTaken(takeCommandFile(appFiles.commandDirectory, request.token, log))
+        }
+    }
+
+    /** ブラウザの実行ファイルを、拡張が入っているブラウザの記録に書き足す。見つからなければ、ログに書くだけにする。設定は読まない。 */
+    private fun recordExtensionPresent(): HostResponse {
+        when (val executable = findBrowserExecutable(ancestorExecutables(), ownExecutable())) {
+            null -> log(HOST_LOG_PREFIX + "ホストを起動したブラウザの実行ファイルを見つけられなかった")
+            else -> recordBrowserWithExtension(appFiles.browsersWithExtensionFile, executable, log)
+        }
+        return HostResponse.Ok
+    }
+
+    /** 追加の要求 [request] を、S3 へ書く。 */
+    private suspend fun add(request: HostRequest.Add): HostResponse {
         val settings = when (val read = settingsFile.read()) {
             is SettingsReadResult.Found ->
                 read.settings.takeIf { it.isComplete() } ?: return failed(SETTINGS_MISSING_ERROR, "設定に未入力の項目がある")
@@ -96,8 +123,8 @@ internal class NativeMessagingHost(
         }
         if (result !is WriteResult.Failed) notifyStorageChanged()
         return when (val response = hostResponseOf(result)) {
-            HostResponse.Ok -> response
             is HostResponse.Failed -> failed(response.error, describeWriteFailure(result))
+            HostResponse.Ok, is HostResponse.CommandTaken -> response
         }
     }
 

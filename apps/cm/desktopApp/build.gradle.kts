@@ -108,7 +108,7 @@ val cloudMarksPackageVersion =
 compose.desktop {
     application {
         mainClass = "to.sava.cloudmarksmultiplatform.MainKt"
-        // 認証情報の暗号化（DPAPI）をFFMで呼ぶ。`run`と配布物の両方に適用される。
+        // 認証情報の暗号化（DPAPI）とレジストリの読み取り（ブラウザの一覧）をFFMで呼ぶ。`run`と配布物の両方に適用される。
         jvmArgs += ENABLE_NATIVE_ACCESS
 
         // Windowsでマウスを載せただけのアクティブ化を働かせるには、JetBrains Runtimeで動かす必要がある。
@@ -132,6 +132,9 @@ compose.desktop {
             // バージョンを指定しないビルドの名前は書式に合わず、インストーラをビルドしない場面でも
             // 設定が拒否されるため、その場合は既定へフォールバックする。
             packageVersion = cloudMarksPackageVersion
+            windows {
+                iconFile.set(project.file("icons/cloudmarks.ico"))
+            }
         }
     }
 }

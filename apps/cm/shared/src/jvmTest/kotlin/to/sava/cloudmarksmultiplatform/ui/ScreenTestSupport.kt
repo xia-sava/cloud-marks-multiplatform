@@ -4,17 +4,21 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.v2.runComposeUiTest
 import kotlinx.coroutines.CoroutineDispatcher
 import org.junit.rules.TemporaryFolder
 import to.sava.cloudmarksmultiplatform.app.ControllerFixture
+import to.sava.cloudmarksmultiplatform.browser.FakeBrowserOpener
 import to.sava.cloudmarksmultiplatform.storage.Item
 import to.sava.cloudmarksmultiplatform.sync.FolderReadResult
 import to.sava.cloudmarksmultiplatform.sync.ROOT_ID
@@ -45,11 +49,14 @@ private const val EDGE_INSET = 2f
  * 画面は窓を出さずに描く。テストの画面の大きさ（1024 × 768、密度 1）は広い画面の区分なので、ツリーの枠とリストを並べて出す。
  * コントローラの処理は、画面と同じディスパッチャで走らせる。そのため、画面のテストが待つとき（waitForIdle など）は、
  * 偽のストレージへの読み書きが終わるまで待つ（偽のストレージは時間を使わない）。止めた読み書きは、止めているあいだは待たない。
+ *
+ * @param browserOpener コントローラが項目をブラウザで開く仕組み。既定では、まとめて開けるプラットフォームとして振る舞う
  */
 @OptIn(ExperimentalTestApi::class)
 internal fun runCloudMarksScreenTest(
     temporaryFolder: TemporaryFolder,
     arrange: (ControllerFixture) -> Unit = {},
+    browserOpener: FakeBrowserOpener = FakeBrowserOpener(),
     block: suspend ComposeUiTest.(ControllerFixture) -> Unit,
 ) = runComposeUiTest {
     var created: ControllerFixture? = null
@@ -57,7 +64,7 @@ internal fun runCloudMarksScreenTest(
         val scope = rememberCoroutineScope()
         val fixture = remember {
             val dispatcher = scope.coroutineContext[ContinuationInterceptor] as CoroutineDispatcher
-            ControllerFixture(scope, dispatcher, temporaryFolder).also {
+            ControllerFixture(scope, dispatcher, temporaryFolder, browserOpener = browserOpener).also {
                 it.store.seed()
                 it.storeSettings()
                 arrange(it)
@@ -90,6 +97,14 @@ internal fun ComposeUiTest.listFolderRow(name: String): SemanticsNodeInteraction
 /** リストの、項目 [n]（[item]）の行。 */
 @OptIn(ExperimentalTestApi::class)
 internal fun ComposeUiTest.itemRow(n: Int): SemanticsNodeInteraction = onNodeWithText(item(n).title)
+
+/** リストの項目 [n]（[item]）を、[key] を押しながら、マウスでクリックする。Ctrl で選ぶ項目を足す・外し、Shift で範囲を選ぶ。 */
+@OptIn(ExperimentalTestApi::class)
+internal fun ComposeUiTest.clickItemRowWithKey(n: Int, key: Key) {
+    onRoot().performKeyInput { keyDown(key) }
+    itemRow(n).performMouseInput { click() }
+    onRoot().performKeyInput { keyUp(key) }
+}
 
 /** リストの、項目 [n]（[item]）の行の上端（根の座標）。リストに無ければ（スクロールして外れていれば）null。 */
 @OptIn(ExperimentalTestApi::class)

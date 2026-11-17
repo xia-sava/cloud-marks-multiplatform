@@ -7,9 +7,25 @@ export interface ExtensionPort {
   onDisconnect: { addListener(listener: () => void): void }
 }
 
-export interface QueriedTab {
+export interface BrowserTab {
+  id?: number
+  windowId: number
+  index: number
   url?: string
   title?: string
+}
+
+/** tabs.onUpdated が渡す変化。使う欄だけを並べる。 */
+export interface TabChangeInfo {
+  status?: string
+  url?: string
+}
+
+export interface TabCreateProperties {
+  url: string
+  active: boolean
+  windowId?: number
+  index?: number
 }
 
 /**
@@ -20,10 +36,21 @@ export interface ExtensionApi {
   runtime: {
     sendNativeMessage(host: string, message: unknown): Promise<unknown>
     connect(connectInfo: { name: string }): ExtensionPort
+    getURL(path: string): string
     onConnect: { addListener(listener: (port: ExtensionPort) => void): void }
+    onInstalled: { addListener(listener: () => void): void }
+    onStartup: { addListener(listener: () => void): void }
   }
   tabs: {
-    query(queryInfo: { highlighted: boolean; currentWindow: boolean }): Promise<QueriedTab[]>
+    query(queryInfo: { highlighted?: boolean; currentWindow?: boolean }): Promise<BrowserTab[]>
+    get(tabId: number): Promise<BrowserTab>
+    create(createProperties: TabCreateProperties): Promise<BrowserTab>
+    update(tabId: number, updateProperties: { url: string }): Promise<BrowserTab | undefined>
+    remove(tabId: number): Promise<void>
+    onUpdated: {
+      addListener(listener: (tabId: number, changeInfo: TabChangeInfo, tab: BrowserTab) => void): void
+    }
+    onRemoved: { addListener(listener: (tabId: number) => void): void }
   }
   storage: {
     session: {

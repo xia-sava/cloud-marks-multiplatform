@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -57,6 +56,7 @@ internal sealed interface OperationDialog {
 /**
  * [dialog] を出し、確定したら [controller] の操作を呼ぶ。確定したときと閉じたときに [onClose] を呼ぶ。
  * 操作を受け付けないあいだ（[AppState.canWrite] が偽）は、確定のボタンを押せない。
+ * ダイアログの中身は、画面全体と同じ表示の大きさで描く（[ScaledAlertDialog]）。
  */
 @Composable
 internal fun OperationDialogHost(
@@ -150,7 +150,7 @@ private fun NameDialog(
     var value by remember { mutableStateOf(TextFieldValue(initialValue, TextRange(0, initialValue.length))) }
     val empty = !allowsEmpty && value.text.isEmpty()
     val canConfirm = canWrite && !empty
-    AlertDialog(
+    ScaledAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
@@ -183,7 +183,7 @@ private fun NameDialog(
  */
 @Composable
 private fun DeleteFolderDialog(name: String, canWrite: Boolean, onConfirm: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
+    ScaledAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(DELETE_FOLDER_TITLE) },
         text = { Text(deleteFolderConfirmation(name)) },
@@ -225,7 +225,7 @@ private fun MoveDestinationDialog(
     val destinationId = chosenId?.takeIf { subject.canMoveTo(tree, it) }
     val rows = remember(tree, expanded) { flattenFolderTree(tree, expanded) }
     val listState = rememberLazyListState()
-    AlertDialog(
+    ScaledAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(MOVE_DESTINATION_TITLE) },
         text = {

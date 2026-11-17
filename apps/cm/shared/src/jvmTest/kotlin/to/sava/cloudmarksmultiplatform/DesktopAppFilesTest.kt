@@ -22,7 +22,7 @@ class DesktopAppFilesTest {
         }
     }
 
-    // 設定のファイルはディレクトリの直下の settings.json、表示の設定のファイルは同じく直下の display.json、
+    // 設定のファイルはディレクトリの直下の settings.json、端末ごとの設定のファイルは同じく直下の device.json、
     // ローカルキャッシュはその下の cache、ログはその下の logs、次の起動へ持ち越す記録はその下の state
     @Test
     fun filesAreInDirectory() {
@@ -31,7 +31,8 @@ class DesktopAppFilesTest {
         val files = desktopAppFilesIn(directory)
 
         assertEquals(directory.resolve("settings.json"), files.settingsFile)
-        assertEquals(directory.resolve("display.json"), files.displaySettingsFile)
+        assertEquals(directory.resolve("device.json"), files.deviceSettingsFile)
+        assertEquals(directory.resolve("commands"), files.commandDirectory)
         assertEquals(directory.resolve("cache"), files.cacheDirectory)
         assertEquals(directory.resolve("logs"), files.logDirectory)
         assertEquals(directory.resolve("state"), files.stateDirectory)

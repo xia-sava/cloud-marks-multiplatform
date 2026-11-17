@@ -16,5 +16,9 @@
 |---|---|
 | `add-folder.json` | フォルダを追加（2 つのタブ。空のタイトルを含む） |
 | `add-bookmarks.json` | ブックマークを追加（1 つのタブ。タイトルは名前の欄の値） |
+| `extension-present.json` | 拡張が入っていることの知らせ |
+| `take-command.json` | コマンドを受け取る |
 | `response-ok.json` | 成功の応答 |
+| `response-command.json` | コマンドを受け取ったときの成功の応答（2 つのタブ。空のタイトルを含む）。`command` の中身は、アプリが書くコマンドのファイルの見本も兼ねる |
+| `response-no-command.json` | コマンドが無いときの成功の応答 |
 | `response-error.json` | 失敗の応答 |

@@ -2,6 +2,8 @@ package to.sava.cloudmarksmultiplatform.host
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
 import to.sava.cloudmarksmultiplatform.app.Connection
@@ -77,6 +79,12 @@ class NativeMessagingHostTest {
         /** 接続を作る前に走らせる。 */
         var onOpen: () -> Unit = {}
 
+        /** ホストを起動したプロセスの祖先の実行ファイルのパス。親から順。 */
+        var ancestors: List<String?> = emptyList()
+
+        /** ホスト自身の実行ファイルのパス。 */
+        var own: String? = null
+
         val host = NativeMessagingHost(
             appFiles = appFiles,
             protector = protector,
@@ -88,6 +96,8 @@ class NativeMessagingHostTest {
             },
             clock = FixedClock,
             generateId = SequentialIds()::next,
+            ancestorExecutables = { ancestors.asSequence() },
+            ownExecutable = { own },
         )
 
         val isManifest: (String) -> Boolean = { key -> key == manifestKey(store.prefix) }
@@ -283,6 +293,158 @@ class NativeMessagingHostTest {
         }
         assertEquals(emptyList(), protector.entropies)
         assertEquals(INVALID_REQUESTS.size, fixture.logs.size)
+    }
+
+    // 拡張が入っていることの知らせは、仲介のプロセスを飛ばした最初の祖先のパスを小文字にして記録に書き、成功を返す。
+    // 設定を読まず、接続を作らず、S3 へ書いたことを知らせるファイルも書き換えない
+    @Test
+    fun extensionPresentRecordsBrowserWithoutSettings() = runTest {
+        val protector = FakeSecretProtector()
+        val fixture = Fixture(protector).apply { storeSettings() }
+        fixture.ancestors = listOf("""C:\Windows\System32\cmd.exe""", """C:\Chrome\Chrome.exe""", """C:\Windows\explorer.exe""")
+
+        val response = fixture.respond(contractBytes("extension-present.json"))
+
+        assertEquals(HostResponse.Ok, response)
+        assertEquals("""{"browsers":["c:\\chrome\\chrome.exe"]}""", fixture.appFiles.browsersWithExtensionFile.readText())
+        fixture.assertNothingWritten("extensionPresent")
+        assertEquals(emptyList(), protector.entropies)
+        assertEquals(emptyList(), fixture.logs)
+    }
+
+    // 配布物のランチャーが自分を子として起動し直すときは、自分と同じ名前の祖先を飛ばして、その上のブラウザを記録する
+    @Test
+    fun extensionPresentSkipsLauncherAncestors() = runTest {
+        val fixture = Fixture()
+        fixture.own = """C:\App\CloudMarks.exe"""
+        fixture.ancestors = listOf("""C:\App\CloudMarks.exe""", """C:\Windows\System32\cmd.exe""", """C:\Chrome\chrome.exe""")
+
+        assertEquals(HostResponse.Ok, fixture.respond(contractBytes("extension-present.json")))
+        assertEquals("""{"browsers":["c:\\chrome\\chrome.exe"]}""", fixture.appFiles.browsersWithExtensionFile.readText())
+    }
+
+    // 拡張が入っていることの知らせを重ねて受けても、同じブラウザは 1 つだけ。壊れた記録は書き直す
+    @Test
+    fun extensionPresentDoesNotDuplicateAndRepairsRecord() = runTest {
+        val fixture = Fixture()
+        fixture.ancestors = listOf("""C:\Chrome\chrome.exe""")
+
+        fixture.respond(contractBytes("extension-present.json"))
+        fixture.respond(contractBytes("extension-present.json"))
+        assertEquals("""{"browsers":["c:\\chrome\\chrome.exe"]}""", fixture.appFiles.browsersWithExtensionFile.readText())
+
+        fixture.appFiles.browsersWithExtensionFile.writeText("壊れた")
+        fixture.ancestors = listOf("""C:\Firefox\firefox.exe""")
+        assertEquals(HostResponse.Ok, fixture.respond(contractBytes("extension-present.json")))
+        assertEquals("""{"browsers":["c:\\firefox\\firefox.exe"]}""", fixture.appFiles.browsersWithExtensionFile.readText())
+    }
+
+    // ブラウザの実行ファイルを見つけられなくても、ログに書くだけで成功を返し、記録は作らない
+    @Test
+    fun extensionPresentWithoutBrowserIsOk() = runTest {
+        val cases = listOf(
+            "祖先が仲介だけ" to listOf<String?>("""C:\Windows\System32\cmd.exe""", "java.exe"),
+            "祖先が無い" to emptyList(),
+            "実行ファイルが分からない" to listOf<String?>(null, """C:\Chrome\chrome.exe"""),
+        )
+
+        cases.forEach { (name, ancestors) ->
+            val fixture = Fixture().also {
+                it.own = """C:\Java\bin\java.exe"""
+                it.ancestors = ancestors
+            }
+
+            assertEquals(HostResponse.Ok, fixture.respond(contractBytes("extension-present.json")), name)
+            assertFalse(Files.exists(fixture.appFiles.browsersWithExtensionFile), name)
+            assertTrue(fixture.logs.single().startsWith(HOST_LOG_PREFIX), name)
+        }
+    }
+
+    // 記録を書けなくても、ログに書くだけで成功を返す
+    @Test
+    fun extensionPresentWriteFailureIsOk() = runTest {
+        val fixture = Fixture()
+        fixture.ancestors = listOf("""C:\Chrome\chrome.exe""")
+        // ディレクトリを置くべき場所にファイルがあるので、ディレクトリを作れない
+        Files.writeString(fixture.appFiles.stateDirectory, "")
+
+        assertEquals(HostResponse.Ok, fixture.respond(contractBytes("extension-present.json")))
+        assertEquals(1, fixture.logs.size)
+    }
+
+    // コマンドの受け取りは、見本のトークンのファイルを読んで消し、中身を command にして返す。応答は見本と JSON として同じ。
+    // 設定を読まず、接続を作らない
+    @Test
+    fun takeCommandReturnsAndDeletesCommand() = runTest {
+        val protector = FakeSecretProtector()
+        val fixture = Fixture(protector).apply { storeSettings() }
+        val contract = jsonOf(contractBytes("response-command.json"))
+        val file = fixture.appFiles.commandDirectory.resolve("$TOKEN.json")
+        Files.createDirectories(file.parent)
+        Files.writeString(file, contract.jsonObject.getValue("command").toString())
+
+        val response = fixture.respond(contractBytes("take-command.json"))
+
+        assertEquals(contract, jsonOf(encodeHostResponse(response)))
+        assertFalse(Files.exists(file))
+        fixture.assertNothingWritten("takeCommand")
+        assertEquals(emptyList(), protector.entropies)
+        assertEquals(emptyList(), fixture.logs)
+    }
+
+    // ファイルが無い（知らないトークン、受け取り済み）ときは、command を null にして返す。同じトークンを 2 回受け取ると 2 回目は null
+    @Test
+    fun takeCommandWithoutFileIsNull() = runTest {
+        val fixture = Fixture()
+        val noCommand = jsonOf(contractBytes("response-no-command.json"))
+
+        assertEquals(noCommand, jsonOf(encodeHostResponse(fixture.respond(contractBytes("take-command.json")))))
+
+        val file = fixture.appFiles.commandDirectory.resolve("$TOKEN.json")
+        Files.createDirectories(file.parent)
+        Files.writeString(file, """{"type":"openTabs","tabs":[{"url":"u","title":""}],"loadAtOnce":1,"loadAhead":1}""")
+        assertTrue(assertIs<HostResponse.CommandTaken>(fixture.respond(contractBytes("take-command.json"))).command != null)
+        assertEquals(noCommand, jsonOf(encodeHostResponse(fixture.respond(contractBytes("take-command.json")))))
+        assertEquals(emptyList(), fixture.logs)
+    }
+
+    // コマンドの形に合わないファイルは、消さずに command を null にして返し、ログに書く
+    @Test
+    fun takeCommandWithInvalidFileIsNullAndKept() = runTest {
+        val fixture = Fixture()
+        val file = fixture.appFiles.commandDirectory.resolve("$TOKEN.json")
+        Files.createDirectories(file.parent)
+        Files.writeString(file, """{"type":"openTabs","tabs":[],"loadAtOnce":1,"loadAhead":1}""")
+
+        val response = fixture.respond(contractBytes("take-command.json"))
+
+        assertEquals(HostResponse.CommandTaken(null), response)
+        assertTrue(Files.exists(file))
+        assertTrue(fixture.logs.single().startsWith(HOST_LOG_PREFIX), fixture.logs.toString())
+        assertFalse(fixture.logs.single().contains(TOKEN), fixture.logs.single())
+    }
+
+    // トークンが決まりに合わなければ、コマンドのディレクトリのファイルに触らず、invalidRequest を返す
+    @Test
+    fun invalidTokenDoesNotTouchCommandFiles() = runTest {
+        val fixture = Fixture()
+        val file = fixture.appFiles.commandDirectory.resolve("$TOKEN.json")
+        val outside = fixture.appFiles.commandDirectory.parent.resolve("outside.json")
+        val command = """{"type":"openTabs","tabs":[{"url":"u","title":""}],"loadAtOnce":1,"loadAhead":1}"""
+        Files.createDirectories(file.parent)
+        Files.writeString(file, command)
+        Files.writeString(outside, command)
+        val tokens = listOf(TOKEN.uppercase(), "../outside", "..\\outside", TOKEN.dropLast(1), "${TOKEN}0", "$TOKEN\n")
+
+        tokens.forEach { token ->
+            val body = """{"protocol":1,"type":"takeCommand","token":${JsonPrimitive(token)}}""".encodeToByteArray()
+
+            assertEquals(HostResponse.Failed(INVALID_REQUEST_ERROR), fixture.respond(body), token)
+        }
+
+        assertEquals(command, file.readText())
+        assertEquals(command, outside.readText())
+        assertEquals(tokens.size, fixture.logs.size)
     }
 
     // 長さが上限を超えたメッセージと、途中で切れたメッセージは、設定を読まず、接続も作らず、何も書かずに invalidRequest を返す

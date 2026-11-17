@@ -19,7 +19,9 @@ fun reserveStandardOutputForResponse(): PrintStream =
     System.out.also { System.setOut(System.err) }
 
 /**
- * Native Messaging のホストとして、[input] からメッセージを 1 つ読み、S3 へ書き、[output] へ応答を 1 つ書く。
+ * Native Messaging のホストとして、[input] からメッセージを 1 つ読んで処理し、[output] へ応答を 1 つ書く。
+ * 処理は、追加（S3 へ書く）、拡張が入っていることの知らせ（ブラウザの記録に書く）、コマンドの受け取り（コマンドのファイルを読んで消す）の
+ * いずれか。
  *
  * ログは [AppFiles.logDirectory] のファイル（アプリと同じもの）に書く。
  *

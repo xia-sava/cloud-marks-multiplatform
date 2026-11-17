@@ -12,6 +12,15 @@ class HostResponseTest {
         assertEquals(jsonOf(contractBytes("response-ok.json")), jsonOf(encodeHostResponse(HostResponse.Ok)))
     }
 
+    // コマンドが無いときの応答は、見本の「コマンドが無い」応答と JSON として同じ
+    @Test
+    fun noCommandMatchesContract() {
+        assertEquals(
+            jsonOf(contractBytes("response-no-command.json")),
+            jsonOf(encodeHostResponse(HostResponse.CommandTaken(null))),
+        )
+    }
+
     // 失敗の応答は、見本と同じ code と message を与えると、見本の失敗の応答と JSON として同じ
     @Test
     fun failedMatchesContract() {

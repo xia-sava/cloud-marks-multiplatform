@@ -25,6 +25,10 @@ import to.sava.cloudmarksmultiplatform.browse.MoveSubject
 import to.sava.cloudmarksmultiplatform.browse.SelectionMode
 import to.sava.cloudmarksmultiplatform.browse.canMove
 import to.sava.cloudmarksmultiplatform.browse.selectedItemsSubject
+import to.sava.cloudmarksmultiplatform.browser.Browser
+import to.sava.cloudmarksmultiplatform.browser.BrowserOpenResult
+import to.sava.cloudmarksmultiplatform.browser.BrowserOpener
+import to.sava.cloudmarksmultiplatform.browser.BrowserTab
 import to.sava.cloudmarksmultiplatform.files.describeIoFailure
 import to.sava.cloudmarksmultiplatform.logging.FileLog
 import to.sava.cloudmarksmultiplatform.operations.ChangeItemTitle
@@ -38,15 +42,17 @@ import to.sava.cloudmarksmultiplatform.operations.Operation
 import to.sava.cloudmarksmultiplatform.operations.RenameFolder
 import to.sava.cloudmarksmultiplatform.operations.TreeState
 import to.sava.cloudmarksmultiplatform.settings.ConnectionSettings
+import to.sava.cloudmarksmultiplatform.settings.DeviceSettingsFile
 import to.sava.cloudmarksmultiplatform.settings.DisplayScale
-import to.sava.cloudmarksmultiplatform.settings.DisplaySettingsFile
 import to.sava.cloudmarksmultiplatform.settings.SecretProtector
 import to.sava.cloudmarksmultiplatform.settings.SettingsFile
 import to.sava.cloudmarksmultiplatform.settings.SettingsForm
 import to.sava.cloudmarksmultiplatform.settings.SettingsFormResult
 import to.sava.cloudmarksmultiplatform.settings.SettingsReadResult
 import to.sava.cloudmarksmultiplatform.settings.SettingsWriteResult
+import to.sava.cloudmarksmultiplatform.settings.TabLoading
 import to.sava.cloudmarksmultiplatform.settings.toSettings
+import to.sava.cloudmarksmultiplatform.storage.Item
 import to.sava.cloudmarksmultiplatform.storage.newId
 import to.sava.cloudmarksmultiplatform.sync.CreateManifestResult
 import to.sava.cloudmarksmultiplatform.sync.FolderReadResult
@@ -73,7 +79,8 @@ private typealias TreeRead = suspend (foldersToLoad: (TreeState) -> Set<String>)
  * 使い終えたら [close] を呼ぶ。[scope] の取り消しは渡した側が行う。
  *
  * S3 からマニフェストを読み直すのは、[start] で設定を読めたとき、[reload] を呼んだとき、[storageChanges] で知らせを受けたとき、
- * 設定を保存したとき、マニフェストを作ろうとして既にあったとき、開いたフォルダの項目ファイルが `404` を返したときだけ。
+ * 設定を保存したとき、マニフェストを作ろうとして既にあったとき、開いたフォルダとブラウザで開くフォルダの項目ファイルが `404` を
+ * 返したときだけ。
  * フォルダを開いたときはマニフェストを GET せず、読んであるツリーからそのフォルダの項目ファイルだけを読む。
  *
  * データを変える操作（`docs/operations.md`）は、一度に 1 つだけ書く。書いているあいだは、ほかの操作も読み直しも受け付けない。
@@ -82,13 +89,16 @@ private typealias TreeRead = suspend (foldersToLoad: (TreeState) -> Set<String>)
  * [deletesStaleFiles] なら、起動して初めてツリーを読めたときに、前に古いファイルの削除を終えてから間隔を過ぎていれば、
  * 裏で古いファイルの削除を走らせる。結果はログにだけ書く。
  *
+ * 項目をブラウザで開くことは、データを変えないので、書いている最中も、読むだけのツリーでも受け付ける。
+ *
  * @param connect 設定から S3 への接続を作る。[ioDispatcher] で呼ぶ
  * @param log 利用者への誤りとしては見せない失敗と、古いファイルの削除の結果を書く。認証情報は渡さない
  * @param storageChanges ほかのプロセスが S3 へ書いた知らせ。[start] から集め、知らせを受けるたびに [reload] を呼ぶ。
  * [reload] が何もしないとき（メインの画面でないとき・読んでいる最中・書いている最中・接続が無いとき）の知らせは捨てる。
  * 知らせを出さない Flow を渡してもよい
  * @param deletesStaleFiles 古いファイルの削除を行うか。デスクトップのアプリだけが行う
- * @param ioDispatcher 設定のファイルと表示の設定のファイルの読み書き、接続を作ること、ローカルキャッシュのディレクトリを消すこと、
+ * @param browserOpener 項目をブラウザで開く仕組み
+ * @param ioDispatcher 設定のファイルと端末ごとの設定のファイルの読み書き、接続を作ること、ローカルキャッシュのディレクトリを消すこと、
  * 古いファイルの削除の記録の読み書きに使う
  * @param clock 古いファイルの削除を前に終えてからの経過を測る、端末の時計
  */
@@ -100,15 +110,16 @@ class CloudMarksController(
     private val scope: CoroutineScope,
     private val storageChanges: Flow<Unit>,
     deletesStaleFiles: Boolean,
+    private val browserOpener: BrowserOpener,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     clock: Clock = Clock.System,
 ) : AutoCloseable {
     private val settingsFile = SettingsFile(appFiles.settingsFile, protector)
-    private val displaySettingsFile = DisplaySettingsFile(appFiles.displaySettingsFile, log)
+    private val deviceSettingsFile = DeviceSettingsFile(appFiles.deviceSettingsFile, log)
     private val cacheRoot: Path = appFiles.cacheDirectory
 
-    /** 表示の設定のファイルへの書き込みを、1 つずつ順に行う。 */
-    private val displaySettingsWriting = Mutex()
+    /** 端末ごとの設定のファイルへの書き込みを、1 つずつ順に行う。 */
+    private val deviceSettingsWriting = Mutex()
 
     /** 古いファイルの削除。行わないなら null。 */
     private val staleFileDeletion: StaleFileDeletion? =
@@ -117,7 +128,7 @@ class CloudMarksController(
     /** 起動してから、古いファイルの削除を走らせるかを確かめたか。初めてツリーを読めたときに確かめる。 */
     private var staleFilesChecked = false
 
-    private val mutableState = MutableStateFlow(AppState())
+    private val mutableState = MutableStateFlow(AppState(opensMultipleItems = browserOpener.opensMultipleItems))
 
     /** 画面全体の状態。 */
     val state: StateFlow<AppState> = mutableState.asStateFlow()
@@ -138,18 +149,20 @@ class CloudMarksController(
     private class ActiveConnection(val connection: Connection, val settings: ConnectionSettings, val scope: CoroutineScope)
 
     /**
-     * 表示の設定と設定を読む。表示の大きさは読めたものにし、読めなければ既定の大きさのままにする。
+     * 端末ごとの設定と設定を読む。表示の大きさとタブの読み込み方は読めたものにし、読めなければ既定のままにする。
      * 設定を読めたら S3 への接続を作ってメインの画面を出し、マニフェストとルートフォルダの項目を読む。
-     * 設定がまだ無いか読めなければ、設定の画面を出して理由を見せる。
-     * あわせて [storageChanges] を集め始める。
+     * 設定がまだ無いか読めなければ、設定の画面を出して理由を見せる。認証情報を復号できなかったときは、復号できなかった理由をログにだけ書く。
+     * あわせて [storageChanges] を集め始め、PC に入っているブラウザを読む（[refreshBrowsers]）。
      */
     fun start() {
         storageChangeWatching.start()
+        refreshBrowsers()
         scope.launch {
-            val displayScale = withContext(ioDispatcher) { displaySettingsFile.read() }
-            update { it.copy(displayScale = displayScale) }
+            val device = withContext(ioDispatcher) { deviceSettingsFile.read() }
+            update { it.copy(displayScale = device.displayScale, tabLoading = device.tabLoading) }
             val read = withContext(ioDispatcher) { settingsFile.read() }
             if (read !is SettingsReadResult.Found) {
+                if (read is SettingsReadResult.Undecryptable) log("保存されている認証情報を復号できなかった: ${read.detail}")
                 update { it.copy(screen = Screen.SETTINGS, settings = SettingsScreenState(readProblem = read)) }
                 return@launch
             }
@@ -333,18 +346,102 @@ class CloudMarksController(
     }
 
     /**
-     * 画面全体の表示の大きさを [scale] にする。すぐに状態へ入れ、表示の設定のファイルに書く（保存の操作を要しない）。
+     * 画面全体の表示の大きさを [scale] にする。すぐに状態へ入れ、端末ごとの設定のファイルに書く（保存の操作を要しない）。
      * いまと同じなら何もしない。書けなければログに書き、利用者には見せない。
-     * 続けて替えても、書き込みは 1 つずつ順に行い、それぞれ書くときの表示の大きさを書くので、最後に替えた値がファイルに残る。
+     * 続けて替えても、書き込みは 1 つずつ順に行い、それぞれ書くときの端末ごとの設定を書くので、最後に替えた値がファイルに残る。
      */
     fun setDisplayScale(scale: DisplayScale) {
         if (state.value.displayScale == scale) return
         update { it.copy(displayScale = scale) }
+        writeDeviceSettings()
+    }
+
+    /**
+     * 2 つ以上の項目をまとめてブラウザで開くときの、タブの読み込み方を [tabLoading] にする。[setDisplayScale] と同じく、
+     * すぐに状態へ入れ、端末ごとの設定のファイルに書く（保存の操作を要しない）。いまと同じなら何もしない。
+     */
+    fun setTabLoading(tabLoading: TabLoading) {
+        if (state.value.tabLoading == tabLoading) return
+        update { it.copy(tabLoading = tabLoading) }
+        writeDeviceSettings()
+    }
+
+    /**
+     * PC に入っているブラウザを読み直し、状態に入れる。起動したときと、項目とフォルダのメニューを開くたびに呼ぶ。
+     * 拡張機能を入れてブラウザを起動し直したあと、アプリを起動し直さなくても、そのブラウザでまとめて開けるようにする。
+     */
+    fun refreshBrowsers() {
         scope.launch {
-            withContext(ioDispatcher) {
-                displaySettingsWriting.withLock { displaySettingsFile.write(state.value.displayScale) }
+            val browsers = browserOpener.browsers()
+            update { it.copy(browsers = browsers) }
+        }
+    }
+
+    /**
+     * 開いているフォルダの項目 [itemId] を、既定のブラウザで開く。開いているフォルダの読めた項目に無ければ何もしない。
+     * 選んでいる項目は変えない。
+     *
+     * PC に入っているブラウザ（[AppState.browsers]）に既定のブラウザがあれば、メニューでそのブラウザを選んだときと同じく
+     * [openInBrowser] で開く。無ければ、Windows に既定のブラウザで開かせる（[BrowserOpener.openInDefaultBrowser]）。
+     * 起動できなければ知らせる。
+     */
+    fun openItem(itemId: String) {
+        val item = state.value.browse.currentLoadedItems.firstOrNull { it.id == itemId } ?: return
+        state.value.browsers.firstOrNull { it.isDefault }?.let { browser ->
+            openInBrowser(browser, listOf(item))
+            return
+        }
+        updateBrowserNotice(null)
+        scope.launch {
+            if (browserOpener.openInDefaultBrowser(item.url) is BrowserOpenResult.LaunchFailed) {
+                updateBrowserNotice(BrowserNotice.DefaultBrowserLaunchFailed)
             }
         }
+    }
+
+    /** 選んでいる項目を、表示の並び順に [browser] で開く（[openInBrowser]）。 */
+    fun openSelectedItems(browser: Browser) {
+        openInBrowser(browser, state.value.browse.selectedItems)
+    }
+
+    /**
+     * フォルダ [folderId] の直下の項目（子孫のフォルダの項目は含めない）を、表示の並び順に [browser] で開く（[openInBrowser]）。
+     *
+     * 項目を読んであればそれを使い、読んでいなければ、読んであるツリーからそのフォルダの項目を読む（マニフェストは GET しない）。
+     * 項目ファイルが `404` を返したら、開いているフォルダと同じく、マニフェストを一度だけ読み直してから読む。
+     * 読めなかったか、項目ファイルが壊れていれば知らせる。マニフェストで項目が無いフォルダは、何もしない。
+     */
+    fun openFolderItems(folderId: String, browser: Browser) {
+        val browse = state.value.browse
+        val tree = browse.tree ?: return
+        if ((tree.state.folders[folderId]?.count ?: 0) == 0) return
+        (browse.folderReads[folderId] as? FolderReadResult.Loaded)?.let { loaded ->
+            openInBrowser(browser, loaded.items)
+            return
+        }
+        val connection = active ?: return
+        connection.scope.launch {
+            when (val read = connection.connection.sync.readFolder(tree, folderId)) {
+                is FolderReadResult.Loaded -> openInBrowser(browser, read.items)
+                is FolderReadResult.Broken -> updateBrowserNotice(BrowserNotice.FolderBroken(read.problem))
+                is FolderReadResult.Failed -> updateBrowserNotice(BrowserNotice.FolderReadFailed(read.failure))
+                FolderReadResult.Missing -> readTree(
+                    connection,
+                    read = { foldersToLoad ->
+                        connection.connection.sync.readAfterMissing(tree, folderId) { reread -> foldersToLoad(reread) + folderId }
+                    },
+                    show = { result ->
+                        showTree(result)
+                        openFolderItemsOf(result, folderId, browser)
+                    },
+                )
+            }
+        }
+    }
+
+    /** ブラウザで開こうとして知らせたことを閉じる。 */
+    fun dismissBrowserNotice() {
+        updateBrowserNotice(null)
     }
 
     /** 設定の画面の入力を [form] に替える。保存の最中は受け付けない。 */
@@ -356,7 +453,7 @@ class CloudMarksController(
      * 入力した設定を保存し、続けてマニフェストを読む。
      *
      * 入力が足りなければ保存しない。シークレットの欄が空なら、保存済みのものを使う。暗号化の仕組みが使えなければ、
-     * 保存を断って理由を見せる。保存できたら、読んであったツリーと、操作の書き込みの結果と元に戻せる削除を捨ててから
+     * 保存を断ってそのことを見せ、使えない理由はログにだけ書く。保存できたら、読んであったツリーと、操作の書き込みの結果と元に戻せる削除を捨ててから
      * S3 への接続を作り直し（前の S3 のクライアントは閉じ、書いている最中の操作は取り消す）、
      * 接続先（バケットかプレフィックス）が替わっていれば、前の接続先のローカルキャッシュのディレクトリを消す。
      * マニフェストを読めたらメインの画面へ戻り、マニフェストが無ければマニフェストを作れるようにし、読めなければ理由を見せる。
@@ -403,7 +500,8 @@ class CloudMarksController(
     private suspend fun save(settings: ConnectionSettings) {
         when (val written = withContext(ioDispatcher) { settingsFile.write(settings) }) {
             is SettingsWriteResult.ProtectionUnavailable -> {
-                updateSettings { it.copy(status = SettingsStatus.ProtectionUnavailable(written.detail)) }
+                log("認証情報を暗号化できなかったため、設定を保存しなかった: ${written.detail}")
+                updateSettings { it.copy(status = SettingsStatus.ProtectionUnavailable) }
                 return
             }
             is SettingsWriteResult.Failed -> {
@@ -586,6 +684,55 @@ class CloudMarksController(
         }
     }
 
+    /** いまの端末ごとの設定を、端末ごとの設定のファイルに書く。書き込みは 1 つずつ順に行う。 */
+    private fun writeDeviceSettings() {
+        scope.launch {
+            withContext(ioDispatcher) {
+                deviceSettingsWriting.withLock { deviceSettingsFile.write(state.value.deviceSettings) }
+            }
+        }
+    }
+
+    /**
+     * [items] を、その並びで [browser] で開く。項目が無ければ何もしない。2 つ以上で、[browser] がまとめて開けなければ何もしない
+     * （メニューでは押せない）。開き始めるときに、前に知らせたことを消す。
+     * 起動できなかったか、まとめて開くコマンドが拡張機能に届かなかったかもしれなければ知らせる。
+     */
+    private fun openInBrowser(browser: Browser, items: List<Item>) {
+        if (items.isEmpty()) return
+        if (items.size > 1 && !browser.opensMultipleItems) return
+        updateBrowserNotice(null)
+        val tabs = items.map { BrowserTab(url = it.url, title = it.title) }
+        val tabLoading = state.value.tabLoading
+        scope.launch {
+            when (val result = browserOpener.openInBrowser(browser, tabs, tabLoading)) {
+                BrowserOpenResult.Opened -> Unit
+                is BrowserOpenResult.LaunchFailed -> updateBrowserNotice(BrowserNotice.LaunchFailed(browser.name, result.detail))
+                BrowserOpenResult.CommandUndelivered -> updateBrowserNotice(BrowserNotice.CommandUndelivered(browser.name))
+            }
+        }
+    }
+
+    /**
+     * 項目ファイルが `404` を返したあとにマニフェストを読み直した結果 [result] から、フォルダ [folderId] の項目を [browser] で開く。
+     * 読めなかったか、そのフォルダが壊れていれば知らせる。読み直したマニフェストにそのフォルダが無ければ、何もしない。
+     */
+    private fun openFolderItemsOf(result: TreeReadResult, folderId: String, browser: Browser) {
+        val tree = when (result) {
+            is TreeReadResult.Readable -> result.tree
+            is TreeReadResult.ReadOnly -> result.tree
+            is TreeReadResult.Failed -> {
+                updateBrowserNotice(BrowserNotice.FolderReadFailed(result.failure))
+                return
+            }
+        }
+        tree.brokenFolders[folderId]?.let { problem ->
+            updateBrowserNotice(BrowserNotice.FolderBroken(problem))
+            return
+        }
+        tree.state.items[folderId]?.let { items -> openInBrowser(browser, items) }
+    }
+
     /** 保存済みの設定 [settings] を開いたときの、設定の画面。 */
     private fun storedSettingsScreen(settings: ConnectionSettings): SettingsScreenState =
         SettingsScreenState(form = SettingsForm.of(settings), hasStoredSettings = true, canReturn = true)
@@ -609,22 +756,27 @@ class CloudMarksController(
     private fun updateWrite(transform: (WriteState) -> WriteState) {
         update { it.copy(write = transform(it.write)) }
     }
+
+    private fun updateBrowserNotice(notice: BrowserNotice?) {
+        update { it.copy(browserNotice = notice) }
+    }
 }
 
 /**
  * [CloudMarksController] を組み立てる。Android とデスクトップのエントリポイントが、プラットフォームごとに違うもの（ファイルの場所、
- * 認証情報を暗号化する仕組み、時計、マニフェストの `updatedBy`、ほかのプロセスが S3 へ書いた知らせ、古いファイルの削除を行うか）を渡して呼ぶ。
- * ログは [AppFiles.logDirectory] のファイルに書く。
+ * 認証情報を暗号化する仕組み、時計、マニフェストの `updatedBy`、ほかのプロセスが S3 へ書いた知らせ、古いファイルの削除を行うか、
+ * 項目をブラウザで開く仕組み）を渡して呼ぶ。ログは [AppFiles.logDirectory] のファイルに書く。
  *
  * 呼んだ側が、作ったコントローラを [CloudMarksController.start] で動かし始め、使い終えたら [CloudMarksController.close] で閉じる。
  *
- * @param appFiles 設定のファイル・ローカルキャッシュ・ログ・次の起動へ持ち越す記録・表示の設定のファイルの場所
+ * @param appFiles 設定のファイル・ローカルキャッシュ・ログ・次の起動へ持ち越す記録・端末ごとの設定のファイルの場所
  * @param protector 認証情報を暗号化する仕組み
  * @param timeSource 書き込みの手順 3 から手順 4 までの経過を測る、モノトニッククロック
  * @param updatedBy 書き込むマニフェストのヘッダーの `updatedBy`。`"desktop"` か `"android"`
  * @param storageChanges ほかのプロセスが S3 へ書いた知らせの Flow を作る関数。このコントローラのログに書く関数を受け取る。
  * デスクトップのアプリはファイルの変化を見張る Flow を作り、Android は知らせを出さない Flow を作る
  * @param deletesStaleFiles 古いファイルの削除を行うか。デスクトップのアプリは行い、Android は行わない
+ * @param browserOpener 項目をブラウザで開く仕組みを作る関数。このコントローラのログに書く関数を受け取る
  * @param scope メインのスレッドで動くスコープ。取り消しは呼んだ側が行う
  */
 fun createCloudMarksController(
@@ -634,6 +786,7 @@ fun createCloudMarksController(
     updatedBy: String,
     storageChanges: (log: (String) -> Unit) -> Flow<Unit>,
     deletesStaleFiles: Boolean,
+    browserOpener: (log: (String) -> Unit) -> BrowserOpener,
     scope: CoroutineScope,
 ): CloudMarksController {
     val log = FileLog(appFiles.logDirectory)
@@ -645,5 +798,6 @@ fun createCloudMarksController(
         scope = scope,
         storageChanges = storageChanges(log::write),
         deletesStaleFiles = deletesStaleFiles,
+        browserOpener = browserOpener(log::write),
     )
 }

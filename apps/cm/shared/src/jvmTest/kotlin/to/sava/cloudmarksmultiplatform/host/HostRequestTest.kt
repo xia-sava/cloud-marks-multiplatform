@@ -1,5 +1,6 @@
 package to.sava.cloudmarksmultiplatform.host
 
+import to.sava.cloudmarksmultiplatform.browser.BrowserTab
 import to.sava.cloudmarksmultiplatform.operations.AddBookmarks
 import to.sava.cloudmarksmultiplatform.operations.AddFolder
 import to.sava.cloudmarksmultiplatform.operations.NewItem
@@ -16,6 +17,8 @@ class HostRequestTest {
 
     private fun validRequest(json: String): HostRequest = assertIs<HostRequestParseResult.Valid>(parse(json), json).request
 
+    private fun addRequest(json: String): HostRequest.Add = assertIs<HostRequest.Add>(validRequest(json), json)
+
     // 見本の「フォルダを追加」を読むと、名前と、空のタイトルを含むタブの並びが、見本の順に入る
     @Test
     fun addFolderContractIsParsed() {
@@ -26,8 +29,8 @@ class HostRequestTest {
                 HostRequest.AddFolder(
                     name = "2026-11-16 21:30:15",
                     tabs = listOf(
-                        HostTab("https://example.com/articles/1", "記事のタイトル"),
-                        HostTab("https://example.org/", ""),
+                        BrowserTab("https://example.com/articles/1", "記事のタイトル"),
+                        BrowserTab("https://example.org/", ""),
                     ),
                 ),
             ),
@@ -41,7 +44,7 @@ class HostRequestTest {
         val parsed = parseHostRequest(contractBytes("add-bookmarks.json"))
 
         assertEquals(
-            HostRequestParseResult.Valid(HostRequest.AddBookmarks(listOf(HostTab("https://example.net/page", "名前の欄で書き換えたタイトル")))),
+            HostRequestParseResult.Valid(HostRequest.AddBookmarks(listOf(BrowserTab("https://example.net/page", "名前の欄で書き換えたタイトル")))),
             parsed,
         )
     }
@@ -51,7 +54,7 @@ class HostRequestTest {
     fun addFolderContractBecomesAddFolder() {
         val ids = SequentialIds()
 
-        val operation = validRequest(contractBytes("add-folder.json").decodeToString()).toOperation(ADDED, ids::next)
+        val operation = addRequest(contractBytes("add-folder.json").decodeToString()).toOperation(ADDED, ids::next)
 
         assertEquals(
             AddFolder(
@@ -72,7 +75,7 @@ class HostRequestTest {
     fun addBookmarksContractBecomesAddBookmarks() {
         val ids = SequentialIds()
 
-        val operation = validRequest(contractBytes("add-bookmarks.json").decodeToString()).toOperation(ADDED, ids::next)
+        val operation = addRequest(contractBytes("add-bookmarks.json").decodeToString()).toOperation(ADDED, ids::next)
 
         assertEquals(
             AddBookmarks(items = listOf(NewItem(hostId(1), "https://example.net/page", "名前の欄で書き換えたタイトル")), added = ADDED),
@@ -106,7 +109,7 @@ class HostRequestTest {
             """{"protocol":1,"type":"addFolder","name":"n","extra":{"a":[1]},"tabs":[{"url":"u","title":"t","favIconUrl":"x"}]}""",
         )
 
-        assertEquals(HostRequest.AddFolder("n", listOf(HostTab("u", "t"))), request)
+        assertEquals(HostRequest.AddFolder("n", listOf(BrowserTab("u", "t"))), request)
     }
 
     // ブックマークを追加する要求の name は、文字列でも、空でも、文字列でなくても無視する
@@ -115,7 +118,7 @@ class HostRequestTest {
         listOf("\"n\"", "\"\"", "null", "1").forEach { name ->
             val request = validRequest("""{"protocol":1,"type":"addBookmarks","name":$name,"tabs":[{"url":"u","title":""}]}""")
 
-            assertEquals(HostRequest.AddBookmarks(listOf(HostTab("u", ""))), request, name)
+            assertEquals(HostRequest.AddBookmarks(listOf(BrowserTab("u", ""))), request, name)
         }
     }
 
@@ -133,6 +136,34 @@ class HostRequestTest {
             """.trimIndent(),
         )
 
-        assertEquals(HostRequest.AddFolder(" ", listOf(HostTab(" ", " "))), request)
+        assertEquals(HostRequest.AddFolder(" ", listOf(BrowserTab(" ", " "))), request)
+    }
+
+    // 見本の「拡張が入っていることの知らせ」を読むと、拡張が入っていることの知らせになる
+    @Test
+    fun extensionPresentContractIsParsed() {
+        assertEquals(
+            HostRequestParseResult.Valid(HostRequest.ExtensionPresent),
+            parseHostRequest(contractBytes("extension-present.json")),
+        )
+    }
+
+    // 見本の「コマンドを受け取る」を読むと、トークンが入る
+    @Test
+    fun takeCommandContractIsParsed() {
+        assertEquals(
+            HostRequestParseResult.Valid(HostRequest.TakeCommand(TOKEN)),
+            parseHostRequest(contractBytes("take-command.json")),
+        )
+    }
+
+    // 拡張が入っていることの知らせとコマンドの受け取りも、表に無い欄は無視する
+    @Test
+    fun unknownFieldsAreIgnoredInNewTypes() {
+        assertEquals(HostRequest.ExtensionPresent, validRequest("""{"protocol":1,"type":"extensionPresent","extra":1,"token":"x"}"""))
+        assertEquals(
+            HostRequest.TakeCommand(TOKEN),
+            validRequest("""{"protocol":1,"type":"takeCommand","token":"$TOKEN","tabs":[],"extra":null}"""),
+        )
     }
 }

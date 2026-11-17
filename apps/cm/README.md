@@ -8,7 +8,7 @@ Kotlin Multiplatform / Compose Multiplatform で、Android と Windows Desktop �
 |---|---|
 | `:shared` | 両方で使うコード。ターゲットは `jvm()` と `android {}`。`jvmShared` は Android とデスクトップで共有する JVM の実装を置く中間ソースセットで、S3 へのアクセスと、画面（エントリポイントは `CloudMarksApp()`）とその状態、状態を持つコントローラの組み立て（`createCloudMarksController()`）を置く。`commonMain` の `App()` は、Android のエントリポイントが使う、アプリの名前だけを出す画面 |
 | `:androidApp` | Android アプリ（`MainActivity` から `App()` を呼ぶ） |
-| `:desktopApp` | Windows デスクトップアプリ（`main.kt` で、ファイルの場所・暗号化の仕組み・時計と、古いファイルの削除を行うことを `createCloudMarksController()` に渡してコントローラを組み立て、ウィンドウの `CloudMarksApp()` に渡す。ウィンドウを閉じたらコントローラを閉じる）。配布物のビルドもここ |
+| `:desktopApp` | Windows デスクトップアプリ（`main.kt` で、ファイルの場所・暗号化の仕組み・時計・古いファイルの削除を行うこと・ほかのプロセスが S3 へ書いた知らせ・ブラウザで開く仕組みを `createCloudMarksController()` に渡してコントローラを組み立て、ウィンドウの `CloudMarksApp()` に渡す。ウィンドウを閉じたらコントローラを閉じる）。Native Messaging のホスト（`HostMain.kt`）と、配布物のビルドもここ |
 
 ## 開く
 

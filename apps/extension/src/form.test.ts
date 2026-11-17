@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs"
-import path from "node:path"
 import { describe, expect, it } from "vitest"
 import {
   buildRequest,
@@ -11,11 +9,7 @@ import {
   nameFieldText,
   rememberName,
 } from "./form"
-
-function contract(file: string): unknown {
-  const full = path.resolve(import.meta.dirname, "../../../contracts/native-messaging", file)
-  return JSON.parse(readFileSync(full, "utf8"))
-}
+import { contract } from "./test-support"
 
 describe("defaultAction", () => {
   it("タブが 1 つ以下ならブックマーク、2 つ以上ならフォルダ", () => {

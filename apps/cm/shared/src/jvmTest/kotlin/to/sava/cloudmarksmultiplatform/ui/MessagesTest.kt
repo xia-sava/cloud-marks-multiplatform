@@ -78,7 +78,8 @@ class MessagesTest {
         assertEquals("3 行目: version が整数でない", message.detail)
     }
 
-    // 設定を読めなかった理由は、詳細を本文から分ける。設定がまだ無いときと読めたときは詳細が無い
+    // 設定を読めなかった理由は、詳細を本文から分ける。設定がまだ無いときと読めたときは詳細が無い。
+    // 認証情報を復号できなかったときは、暗号化の仕組みが返した文を詳細に出さない
     @Test
     fun settingsReadProblemSeparatesDetail() {
         assertEquals(
@@ -89,11 +90,24 @@ class MessagesTest {
             UiMessage("設定ファイルを読み込めませんでした。", "アクセスが拒否された"),
             describeSettingsReadProblem(SettingsReadResult.Failed("アクセスが拒否された")),
         )
-        assertEquals("復号に失敗", describeSettingsReadProblem(SettingsReadResult.Undecryptable("復号に失敗"))?.detail)
+        assertNull(describeSettingsReadProblem(SettingsReadResult.Undecryptable("復号に失敗"))?.detail)
         assertNull(describeSettingsReadProblem(SettingsReadResult.NotFound)?.detail)
         assertEquals(
             "データを保存する S3 のバケットと、アクセスキーを入力してください。",
             describeSettingsReadProblem(SettingsReadResult.NotFound)?.text,
+        )
+    }
+
+    // 保存されているアクセスキーを復号できなかったときのデスクトップの文は、別のユーザーや別の PC で保存した設定は使えないことを添える。
+    // 詳細は無い
+    @Test
+    fun undecryptableTextOnDesktop() {
+        assertEquals(
+            UiMessage(
+                "保存されているアクセスキーを読み込めませんでした。" +
+                    "別のユーザーや別の PC で保存した設定は使えないため、もう一度入力して保存してください。",
+            ),
+            describeSettingsReadProblem(SettingsReadResult.Undecryptable("復号に失敗")),
         )
     }
 
@@ -103,16 +117,21 @@ class MessagesTest {
         assertNull(describeSettingsStatus(SettingsStatus.Editing))
     }
 
-    // 保存の失敗は、詳細を本文から分ける
+    // 設定のファイルを書けなかったときは、詳細を本文から分ける
     @Test
-    fun saveFailuresSeparateDetail() {
-        assertEquals(
-            UiMessage("この環境ではアクセスキーを暗号化できないため、保存しませんでした。", "DPAPI が使えない"),
-            describeSettingsStatus(SettingsStatus.ProtectionUnavailable("DPAPI が使えない")),
-        )
+    fun writeFailureSeparatesDetail() {
         assertEquals(
             UiMessage("設定を保存できませんでした。", "ディスクが満杯"),
             describeSettingsStatus(SettingsStatus.WriteFailed("ディスクが満杯")),
+        )
+    }
+
+    // 暗号化の仕組みが使えなかったときは、保存しなかったことだけを伝え、詳細は無い
+    @Test
+    fun protectionUnavailableHasTextOnly() {
+        assertEquals(
+            UiMessage("この環境ではアクセスキーを暗号化できないため、保存しませんでした。"),
+            describeSettingsStatus(SettingsStatus.ProtectionUnavailable),
         )
     }
 
@@ -122,6 +141,7 @@ class MessagesTest {
         val statuses = listOf(
             SettingsStatus.Incomplete(setOf(SettingsField.REGION)),
             SettingsStatus.Saving,
+            SettingsStatus.ProtectionUnavailable,
             SettingsStatus.ManifestNotFound,
             SettingsStatus.CreatingManifest,
         )

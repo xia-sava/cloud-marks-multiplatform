@@ -23,10 +23,23 @@ export interface AddBookmarksRequest {
 
 export type AddRequest = AddFolderRequest | AddBookmarksRequest
 
+/** このブラウザに拡張が入っていることを知らせる。 */
+export interface ExtensionPresentMessage {
+  protocol: 1
+  type: "extensionPresent"
+}
+
+/** アプリからのコマンドを受け取る。 */
+export interface TakeCommandMessage {
+  protocol: 1
+  type: "takeCommand"
+  token: string
+}
+
 /** 追加の結果。失敗のときは画面にそのまま出す文を持つ。 */
 export type Outcome = { ok: true } | { ok: false; message: string }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
 

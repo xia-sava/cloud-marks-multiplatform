@@ -14,8 +14,9 @@ import to.sava.cloudmarksmultiplatform.remote.FakeObjectStore.GetFault
 import to.sava.cloudmarksmultiplatform.remote.FakeObjectStore.Request
 import to.sava.cloudmarksmultiplatform.settings.CREDENTIALS
 import to.sava.cloudmarksmultiplatform.settings.ConnectionSettings
+import to.sava.cloudmarksmultiplatform.browser.FakeBrowserOpener
+import to.sava.cloudmarksmultiplatform.settings.DeviceSettingsFile
 import to.sava.cloudmarksmultiplatform.settings.DisplayScale
-import to.sava.cloudmarksmultiplatform.settings.DisplaySettingsFile
 import to.sava.cloudmarksmultiplatform.settings.FakeSecretProtector
 import to.sava.cloudmarksmultiplatform.settings.SETTINGS
 import to.sava.cloudmarksmultiplatform.settings.SettingsField
@@ -113,6 +114,19 @@ class CloudMarksControllerTest {
         }
     }
 
+    // 認証情報を復号できなかったときは、暗号化の仕組みが返した理由をログに書く
+    @Test
+    fun undecryptableReasonIsLogged() = runTest {
+        val fixture = ControllerFixture(this, temporaryFolder)
+        SettingsFile(fixture.appFiles.settingsFile, FakeSecretProtector(owner = 2)).write(SETTINGS)
+
+        fixture.controller.start()
+        runCurrent()
+
+        assertIs<SettingsReadResult.Undecryptable>(fixture.state.settings.readProblem)
+        assertTrue(fixture.logs.any { "復号できない" in it }, fixture.logs.toString())
+    }
+
     // 組み立てたコントローラは、渡した場所の設定のファイルを、渡した暗号化の仕組みで読む
     // （別のユーザーが暗号化した設定は復号できないとして、設定の画面を出す）
     @Test
@@ -123,7 +137,8 @@ class CloudMarksControllerTest {
             cacheDirectory = directory.resolve("cache"),
             logDirectory = directory.resolve("logs"),
             stateDirectory = directory.resolve("state"),
-            displaySettingsFile = directory.resolve("display.json"),
+            deviceSettingsFile = directory.resolve("device.json"),
+            commandDirectory = directory.resolve("commands"),
         )
         SettingsFile(appFiles.settingsFile, FakeSecretProtector(owner = 2)).write(SETTINGS)
         val controller = createCloudMarksController(
@@ -133,6 +148,7 @@ class CloudMarksControllerTest {
             updatedBy = "desktop",
             storageChanges = { emptyFlow() },
             deletesStaleFiles = false,
+            browserOpener = { FakeBrowserOpener() },
             scope = backgroundScope,
         )
 
@@ -650,7 +666,7 @@ class CloudMarksControllerTest {
         assertEquals(SettingsStatus.Editing, fixture.state.settings.status)
     }
 
-    // 暗号化の仕組みが使えなければ、保存を断って理由を見せる。ファイルは書かず、接続も作らない
+    // 暗号化の仕組みが使えなければ、保存を断ってそのことを見せ、暗号化の仕組みが返した理由をログに書く。ファイルは書かず、接続も作らない
     @Test
     fun refusesToSaveWithoutProtection() = runTest {
         val fixture = ControllerFixture(this, temporaryFolder, protector = FakeSecretProtector(available = false))
@@ -661,10 +677,11 @@ class CloudMarksControllerTest {
         fixture.controller.saveSettings()
         runCurrent()
 
-        assertIs<SettingsStatus.ProtectionUnavailable>(fixture.state.settings.status)
+        assertEquals(SettingsStatus.ProtectionUnavailable, fixture.state.settings.status)
         assertEquals(Screen.SETTINGS, fixture.state.screen)
         assertFalse(fixture.appFiles.settingsFile.exists())
         assertEquals(emptyList(), fixture.connected)
+        assertTrue(fixture.logs.any { "暗号化の仕組みが使えない" in it }, fixture.logs.toString())
     }
 
     // 入力が足りなければ、足りない欄を見せて保存しない
@@ -683,7 +700,7 @@ class CloudMarksControllerTest {
         assertEquals(emptyList(), fixture.connected)
     }
 
-    // 表示の大きさを替えると、すぐ状態に入り、表示の設定のファイルに書く（接続の設定のファイルとは別）。
+    // 表示の大きさを替えると、すぐ状態に入り、端末ごとの設定のファイルに書く（接続の設定のファイルとは別）。
     // 同じファイルを読むコントローラを作り直すと、起動したときに同じ大きさになる
     @Test
     fun displayScaleIsKeptAcrossControllers() = runTest {
@@ -699,7 +716,7 @@ class CloudMarksControllerTest {
         assertEquals(SCALE_125, first.state.displayScale)
         runCurrent()
 
-        assertEquals(SCALE_125, DisplaySettingsFile(first.appFiles.displaySettingsFile) {}.read())
+        assertEquals(SCALE_125, DeviceSettingsFile(first.appFiles.deviceSettingsFile) {}.read().displayScale)
         assertEquals(settingsBefore, Files.readString(first.appFiles.settingsFile))
 
         val recreated = ControllerFixture(this, temporaryFolder, directory = first.directory)
@@ -718,23 +735,23 @@ class CloudMarksControllerTest {
 
         fixture.controller.setDisplayScale(DisplayScale.DEFAULT)
         runCurrent()
-        assertFalse(fixture.appFiles.displaySettingsFile.exists())
+        assertFalse(fixture.appFiles.deviceSettingsFile.exists())
 
         DisplayScale.STEPS.forEach { fixture.controller.setDisplayScale(it) }
         runCurrent()
 
         assertEquals(DisplayScale.STEPS.last(), fixture.state.displayScale)
-        assertEquals(DisplayScale.STEPS.last(), DisplaySettingsFile(fixture.appFiles.displaySettingsFile) {}.read())
+        assertEquals(DisplayScale.STEPS.last(), DeviceSettingsFile(fixture.appFiles.deviceSettingsFile) {}.read().displayScale)
     }
 
-    // 表示の設定のファイルが無いか読めなければ、既定の大きさで起動する。読めなかったことはログに書き、設定の読み込みは続ける
+    // 端末ごとの設定のファイルが無いか読めなければ、既定の大きさで起動する。読めなかったことはログに書き、設定の読み込みは続ける
     @Test
-    fun unreadableDisplaySettingsStartAtDefault() = runTest {
+    fun unreadableDeviceSettingsStartAtDefault() = runTest {
         val fixture = ControllerFixture(this, temporaryFolder).apply {
             store.seed()
             storeSettings()
         }
-        Files.writeString(fixture.appFiles.displaySettingsFile, "not json")
+        Files.writeString(fixture.appFiles.deviceSettingsFile, "not json")
 
         fixture.controller.start()
         runCurrent()

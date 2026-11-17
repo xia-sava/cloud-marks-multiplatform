@@ -1,13 +1,7 @@
-import { readFileSync } from "node:fs"
-import path from "node:path"
 import { describe, expect, it } from "vitest"
 import { MESSAGES } from "./messages"
 import { classifySendFailure, interpretResponse } from "./protocol"
-
-function contract(file: string): unknown {
-  const full = path.resolve(import.meta.dirname, "../../../contracts/native-messaging", file)
-  return JSON.parse(readFileSync(full, "utf8"))
-}
+import { contract } from "./test-support"
 
 describe("interpretResponse", () => {
   it("成功の見本を成功と解釈する", () => {
