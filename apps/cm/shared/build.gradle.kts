@@ -86,6 +86,10 @@ kotlin {
         }
         jvmTest.dependencies {
             implementation(libs.kotlin.testJunit)
+            // 画面のテストは、窓を出さずに runComposeUiTest で画面を動かす。描くための Skia のネイティブのライブラリを、
+            // 走らせる OS のものから取る。
+            implementation(libs.compose.uiTest)
+            implementation(compose.desktop.currentOs)
         }
         jvmMain {
             dependsOn(jvmShared)

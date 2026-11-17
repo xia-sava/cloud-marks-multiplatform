@@ -1,6 +1,12 @@
 package to.sava.cloudmarksmultiplatform.ui
 
 import to.sava.cloudmarksmultiplatform.app.SettingsStatus
+import to.sava.cloudmarksmultiplatform.app.WriteOutcome
+import to.sava.cloudmarksmultiplatform.operations.NotAppliedReason
+import to.sava.cloudmarksmultiplatform.operations.OperationResult
+import to.sava.cloudmarksmultiplatform.operations.OperationStatus
+import to.sava.cloudmarksmultiplatform.operations.RenameFolder
+import to.sava.cloudmarksmultiplatform.settings.DisplayScale
 import to.sava.cloudmarksmultiplatform.settings.SettingsField
 import to.sava.cloudmarksmultiplatform.settings.SettingsReadResult
 import to.sava.cloudmarksmultiplatform.storage.StorageProblem
@@ -57,7 +63,7 @@ class MessagesTest {
         failures.forEach { failure -> assertNull(describeSyncFailure(failure).detail, failure.toString()) }
     }
 
-    // 読むだけにしている失敗の文は、読むだけにしている知らせと同じ
+    // 読むだけにしている失敗の文は、読むだけにしていることを伝える文と同じ
     @Test
     fun readOnlyTextIsReadOnlyNotice() {
         assertEquals(READ_ONLY_NOTICE, describeSyncFailure(SyncFailure.ReadOnly(version = 2, readableBy = 1)).text)
@@ -133,5 +139,65 @@ class MessagesTest {
             message?.text,
         )
         assertEquals("UnknownHostException", message?.detail)
+    }
+
+    // 書けて伝えることが無ければ、文が無い
+    @Test
+    fun writtenHasNoMessage() {
+        assertNull(describeWriteOutcome(WriteOutcome.Written))
+    }
+
+    // 書けなかったときは、保存できなかったことの次の行に S3 の失敗の文を続け、詳細は失敗のものを使う
+    @Test
+    fun failedWriteContinuesWithFailureText() {
+        val message = describeWriteOutcome(WriteOutcome.Failed(SyncFailure.Unreachable("SocketTimeoutException")))
+
+        assertEquals(
+            "変更を保存できませんでした。\nS3 に接続できませんでした。ネットワークの状態を確認してください。",
+            message?.text,
+        )
+        assertEquals("SocketTimeoutException", message?.detail)
+    }
+
+    // 適用しなかった操作があるときと、書けたか確かめられなかったときは、それぞれの文だけで詳細が無い
+    @Test
+    fun notAppliedAndUnconfirmedHaveTextOnly() {
+        val notApplied = WriteOutcome.NotApplied(
+            listOf(OperationResult(RenameFolder("folder", "名前"), OperationStatus.NotApplied(NotAppliedReason.TargetNotFound))),
+        )
+
+        assertEquals(UiMessage("対象が見つからなかったため、一部の変更を反映できませんでした。"), describeWriteOutcome(notApplied))
+        assertEquals(
+            UiMessage("変更を保存できたかどうかを確認できませんでした。再読み込みして確認してください。"),
+            describeWriteOutcome(WriteOutcome.Unconfirmed(SyncFailure.Unreachable("SocketTimeoutException"))),
+        )
+    }
+
+    // 項目を消したあとのお知らせは、消した数を入れる
+    @Test
+    fun deletedItemsNoticeHasCount() {
+        assertEquals("3 件の項目を削除しました。", deletedItemsNotice(3))
+    }
+
+    // 2 つ以上の項目をドラッグしているあいだの札は、項目の数を入れる
+    @Test
+    fun draggedItemsLabelHasCount() {
+        assertEquals("3 件の項目", draggedItemsLabel(3))
+    }
+
+    // 表示の大きさの段は、百分率の数字に % を付けて出す
+    @Test
+    fun displayScaleLabelIsPercent() {
+        assertEquals(listOf("80%", "90%", "100%", "110%", "125%", "150%", "175%", "200%"), DisplayScale.STEPS.map(::displayScaleLabel))
+        assertEquals("表示の大きさ", DISPLAY_SCALE_LABEL)
+    }
+
+    // フォルダの削除の確認は、フォルダの名前をかぎ括弧で囲む
+    @Test
+    fun deleteFolderConfirmationQuotesName() {
+        assertEquals(
+            "「フォルダ A」と、その中のフォルダと項目をすべて削除します。この操作は元に戻せません。",
+            deleteFolderConfirmation("フォルダ A"),
+        )
     }
 }

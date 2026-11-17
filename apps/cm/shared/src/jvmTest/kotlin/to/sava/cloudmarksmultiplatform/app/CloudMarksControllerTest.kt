@@ -1,41 +1,35 @@
 package to.sava.cloudmarksmultiplatform.app
 
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
 import to.sava.cloudmarksmultiplatform.AppFiles
-import to.sava.cloudmarksmultiplatform.remote.FakeObjectStore
+import to.sava.cloudmarksmultiplatform.browse.SelectionMode
 import to.sava.cloudmarksmultiplatform.remote.FakeObjectStore.GetFault
 import to.sava.cloudmarksmultiplatform.remote.FakeObjectStore.Request
 import to.sava.cloudmarksmultiplatform.settings.CREDENTIALS
 import to.sava.cloudmarksmultiplatform.settings.ConnectionSettings
+import to.sava.cloudmarksmultiplatform.settings.DisplayScale
+import to.sava.cloudmarksmultiplatform.settings.DisplaySettingsFile
 import to.sava.cloudmarksmultiplatform.settings.FakeSecretProtector
 import to.sava.cloudmarksmultiplatform.settings.SETTINGS
-import to.sava.cloudmarksmultiplatform.settings.SecretProtector
 import to.sava.cloudmarksmultiplatform.settings.SettingsField
 import to.sava.cloudmarksmultiplatform.settings.SettingsFile
 import to.sava.cloudmarksmultiplatform.settings.SettingsForm
 import to.sava.cloudmarksmultiplatform.settings.SettingsReadResult
-import to.sava.cloudmarksmultiplatform.settings.SettingsWriteResult
-import to.sava.cloudmarksmultiplatform.storage.itemsFileKey
 import to.sava.cloudmarksmultiplatform.storage.manifestKey
 import to.sava.cloudmarksmultiplatform.sync.A_FILE_ID
 import to.sava.cloudmarksmultiplatform.sync.A_ITEMS
 import to.sava.cloudmarksmultiplatform.sync.FOLDER_A
 import to.sava.cloudmarksmultiplatform.sync.FOLDER_B
 import to.sava.cloudmarksmultiplatform.sync.FolderReadResult
-import to.sava.cloudmarksmultiplatform.sync.InMemorySyncCache
 import to.sava.cloudmarksmultiplatform.sync.LoadedTree
 import to.sava.cloudmarksmultiplatform.sync.ROOT_ID
 import to.sava.cloudmarksmultiplatform.sync.ROOT_ITEMS
-import to.sava.cloudmarksmultiplatform.sync.StorageSync
 import to.sava.cloudmarksmultiplatform.sync.SyncFailure
 import to.sava.cloudmarksmultiplatform.sync.addFolderAsOtherWriter
 import to.sava.cloudmarksmultiplatform.sync.connectionCacheDirectory
@@ -47,13 +41,13 @@ import to.sava.cloudmarksmultiplatform.sync.replaceItemsAsOtherWriter
 import to.sava.cloudmarksmultiplatform.sync.seed
 import to.sava.cloudmarksmultiplatform.sync.storedManifest
 import java.nio.file.Files
-import java.nio.file.Path
 import kotlin.io.path.exists
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.TestTimeSource
 
@@ -69,17 +63,14 @@ private val FILLED_FORM = SettingsForm(
 /** 接続先を替えるときの、別のバケット。 */
 private const val OTHER_BUCKET = "other-bucket"
 
-/** 起きたことの記録（Fixture.events）の、接続を閉じたこと。 */
-private const val CLOSED = "closed"
-
-/** 起きたことの記録（Fixture.events）の、止めた GET が取り消されたこと。 */
-private const val CANCELLED = "cancelled"
-
 /** B に項目を持たせるときの、B の項目ファイルの ID。 */
 private val B_FILE_ID = fileId(3)
 
 /** B に項目を持たせるときの、B の項目。 */
 private val B_ITEMS = listOf(item(4))
+
+/** 既定と違う表示の大きさ。 */
+private val SCALE_125 = checkNotNull(DisplayScale.ofPercent(125))
 
 // runCurrent が ExperimentalCoroutinesApi であるため。
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -87,89 +78,8 @@ class CloudMarksControllerTest {
     @get:Rule
     val temporaryFolder = TemporaryFolder()
 
-    /** テストの中で、場合ごとに別のディレクトリを使うための番号。 */
-    private var directoryCount = 0
-
-    /**
-     * 一時ディレクトリの下のファイルの場所、偽のストレージ、偽の暗号化と、それらを使うコントローラ。
-     *
-     * 接続は、作るたびに [connected] に、閉じるたびに [closed] に、その設定を記録する。接続は [addStore] で登録した
-     * バケットならそのストレージを、それ以外は [store] を使う。
-     * コントローラの処理は [scope] の `backgroundScope` で走らせ、`runCurrent` で進める（`advanceUntilIdle` は
-     * `backgroundScope` の処理を待たない）。どの処理も仮想の時間を進めないので、`runCurrent` で終わりまで進む。
-     */
-    private inner class Fixture(scope: TestScope, val protector: SecretProtector = FakeSecretProtector()) {
-        val directory: Path = temporaryFolder.root.toPath().resolve("case-${directoryCount++}")
-        val appFiles = AppFiles(directory.resolve("settings.json"), directory.resolve("cache"), directory.resolve("logs"))
-        val store = FakeObjectStore()
-        private val storesByBucket = mutableMapOf<String, FakeObjectStore>()
-        val connected = mutableListOf<ConnectionSettings>()
-        val closed = mutableListOf<ConnectionSettings>()
-        val logs = mutableListOf<String>()
-
-        /** 接続を閉じたこと（[CLOSED]）と、[stopNextGet] で止めた GET が取り消されたこと（[CANCELLED]）。起きた順。 */
-        val events = mutableListOf<String>()
-
-        /** 接続を作る直前に走らせる。 */
-        var onConnect: () -> Unit = {}
-
-        val controller = CloudMarksController(
-            appFiles = appFiles,
-            protector = protector,
-            connect = { settings ->
-                onConnect()
-                connected += settings
-                val sync = StorageSync(storesByBucket[settings.bucket] ?: store, InMemorySyncCache(), "desktop", TestTimeSource())
-                Connection(sync) {
-                    closed += settings
-                    events += CLOSED
-                }
-            },
-            log = { logs += it },
-            scope = scope.backgroundScope,
-            ioDispatcher = StandardTestDispatcher(scope.testScheduler),
-        )
-
-        val state: AppState get() = controller.state.value
-
-        val settingsFile: SettingsFile get() = SettingsFile(appFiles.settingsFile, FakeSecretProtector())
-
-        /** 保存済みの設定として [settings] を置く。 */
-        fun storeSettings(settings: ConnectionSettings = SETTINGS) {
-            assertEquals(SettingsWriteResult.Success, settingsFile.write(settings))
-        }
-
-        /** バケット [bucket] の接続が使う、[store] とは別のストレージを作る。 */
-        fun addStore(bucket: String): FakeObjectStore = FakeObjectStore().also { storesByBucket[bucket] = it }
-
-        val isManifest: (String) -> Boolean = { key -> key == manifestKey(store.prefix) }
-
-        /** [store] の、フォルダ [folderId] の項目ファイル [fileId] のキー。 */
-        fun itemsKey(folderId: String, fileId: String): String = itemsFileKey(store.prefix, folderId, fileId)
-
-        /**
-         * [store] の、[key] に合う次の GET を止める。返したものを完了させると進む。
-         * 止めているあいだに取り消されたら、[events] に [CANCELLED] を記録する。
-         */
-        fun stopNextGet(key: (String) -> Boolean): CompletableDeferred<Unit> {
-            val gate = CompletableDeferred<Unit>()
-            store.onNextGet(
-                GetFault.RunBefore {
-                    try {
-                        gate.await()
-                    } catch (cancellation: CancellationException) {
-                        events += CANCELLED
-                        throw cancellation
-                    }
-                },
-                key,
-            )
-            return gate
-        }
-    }
-
     /** 場合ごとの、フィクスチャの用意と、結果 [T] の確かめ方。 */
-    private data class Case<T>(val arrange: (Fixture) -> Unit, val check: (T) -> Unit)
+    private data class Case<T>(val arrange: (ControllerFixture) -> Unit, val check: (T) -> Unit)
 
     // 設定がまだ無いとき・読めないときは、最初に設定の画面を出し、読めない理由を持つ。メインの画面へは戻れず、接続も作らない
     @Test
@@ -188,7 +98,7 @@ class CloudMarksControllerTest {
             }) { problem -> assertIs<SettingsReadResult.Undecryptable>(problem) },
         )
         cases.forEach { (arrange, assertProblem) ->
-            val fixture = Fixture(this)
+            val fixture = ControllerFixture(this, temporaryFolder)
             arrange(fixture)
 
             fixture.controller.start()
@@ -207,9 +117,22 @@ class CloudMarksControllerTest {
     @Test
     fun createdControllerReadsSettingsWithGivenProtector() = runTest {
         val directory = temporaryFolder.root.toPath().resolve("created")
-        val appFiles = AppFiles(directory.resolve("settings.json"), directory.resolve("cache"), directory.resolve("logs"))
+        val appFiles = AppFiles(
+            settingsFile = directory.resolve("settings.json"),
+            cacheDirectory = directory.resolve("cache"),
+            logDirectory = directory.resolve("logs"),
+            stateDirectory = directory.resolve("state"),
+            displaySettingsFile = directory.resolve("display.json"),
+        )
         SettingsFile(appFiles.settingsFile, FakeSecretProtector(owner = 2)).write(SETTINGS)
-        val controller = createCloudMarksController(appFiles, FakeSecretProtector(), TestTimeSource(), "desktop", backgroundScope)
+        val controller = createCloudMarksController(
+            appFiles = appFiles,
+            protector = FakeSecretProtector(),
+            timeSource = TestTimeSource(),
+            updatedBy = "desktop",
+            deletesStaleFiles = false,
+            scope = backgroundScope,
+        )
 
         controller.start()
         val state = controller.state.first { it.screen != Screen.STARTING }
@@ -222,7 +145,7 @@ class CloudMarksControllerTest {
     // 設定の画面の入力には保存済みの値が入り、シークレットの欄は空
     @Test
     fun readableSettingsShowTree() = runTest {
-        val fixture = Fixture(this).apply {
+        val fixture = ControllerFixture(this, temporaryFolder).apply {
             store.seed()
             storeSettings()
         }
@@ -243,7 +166,7 @@ class CloudMarksControllerTest {
     // フォルダを開くと、マニフェストを GET せず、そのフォルダの項目ファイルだけを読む
     @Test
     fun openingFolderReadsOnlyItsFile() = runTest {
-        val fixture = Fixture(this).apply {
+        val fixture = ControllerFixture(this, temporaryFolder).apply {
             store.seed()
             storeSettings()
         }
@@ -264,7 +187,7 @@ class CloudMarksControllerTest {
     // 開いたフォルダの項目ファイルが 404 なら、マニフェストを読み直してツリーを替え、読み直したマニフェストが指す新しい項目ファイルを読む
     @Test
     fun missingFolderFileRereadsManifestAndReadsNewFile() = runTest {
-        val fixture = Fixture(this).apply {
+        val fixture = ControllerFixture(this, temporaryFolder).apply {
             store.seed()
             storeSettings()
         }
@@ -301,7 +224,7 @@ class CloudMarksControllerTest {
     // 開き直しても読み直さない
     @Test
     fun missingFolderFileStillReferencedAfterRereadIsBroken() = runTest {
-        val fixture = Fixture(this).apply {
+        val fixture = ControllerFixture(this, temporaryFolder).apply {
             store.seed()
             storeSettings()
         }
@@ -334,7 +257,7 @@ class CloudMarksControllerTest {
     // マニフェストを読み直し続けない
     @Test
     fun failedRereadAfterMissingFolderFileShowsFailure() = runTest {
-        val fixture = Fixture(this).apply {
+        val fixture = ControllerFixture(this, temporaryFolder).apply {
             store.seed()
             storeSettings()
         }
@@ -362,7 +285,7 @@ class CloudMarksControllerTest {
     // 履歴・選んでいた項目を保つ（B を開いて読み込みを止めているあいだに、A へ戻って項目を選ぶ）
     @Test
     fun rereadAfterMissingFolderFileKeepsBrowseState() = runTest {
-        val fixture = Fixture(this).apply {
+        val fixture = ControllerFixture(this, temporaryFolder).apply {
             store.seed()
             store.replaceItemsAsOtherWriter(FOLDER_B, B_FILE_ID, B_ITEMS)
             storeSettings()
@@ -379,7 +302,7 @@ class CloudMarksControllerTest {
         fixture.controller.openFolder(FOLDER_B)
         runCurrent()
         fixture.controller.back()
-        fixture.controller.selectItem(A_ITEMS.first().id)
+        fixture.controller.selectItem(A_ITEMS.first().id, SelectionMode.SINGLE)
         fixture.controller.toggleExpanded(FOLDER_B)
 
         gate.complete(Unit)
@@ -389,8 +312,9 @@ class CloudMarksControllerTest {
         assertEquals(fixture.store.storedManifest(), after.tree?.manifest)
         assertEquals(FOLDER_A, after.currentFolderId)
         assertEquals(listOf(ROOT_ID), after.history)
-        assertEquals(setOf(ROOT_ID, FOLDER_B), after.expandedFolders)
-        assertEquals(A_ITEMS.first().id, after.selectedItemId)
+        // 開いたときに開いた A と B のうち、B は閉じたまま
+        assertEquals(setOf(ROOT_ID, FOLDER_A), after.expandedFolders)
+        assertEquals(setOf(A_ITEMS.first().id), after.selectedItemIds)
         assertEquals(FolderReadResult.Loaded(A_ITEMS), after.currentItems)
         assertFalse(after.loading)
     }
@@ -398,7 +322,7 @@ class CloudMarksControllerTest {
     // 読み直すと、マニフェストを条件付きで GET し、開いていたフォルダを開いたまま、その項目を一緒に読む（ローカルキャッシュにあれば GET しない）
     @Test
     fun reloadRereadsManifestAndKeepsOpenFolder() = runTest {
-        val fixture = Fixture(this).apply {
+        val fixture = ControllerFixture(this, temporaryFolder).apply {
             store.seed()
             storeSettings()
         }
@@ -421,7 +345,7 @@ class CloudMarksControllerTest {
     // 読み直しが失敗したら、前に読めたツリーと開いていたフォルダの項目を残し、失敗を持つ。また読み直せる
     @Test
     fun failedReloadKeepsTreeAndHoldsFailure() = runTest {
-        val fixture = Fixture(this).apply {
+        val fixture = ControllerFixture(this, temporaryFolder).apply {
             store.seed()
             storeSettings()
         }
@@ -442,6 +366,28 @@ class CloudMarksControllerTest {
         assertEquals(SyncFailure.Unreachable("HTTP 500"), browse.failure)
         assertFalse(browse.loading)
         assertTrue(fixture.state.canReload)
+    }
+
+    // 読み直しの失敗の帯を閉じると、失敗を持たなくなる。前に読めたツリーと開いていたフォルダはそのまま
+    @Test
+    fun dismissingReadFailureClearsFailureAndKeepsTree() = runTest {
+        val fixture = ControllerFixture(this, temporaryFolder).apply {
+            store.seed()
+            storeSettings()
+        }
+        fixture.controller.start()
+        runCurrent()
+        val tree = fixture.state.browse.tree
+        fixture.store.onNextGet(GetFault.Forbidden, key = fixture.isManifest)
+        fixture.controller.reload()
+        runCurrent()
+        assertEquals(SyncFailure.Forbidden, fixture.state.browse.failure)
+
+        fixture.controller.dismissReadFailure()
+
+        assertNull(fixture.state.browse.failure)
+        assertEquals(tree, fixture.state.browse.tree)
+        assertEquals(FolderReadResult.Loaded(ROOT_ITEMS), fixture.state.browse.currentItems)
     }
 
     // 保存すると設定を書き、続けてマニフェストを読んで結果を見せる。読めたらメインの画面へ戻る。マニフェストが無ければ作れるようにする。
@@ -480,7 +426,7 @@ class CloudMarksControllerTest {
             },
         )
         cases.forEachIndexed { index, (arrange, assertState) ->
-            val fixture = Fixture(this)
+            val fixture = ControllerFixture(this, temporaryFolder)
             fixture.controller.start()
             runCurrent()
             arrange(fixture)
@@ -499,7 +445,7 @@ class CloudMarksControllerTest {
     // マニフェストが無いと分かったあとで「作成」を押すと、マニフェストを作り、メインの画面へ戻ってそのツリーを出す
     @Test
     fun createsManifestWhenMissing() = runTest {
-        val fixture = Fixture(this)
+        val fixture = ControllerFixture(this, temporaryFolder)
         fixture.controller.start()
         runCurrent()
         fixture.controller.editSettings(FILLED_FORM)
@@ -528,7 +474,7 @@ class CloudMarksControllerTest {
             SETTINGS.copy(region = "us-east-1") to false,
         )
         cases.forEach { (changed, deleted) ->
-            val fixture = Fixture(this).apply {
+            val fixture = ControllerFixture(this, temporaryFolder).apply {
                 store.seed()
                 storeSettings()
             }
@@ -555,7 +501,7 @@ class CloudMarksControllerTest {
     // 設定を保存して接続を作り直すときは、読んであったツリーを捨ててから新しい接続を作る（新しい接続と前のツリーが同時に存在しない）
     @Test
     fun savingClearsTreeBeforeConnecting() = runTest {
-        val fixture = Fixture(this).apply {
+        val fixture = ControllerFixture(this, temporaryFolder).apply {
             store.seed()
             storeSettings()
         }
@@ -576,7 +522,7 @@ class CloudMarksControllerTest {
     // 止めた読み込みが進めるようになっても、前の接続の結果は状態に入らず、読み込み中の表示も残らない
     @Test
     fun replacingConnectionCancelsStoppedReadBeforeClosing() = runTest {
-        val cases: List<Pair<String, (Fixture) -> CompletableDeferred<Unit>>> = listOf(
+        val cases: List<Pair<String, (ControllerFixture) -> CompletableDeferred<Unit>>> = listOf(
             // 読み直して、マニフェストの GET を止める
             "マニフェスト" to { fixture ->
                 fixture.stopNextGet(fixture.isManifest).also { fixture.controller.reload() }
@@ -588,7 +534,7 @@ class CloudMarksControllerTest {
             },
         )
         cases.forEach { (name, stopRead) ->
-            val fixture = Fixture(this).apply {
+            val fixture = ControllerFixture(this, temporaryFolder).apply {
                 store.seed()
                 storeSettings()
             }
@@ -621,7 +567,7 @@ class CloudMarksControllerTest {
     // 読み込みを止めたまま閉じると、接続を閉じ、止めた読み込みを取り消す。止めた読み込みが進めるようになっても、状態は変わらない
     @Test
     fun closingWhileReadingClosesConnectionAndFreezesState() = runTest {
-        val fixture = Fixture(this).apply {
+        val fixture = ControllerFixture(this, temporaryFolder).apply {
             store.seed()
             storeSettings()
         }
@@ -646,7 +592,7 @@ class CloudMarksControllerTest {
     // 空のまま保存したら、保存済みのシークレットを使う
     @Test
     fun emptySecretSavesStoredSecret() = runTest {
-        val fixture = Fixture(this).apply {
+        val fixture = ControllerFixture(this, temporaryFolder).apply {
             store.seed()
             storeSettings()
         }
@@ -670,7 +616,7 @@ class CloudMarksControllerTest {
     // 入力したシークレットが状態に載っているとき（暗号化が使えず保存を断られた後）も、状態を文字列にするとシークレットは出ない
     @Test
     fun stateStringHidesTypedSecret() = runTest {
-        val fixture = Fixture(this, protector = FakeSecretProtector(available = false))
+        val fixture = ControllerFixture(this, temporaryFolder, protector = FakeSecretProtector(available = false))
         fixture.controller.start()
         runCurrent()
 
@@ -686,7 +632,7 @@ class CloudMarksControllerTest {
     // 設定の画面から保存せずに戻ると、入力した値（シークレットを含む）を捨て、保存済みの設定から作り直す
     @Test
     fun backFromSettingsDiscardsInput() = runTest {
-        val fixture = Fixture(this).apply {
+        val fixture = ControllerFixture(this, temporaryFolder).apply {
             store.seed()
             storeSettings()
         }
@@ -705,7 +651,7 @@ class CloudMarksControllerTest {
     // 暗号化の仕組みが使えなければ、保存を断って理由を見せる。ファイルは書かず、接続も作らない
     @Test
     fun refusesToSaveWithoutProtection() = runTest {
-        val fixture = Fixture(this, protector = FakeSecretProtector(available = false))
+        val fixture = ControllerFixture(this, temporaryFolder, protector = FakeSecretProtector(available = false))
         fixture.controller.start()
         runCurrent()
 
@@ -722,7 +668,7 @@ class CloudMarksControllerTest {
     // 入力が足りなければ、足りない欄を見せて保存しない
     @Test
     fun incompleteFormIsNotSaved() = runTest {
-        val fixture = Fixture(this)
+        val fixture = ControllerFixture(this, temporaryFolder)
         fixture.controller.start()
         runCurrent()
 
@@ -733,5 +679,66 @@ class CloudMarksControllerTest {
         assertEquals(SettingsStatus.Incomplete(setOf(SettingsField.BUCKET, SettingsField.SECRET)), fixture.state.settings.status)
         assertFalse(fixture.appFiles.settingsFile.exists())
         assertEquals(emptyList(), fixture.connected)
+    }
+
+    // 表示の大きさを替えると、すぐ状態に入り、表示の設定のファイルに書く（接続の設定のファイルとは別）。
+    // 同じファイルを読むコントローラを作り直すと、起動したときに同じ大きさになる
+    @Test
+    fun displayScaleIsKeptAcrossControllers() = runTest {
+        val first = ControllerFixture(this, temporaryFolder).apply {
+            store.seed()
+            storeSettings()
+        }
+        first.controller.start()
+        runCurrent()
+        val settingsBefore = Files.readString(first.appFiles.settingsFile)
+
+        first.controller.setDisplayScale(SCALE_125)
+        assertEquals(SCALE_125, first.state.displayScale)
+        runCurrent()
+
+        assertEquals(SCALE_125, DisplaySettingsFile(first.appFiles.displaySettingsFile) {}.read())
+        assertEquals(settingsBefore, Files.readString(first.appFiles.settingsFile))
+
+        val recreated = ControllerFixture(this, temporaryFolder, directory = first.directory)
+        recreated.controller.start()
+        runCurrent()
+
+        assertEquals(SCALE_125, recreated.state.displayScale)
+    }
+
+    // いまと同じ大きさにしてもファイルを書かない。段を小さい順に替えると、最後に替えた段（いちばん大きい段）が状態とファイルに残る
+    @Test
+    fun lastOfScalesSetInTurnIsKept() = runTest {
+        val fixture = ControllerFixture(this, temporaryFolder)
+        fixture.controller.start()
+        runCurrent()
+
+        fixture.controller.setDisplayScale(DisplayScale.DEFAULT)
+        runCurrent()
+        assertFalse(fixture.appFiles.displaySettingsFile.exists())
+
+        DisplayScale.STEPS.forEach { fixture.controller.setDisplayScale(it) }
+        runCurrent()
+
+        assertEquals(DisplayScale.STEPS.last(), fixture.state.displayScale)
+        assertEquals(DisplayScale.STEPS.last(), DisplaySettingsFile(fixture.appFiles.displaySettingsFile) {}.read())
+    }
+
+    // 表示の設定のファイルが無いか読めなければ、既定の大きさで起動する。読めなかったことはログに書き、設定の読み込みは続ける
+    @Test
+    fun unreadableDisplaySettingsStartAtDefault() = runTest {
+        val fixture = ControllerFixture(this, temporaryFolder).apply {
+            store.seed()
+            storeSettings()
+        }
+        Files.writeString(fixture.appFiles.displaySettingsFile, "not json")
+
+        fixture.controller.start()
+        runCurrent()
+
+        assertEquals(DisplayScale.DEFAULT, fixture.state.displayScale)
+        assertEquals(1, fixture.logs.size)
+        assertEquals(Screen.MAIN, fixture.state.screen)
     }
 }

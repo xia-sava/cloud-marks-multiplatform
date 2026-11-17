@@ -15,6 +15,8 @@ S3 上の形式を変えるときは、`contracts/storage/` の見本も同じ�
   実行されるのは `:androidApp:test` と `:desktopApp:test` だけ。コードは `:shared` にあるため、**緑に見えて
   何も確かめていない**
 - **エントリポイントは `./gradlew check`。** `:shared:jvmTest` と `:shared:testAndroidHostTest` の両方を含む
+- 画面のテストは `:shared:jvmTest` の `ui/` にあり、`runComposeUiTest` で窓を出さずに描いて操作する。
+  アプリを起動しなくても走らせてよい
 - `check` は androidMain のコンパイルを含まない。Android 側のコンパイルまで見るなら
   `:shared:compileAndroidMain :androidApp:compileDebugKotlin` を足す
 - **Gradle は up-to-date だと黙って走らせ直さない。** テストを壊して判別力を確かめた後などは `--rerun-tasks` を

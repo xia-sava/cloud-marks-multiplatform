@@ -38,6 +38,16 @@ fun flattenFolderTree(tree: TreeState, expanded: Set<String>): List<FolderTreeRo
         visit(tree.rootId, depth = 0)
     }
 
+/** ツリーで開いているノード [this] の、[folderId] を開く、または閉じたもの。 */
+fun Set<String>.withToggled(folderId: String): Set<String> = if (folderId in this) this - folderId else this + folderId
+
 /** [folderId] の祖先のフォルダの ID。親からルートフォルダへ向かう順。ルートフォルダと、ツリーに無いフォルダには空。 */
 fun TreeState.ancestorsOf(folderId: String): List<String> =
     generateSequence(folders[folderId]?.parent) { folders[it]?.parent }.toList()
+
+/**
+ * フォルダ [folderId] と、その子孫のフォルダの項目の数の合計。マニフェストの各フォルダの `count` を足す（項目ファイルは読まない）。
+ * ツリーに無いフォルダは 0。
+ */
+fun TreeState.itemCountWithDescendants(folderId: String): Int =
+    folders[folderId]?.let { node -> node.count + node.children.sumOf { itemCountWithDescendants(it) } } ?: 0

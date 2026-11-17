@@ -14,10 +14,20 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
@@ -26,6 +36,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import to.sava.cloudmarksmultiplatform.app.SettingsScreenState
 import to.sava.cloudmarksmultiplatform.app.SettingsStatus
+import to.sava.cloudmarksmultiplatform.settings.DisplayScale
 import to.sava.cloudmarksmultiplatform.settings.SettingsField
 import to.sava.cloudmarksmultiplatform.settings.SettingsForm
 import to.sava.cloudmarksmultiplatform.settings.SettingsReadResult
@@ -46,21 +57,26 @@ private const val STORED_SECRET_HINT = "変更する場合だけ入力してく�
 private const val PREFIX_HINT = "空欄にすると、バケットの直下に保存します。"
 
 /**
- * 設定の画面。S3 の接続先と認証情報を入れて保存する。
+ * 設定の画面。S3 の接続先と認証情報を入れて保存する。その下で、画面全体の表示の大きさを選ぶ。
  *
  * シークレットは伏せ字で入れる。保存済みの設定があるときは、シークレットの欄を空にして [STORED_SECRET_HINT] を添える。
  * 保存済みのシークレットは画面に出さない。
+ * 表示の大きさは、選ぶとすぐに [onDisplayScaleChange] へ渡し、保存の操作を要しない。保存の最中でも選べる。
  *
+ * @param displayScale いまの表示の大きさ
  * @param onEdit 入力を変えたときに、変えたあとの入力を渡す
  * @param onSave 保存する
  * @param onCreateManifest マニフェストが無いと分かったあとで、マニフェストを作る
+ * @param onDisplayScaleChange 表示の大きさを選んだときに、選んだ段を渡す
  */
 @Composable
 internal fun SettingsScreen(
     settings: SettingsScreenState,
+    displayScale: DisplayScale,
     onEdit: (SettingsForm) -> Unit,
     onSave: () -> Unit,
     onCreateManifest: () -> Unit,
+    onDisplayScaleChange: (DisplayScale) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val form = settings.form
@@ -109,6 +125,40 @@ internal fun SettingsScreen(
             )
             Button(onClick = onSave, enabled = !busy) { Text("保存") }
             SettingsStatusView(settings.status, onCreateManifest)
+            HorizontalDivider()
+            DisplayScaleField(displayScale, onDisplayScaleChange)
+        }
+    }
+}
+
+/**
+ * 表示の大きさを選ぶ欄。題は [DISPLAY_SCALE_LABEL]、いまの段を `80%` のように出し（[displayScaleLabel]）、押すと段の一覧を開く。
+ * 段を選ぶと一覧を閉じ、[onChange] に選んだ段を渡す。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DisplayScaleField(scale: DisplayScale, onChange: (DisplayScale) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = displayScaleLabel(scale),
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            label = { Text(DISPLAY_SCALE_LABEL) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DisplayScale.STEPS.forEach { step ->
+                DropdownMenuItem(
+                    text = { Text(displayScaleLabel(step)) },
+                    onClick = {
+                        expanded = false
+                        onChange(step)
+                    },
+                )
+            }
         }
     }
 }

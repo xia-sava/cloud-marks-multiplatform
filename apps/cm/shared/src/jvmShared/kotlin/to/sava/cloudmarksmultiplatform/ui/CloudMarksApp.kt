@@ -19,20 +19,25 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
@@ -41,6 +46,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
@@ -52,8 +58,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.max
@@ -63,7 +71,10 @@ import kotlinx.coroutines.flow.filter
 import to.sava.cloudmarksmultiplatform.app.AppState
 import to.sava.cloudmarksmultiplatform.app.CloudMarksController
 import to.sava.cloudmarksmultiplatform.app.Screen
+import to.sava.cloudmarksmultiplatform.app.UndoableDelete
+import to.sava.cloudmarksmultiplatform.app.WriteState
 import to.sava.cloudmarksmultiplatform.browse.BrowseState
+import to.sava.cloudmarksmultiplatform.settings.DisplayScale
 
 /** 広い画面での、ツリーの枠の幅の初め。 */
 private val DEFAULT_TREE_PANE_WIDTH = 280.dp
@@ -98,6 +109,8 @@ private data class MainPaneState(
 
 /**
  * Cloud Marks の画面。[controller] の状態を描き、利用者の操作を [controller] へ渡す。
+ * 画面全体を、表示の大きさ（[AppState.displayScale]）で拡大縮小して描く。メインの画面と設定の画面の上で、Ctrl を押しながらホイールを
+ * 縦に回すと、表示の大きさを 1 段ずつ替える（[displayScaleWheel]）。
  *
  * [controller] は呼ぶ側が `createCloudMarksController` で組み立て、[CloudMarksController.start] で動かし始め、
  * 使い終えたら [CloudMarksController.close] で閉じる。
@@ -111,36 +124,113 @@ fun CloudMarksApp(controller: CloudMarksController) {
         // フォルダを替えたら、リストを先頭から見せる
         itemListState = remember(state.browse.currentFolderId) { LazyListState() },
     )
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
-        Surface(modifier = Modifier.fillMaxSize()) {
-            CloudMarksScreen(state, controller, panes)
+    ScaledDensity(state.displayScale) {
+        MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
+            Surface(modifier = Modifier.fillMaxSize().displayScaleWheel(controller)) {
+                CloudMarksScreen(state, controller, panes)
+            }
         }
     }
 }
 
+/** [content] を、いまの画面の密度に [scale] の倍率を掛けた密度で描く。文字の大きさの倍率はそのまま。 */
+@Composable
+private fun ScaledDensity(scale: DisplayScale, content: @Composable () -> Unit) {
+    val density = LocalDensity.current
+    val scaled = remember(density, scale) { Density(density.density * scale.factor, density.fontScale) }
+    CompositionLocalProvider(LocalDensity provides scaled, content = content)
+}
+
+/**
+ * 画面の幅の区分に合わせてメインの画面を組み、データを変える操作のダイアログと、項目を消したあとのお知らせと、ドラッグ中の札を重ねる。
+ * ダイアログとドラッグの状態は、窓の幅の区分が替わっても保つ。ドラッグを始めたあとのポインターは、窓いっぱいの枠で追う（[moveDragTracker]）。
+ */
 @Composable
 private fun CloudMarksScreen(state: AppState, controller: CloudMarksController, panes: MainPaneState) {
     val wide = currentWindowAdaptiveInfoV2().windowSizeClass
         .isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND)
     LaunchedEffect(wide) { controller.setWideLayout(wide) }
 
-    if (state.screen == Screen.MAIN && !wide) {
-        NarrowMainScreen(state, controller, panes)
-        return
+    var dialog by remember { mutableStateOf<OperationDialog?>(null) }
+    val dragState = remember { MoveDragState() }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val canWrite = state.canWrite
+    // 受け取るリストとツリーの行が、状態が替わるたびに描き直されないよう、受け付けるかどうかが替わったときだけ作り直す
+    val operations = remember(canWrite, controller, dragState) {
+        OperationActions(
+            canWrite = canWrite,
+            dragState = dragState,
+            onOpenDialog = { dialog = it },
+            onDeleteSelectedItems = controller::deleteSelectedItems,
+            onMove = controller::moveTo,
+        )
     }
-    Column(Modifier.fillMaxSize()) {
-        CloudMarksTopBar(state, controller)
-        when (state.screen) {
-            Screen.STARTING -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-            Screen.SETTINGS -> SettingsScreen(
-                settings = state.settings,
-                onEdit = controller::editSettings,
-                onSave = controller::saveSettings,
-                onCreateManifest = controller::createManifest,
+    UndoDeleteNotice(
+        undoable = state.write.undoableDelete,
+        visible = state.screen == Screen.MAIN,
+        hostState = snackbarHostState,
+        onUndo = controller::undoDelete,
+        onDismiss = controller::dismissUndo,
+    )
+    Box(Modifier.fillMaxSize().moveDragTracker(dragState, onDrop = operations.onMove)) {
+        if (state.screen == Screen.MAIN && !wide) {
+            NarrowMainScreen(state, controller, panes, operations)
+        } else {
+            Column(Modifier.fillMaxSize()) {
+                CloudMarksTopBar(state, controller, operations)
+                when (state.screen) {
+                    Screen.STARTING -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                    Screen.SETTINGS -> SettingsScreen(
+                        settings = state.settings,
+                        displayScale = state.displayScale,
+                        onEdit = controller::editSettings,
+                        onSave = controller::saveSettings,
+                        onCreateManifest = controller::createManifest,
+                        onDisplayScaleChange = controller::setDisplayScale,
+                    )
+                    Screen.MAIN -> {
+                        MainBanners(state, controller)
+                        WideMainBody(state.browse, controller, panes, operations)
+                    }
+                }
+            }
+        }
+        SnackbarHost(snackbarHostState, Modifier.align(Alignment.BottomCenter))
+        MoveDragLabel(dragState, state.browse)
+    }
+    dialog?.let { OperationDialogHost(it, state, controller, onClose = { dialog = null }) }
+}
+
+/**
+ * [visible] のあいだ（メインの画面を出しているあいだ）、元に戻せる項目の削除 [undoable] があれば、画面の下にお知らせを出す。
+ * [UNDO_LABEL] を押したら [onUndo] を呼び、受け付けられなければ（false が返れば）、同じお知らせを出し直す。
+ * 押さずに閉じたら（時間切れを含む）[onDismiss] を呼ぶ。[undoable] が替わるか無くなるか、[visible] が偽になったら、
+ * 出しているお知らせを閉じる。
+ */
+@Composable
+private fun UndoDeleteNotice(
+    undoable: UndoableDelete?,
+    visible: Boolean,
+    hostState: SnackbarHostState,
+    onUndo: () -> Boolean,
+    onDismiss: () -> Unit,
+) {
+    val currentOnUndo by rememberUpdatedState(onUndo)
+    val currentOnDismiss by rememberUpdatedState(onDismiss)
+    LaunchedEffect(undoable, visible) {
+        if (undoable == null || !visible) return@LaunchedEffect
+        while (true) {
+            val result = hostState.showSnackbar(
+                message = deletedItemsNotice(undoable.count),
+                actionLabel = UNDO_LABEL,
+                duration = SnackbarDuration.Long,
             )
-            Screen.MAIN -> {
-                BrowseBanners(state.browse)
-                WideMainBody(state.browse, controller, panes)
+            when (result) {
+                SnackbarResult.ActionPerformed -> if (currentOnUndo()) return@LaunchedEffect
+                SnackbarResult.Dismissed -> {
+                    currentOnDismiss()
+                    return@LaunchedEffect
+                }
             }
         }
     }
@@ -151,7 +241,12 @@ private fun CloudMarksScreen(state: AppState, controller: CloudMarksController, 
  * （閉じているあいだはジェスチャーを受けない）。開いたドロワーは、スワイプや外側を押す操作で閉じられる。
  */
 @Composable
-private fun NarrowMainScreen(state: AppState, controller: CloudMarksController, panes: MainPaneState) {
+private fun NarrowMainScreen(
+    state: AppState,
+    controller: CloudMarksController,
+    panes: MainPaneState,
+    operations: OperationActions,
+) {
     val browse = state.browse
     val drawerState = rememberDrawerState(if (browse.drawerOpen) DrawerValue.Open else DrawerValue.Closed)
     LaunchedEffect(browse.drawerOpen) {
@@ -173,18 +268,21 @@ private fun NarrowMainScreen(state: AppState, controller: CloudMarksController, 
                 FolderTreePane(
                     browse = browse,
                     listState = panes.treeListState,
+                    actions = operations,
                     onOpen = controller::openFolder,
                     onToggle = controller::toggleExpanded,
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
         },
     ) {
         Column(Modifier.fillMaxSize()) {
-            CloudMarksTopBar(state, controller)
-            BrowseBanners(browse)
+            CloudMarksTopBar(state, controller, operations)
+            MainBanners(state, controller)
             FolderListPane(
                 browse = browse,
                 listState = panes.itemListState,
+                actions = operations,
                 onOpenFolder = controller::openFolder,
                 onSelectItem = controller::selectItem,
             )
@@ -205,15 +303,18 @@ private fun DrawerTopRow(onClose: () -> Unit) {
             .padding(start = APP_BAR_HORIZONTAL_PADDING),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onClose) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "フォルダの一覧を閉じる")
-        }
+        TooltipIconButton(Icons.AutoMirrored.Filled.ArrowBack, CLOSE_DRAWER_DESCRIPTION, onClick = onClose)
     }
 }
 
 /** 広い画面のメインの画面の本体。左にツリーの枠、右にリスト。境目をドラッグしてツリーの枠の幅を変える。 */
 @Composable
-private fun WideMainBody(browse: BrowseState, controller: CloudMarksController, panes: MainPaneState) {
+private fun WideMainBody(
+    browse: BrowseState,
+    controller: CloudMarksController,
+    panes: MainPaneState,
+    operations: OperationActions,
+) {
     var paneWidth by panes.treePaneWidth
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val maxPaneWidth = max(MIN_TREE_PANE_WIDTH, maxWidth * MAX_TREE_PANE_FRACTION)
@@ -222,6 +323,7 @@ private fun WideMainBody(browse: BrowseState, controller: CloudMarksController, 
                 FolderTreePane(
                     browse = browse,
                     listState = panes.treeListState,
+                    actions = operations,
                     onOpen = controller::openFolder,
                     onToggle = controller::toggleExpanded,
                     modifier = Modifier.width(paneWidth.coerceIn(MIN_TREE_PANE_WIDTH, maxPaneWidth)).fillMaxHeight(),
@@ -234,6 +336,7 @@ private fun WideMainBody(browse: BrowseState, controller: CloudMarksController, 
             FolderListPane(
                 browse = browse,
                 listState = panes.itemListState,
+                actions = operations,
                 onOpenFolder = controller::openFolder,
                 onSelectItem = controller::selectItem,
                 modifier = Modifier.weight(1f).fillMaxHeight(),
@@ -261,51 +364,110 @@ private fun PaneDivider(onDrag: (Dp) -> Unit) {
     }
 }
 
-/** マニフェストを読んでいる最中のインジケーターと、読むだけにしていること・読み直しに失敗したことの知らせ。 */
+/** メインの画面の、AppBar の下に並べる帯。マニフェストを読んだ様子（[BrowseBanners]）と、操作を書いた様子（[WriteBanner]）。 */
 @Composable
-private fun BrowseBanners(browse: BrowseState) {
+private fun MainBanners(state: AppState, controller: CloudMarksController) {
+    BrowseBanners(state.browse, onDismissFailure = controller::dismissReadFailure)
+    WriteBanner(state.write, onDismissOutcome = controller::dismissWriteOutcome)
+}
+
+/**
+ * マニフェストを読んでいる最中のインジケーターと、読むだけにしていること・読み直しに失敗したことを伝える帯。
+ * 読み直しに失敗したことの帯は、[CLOSE_LABEL] を押すと [onDismissFailure] を呼ぶ。
+ */
+@Composable
+private fun BrowseBanners(browse: BrowseState, onDismissFailure: () -> Unit) {
     if (browse.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
     if (browse.tree == null) return
     if (browse.readOnly) Banner(UiMessage(READ_ONLY_NOTICE))
-    browse.failure?.let { Banner(describeSyncFailure(it)) }
+    browse.failure?.let { Banner(describeSyncFailure(it), onDismiss = onDismissFailure) }
 }
 
+/**
+ * データを変える操作を書いている最中と、書いた結果を伝える帯。書けて伝えることが無ければ出さない。
+ * 書いた結果の帯は、[CLOSE_LABEL] を押すと [onDismissOutcome] を呼ぶ。
+ */
 @Composable
-private fun Banner(message: UiMessage) {
-    MessageText(
-        message = message,
-        color = MaterialTheme.colorScheme.onErrorContainer,
+private fun WriteBanner(write: WriteState, onDismissOutcome: () -> Unit) {
+    if (write.writing) {
+        Banner(
+            message = UiMessage(WRITING_NOTICE),
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+        return
+    }
+    write.outcome?.let(::describeWriteOutcome)?.let { Banner(it, onDismiss = onDismissOutcome) }
+}
+
+/**
+ * メインの画面の帯。色を指定しなければ、誤りの色で出す。
+ *
+ * @param onDismiss 帯の右端の [CLOSE_LABEL] を押したとき。null なら、ボタンを置かない
+ */
+@Composable
+private fun Banner(
+    message: UiMessage,
+    containerColor: Color = MaterialTheme.colorScheme.errorContainer,
+    contentColor: Color = MaterialTheme.colorScheme.onErrorContainer,
+    onDismiss: (() -> Unit)? = null,
+) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.errorContainer)
+            .background(containerColor)
             .padding(BANNER_PADDING),
-    )
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        MessageText(message = message, color = contentColor, modifier = Modifier.weight(1f))
+        onDismiss?.let { dismiss ->
+            TextButton(onClick = dismiss, colors = ButtonDefaults.textButtonColors(contentColor = contentColor)) {
+                Text(CLOSE_LABEL)
+            }
+        }
+    }
 }
 
-/** 最上部の AppBar。左にハンバーガーと戻るボタン、右に読み直すボタンと歯車。 */
+/**
+ * 最上部の AppBar。左にハンバーガーと戻るボタン、右に読み直すボタンと歯車。
+ * メインの画面で項目を選んでいるあいだは、読み直すボタンの左に、選んでいる項目を消すボタンと移すボタンを出す。
+ * どのボタンも、ボタンの説明をツールチップに出す。
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CloudMarksTopBar(state: AppState, controller: CloudMarksController) {
+private fun CloudMarksTopBar(state: AppState, controller: CloudMarksController, operations: OperationActions) {
     val onMain = state.screen == Screen.MAIN
     TopAppBar(
         title = { Text(titleOf(state), maxLines = 1, overflow = TextOverflow.Ellipsis) },
         navigationIcon = {
             Row {
-                IconButton(onClick = controller::toggleTreePane, enabled = onMain) {
-                    Icon(Icons.Filled.Menu, contentDescription = "フォルダの一覧")
-                }
-                IconButton(onClick = controller::back, enabled = state.canGoBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る")
-                }
+                TooltipIconButton(Icons.Filled.Menu, TREE_PANE_DESCRIPTION, onClick = controller::toggleTreePane, enabled = onMain)
+                TooltipIconButton(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    BACK_DESCRIPTION,
+                    onClick = controller::back,
+                    enabled = state.canGoBack,
+                )
             }
         },
         actions = {
-            IconButton(onClick = controller::reload, enabled = state.canReload) {
-                Icon(Icons.Filled.Refresh, contentDescription = "再読み込み")
+            val selectedItemIds = state.browse.selectedItemIds
+            if (onMain && selectedItemIds.isNotEmpty()) {
+                TooltipIconButton(
+                    Icons.Filled.Delete,
+                    DELETE_LABEL,
+                    onClick = operations.onDeleteSelectedItems,
+                    enabled = operations.canWrite,
+                )
+                TooltipIconButton(
+                    MoveToFolderIcon,
+                    MOVE_LABEL,
+                    onClick = { operations.openMoveDialog(state.browse) },
+                    enabled = operations.canWrite,
+                )
             }
-            IconButton(onClick = controller::openSettings, enabled = onMain) {
-                Icon(Icons.Filled.Settings, contentDescription = "設定")
-            }
+            TooltipIconButton(Icons.Filled.Refresh, RELOAD_DESCRIPTION, onClick = controller::reload, enabled = state.canReload)
+            TooltipIconButton(Icons.Filled.Settings, SETTINGS_DESCRIPTION, onClick = controller::openSettings, enabled = onMain)
         },
     )
 }

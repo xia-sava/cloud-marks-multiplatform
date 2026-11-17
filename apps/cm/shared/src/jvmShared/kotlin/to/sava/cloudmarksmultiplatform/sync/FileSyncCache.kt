@@ -30,15 +30,21 @@ private const val CONNECTION_NAME_SEPARATOR = "\n"
 private val HASH_NAME_PATTERN = Regex("[0-9a-f]{64}")
 
 /**
- * 接続先のバケットとプレフィックスに対する、ローカルキャッシュのディレクトリを返す。
+ * 接続先のバケットとプレフィックスから決まる名前。端末に置くファイルやディレクトリを、接続先ごとに分けるのに使う。
  *
- * 名前は、バケットと（前後の `/` を除いた）プレフィックスから決まる SHA-256 の 16 進で、パスとして安全な固定長になる。
- * 接続先が同じなら、アプリと Native Messaging のホストのように別のプロセスでも同じディレクトリになる。
+ * バケットと（前後の `/` を除いた）プレフィックスから決まる SHA-256 の 16 進で、パスとして安全な固定長になる。
+ * 接続先が同じなら、アプリと Native Messaging のホストのように別のプロセスでも同じ名前になる。
+ */
+fun connectionName(bucket: String, prefix: String): String =
+    sha256Hex(bucket + CONNECTION_NAME_SEPARATOR + normalizePrefix(prefix))
+
+/**
+ * 接続先のバケットとプレフィックスに対する、ローカルキャッシュのディレクトリを返す。名前は [connectionName]。
  *
  * @param root キャッシュ全体のルートディレクトリ
  */
 fun connectionCacheDirectory(root: Path, bucket: String, prefix: String): Path =
-    root.resolve(sha256Hex(bucket + CONNECTION_NAME_SEPARATOR + normalizePrefix(prefix)))
+    root.resolve(connectionName(bucket, prefix))
 
 /**
  * ファイルで持つローカルキャッシュ。アプリを閉じても残る。接続先ごとに 1 つ作る。

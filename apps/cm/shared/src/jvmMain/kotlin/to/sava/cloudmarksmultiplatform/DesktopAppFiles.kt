@@ -11,6 +11,9 @@ private const val CACHE_DIRECTORY_NAME = "cache"
 /** ログのファイルを置くディレクトリの名前。 */
 private const val LOG_DIRECTORY_NAME = "logs"
 
+/** 次の起動へ持ち越す記録を置くディレクトリの名前。 */
+private const val STATE_DIRECTORY_NAME = "state"
+
 /** Windows で、ユーザーごとの、ほかの PC へ持ち出さないデータを置く場所を指す環境変数。 */
 private const val LOCAL_APP_DATA = "LOCALAPPDATA"
 
@@ -19,7 +22,8 @@ private const val USER_HOME = "user.home"
 /**
  * デスクトップのアプリが端末に置くファイルの場所。
  *
- * `%LOCALAPPDATA%\CloudMarks` の直下に設定のファイルを、その下の `cache` にローカルキャッシュを、`logs` にログを置く。
+ * `%LOCALAPPDATA%\CloudMarks` の直下に設定のファイルと表示の設定のファイルを、その下の `cache` にローカルキャッシュを、
+ * `logs` にログを、`state` に次の起動へ持ち越す記録を置く。
  * 環境変数 `LOCALAPPDATA` が無ければ、ホームの下の `CloudMarks` を使う。
  */
 fun desktopAppFiles(): AppFiles =
@@ -31,6 +35,8 @@ internal fun desktopAppFilesIn(directory: Path): AppFiles =
         settingsFile = directory.resolve(SETTINGS_FILE_NAME),
         cacheDirectory = directory.resolve(CACHE_DIRECTORY_NAME),
         logDirectory = directory.resolve(LOG_DIRECTORY_NAME),
+        stateDirectory = directory.resolve(STATE_DIRECTORY_NAME),
+        displaySettingsFile = directory.resolve(DISPLAY_SETTINGS_FILE_NAME),
     )
 
 /** [localAppData]（環境変数 `LOCALAPPDATA` の値）の下、それが無いか空なら [userHome] の下の `CloudMarks`。 */

@@ -19,6 +19,7 @@ fun main() {
         protector = WindowsDpapiProtector,
         timeSource = TimeSource.Monotonic,
         updatedBy = UPDATED_BY,
+        deletesStaleFiles = true,
         scope = scope,
     )
     controller.start()

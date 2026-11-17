@@ -1,5 +1,6 @@
 package to.sava.cloudmarksmultiplatform.browse
 
+import to.sava.cloudmarksmultiplatform.sync.fileId
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -71,11 +72,42 @@ class FolderTreeTest {
         assertEquals(listOf(true, false, false), rows.map { it.isRoot })
     }
 
+    // 開いているノードに含まれていれば閉じ（除き）、含まれていなければ開く（足す）。ほかのノードは変えない
+    @Test
+    fun toggledFlipsOnlyGivenFolder() {
+        assertEquals(setOf(ROOT), setOf(ROOT, A).withToggled(A))
+        assertEquals(setOf(ROOT, A, B), setOf(ROOT, A).withToggled(B))
+    }
+
     // 祖先は、親からルートフォルダへ向かう順。ルートフォルダと、ツリーに無いフォルダには祖先が無い
     @Test
     fun ancestorsFromParentToRoot() {
         assertEquals(listOf(A1, A, ROOT), tree.ancestorsOf(A1A))
         assertEquals(emptyList(), tree.ancestorsOf(ROOT))
         assertEquals(emptyList(), tree.ancestorsOf("unknown"))
+    }
+
+    // 項目の数は、そのフォルダと子孫のフォルダの、マニフェストの count の合計。項目ファイルを読んでいなくても数える。
+    // 子孫の無いフォルダはそのフォルダの count だけ、ツリーに無いフォルダは 0
+    @Test
+    fun itemCountAddsDescendantCounts() {
+        // ルートフォルダ 1、A 2、A1 4、A1a 8、A2 16、B 32 件
+        val counts = mapOf(ROOT to 1, A to 2, A1 to 4, A1A to 8, A2 to 16, B to 32)
+        val entries = treeEntries().mapIndexed { index, entry ->
+            entry.copy(items = fileId(index + 10), count = counts.getValue(entry.id))
+        }
+        val counted = loadedTree(entries).state
+        val expected = mapOf(
+            ROOT to 63,
+            A to 2 + 4 + 8 + 16,
+            A1 to 4 + 8,
+            A1A to 8,
+            A2 to 16,
+            B to 32,
+            "unknown" to 0,
+        )
+
+        assertEquals(expected, expected.keys.associateWith { counted.itemCountWithDescendants(it) })
+        assertEquals(emptyMap(), counted.items.filterKeys { it in counts })
     }
 }

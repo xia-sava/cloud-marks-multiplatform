@@ -1,6 +1,8 @@
 package to.sava.cloudmarksmultiplatform.ui
 
 import to.sava.cloudmarksmultiplatform.app.SettingsStatus
+import to.sava.cloudmarksmultiplatform.app.WriteOutcome
+import to.sava.cloudmarksmultiplatform.settings.DisplayScale
 import to.sava.cloudmarksmultiplatform.settings.SettingsReadResult
 import to.sava.cloudmarksmultiplatform.storage.StorageProblem
 import to.sava.cloudmarksmultiplatform.sync.SyncFailure
@@ -11,11 +13,109 @@ internal const val ROOT_FOLDER_LABEL = "トップ"
 internal const val APP_TITLE = "Cloud Marks"
 internal const val SETTINGS_TITLE = "設定"
 
-/** マニフェストの `version` が知っている版より新しく、読むだけにしていることの知らせ。 */
+/** マニフェストの `version` が知っている版より新しく、読むだけにしていることを伝える文。 */
 internal const val READ_ONLY_NOTICE = "データの形式が新しいため、表示はできますが変更はできません。アプリを更新してください。"
 
-/** フォルダが空であることの知らせ。 */
+/** フォルダが空であることを伝える文。 */
 internal const val EMPTY_FOLDER_NOTICE = "このフォルダは空です。"
+
+/** 消す操作。AppBar のボタン、項目とフォルダのメニューの項目、フォルダの削除の確認の、確定のボタン。 */
+internal const val DELETE_LABEL = "削除"
+
+/** 移す操作。AppBar のボタン、項目とフォルダのメニューの項目、移動先を選ぶダイアログの、確定のボタン。 */
+internal const val MOVE_LABEL = "移動"
+
+/** 項目のタイトルを変える操作。項目のメニューの項目と、ダイアログの題。 */
+internal const val RENAME_ITEM_LABEL = "タイトルを変更"
+
+/** フォルダの名前を変える操作。フォルダのメニューの項目と、ダイアログの題。 */
+internal const val RENAME_FOLDER_LABEL = "名前を変更"
+
+/** フォルダを作る操作。フォルダのメニューの項目と、ダイアログの題。 */
+internal const val NEW_FOLDER_LABEL = "新しいフォルダ"
+
+/** 項目のタイトルを変えるダイアログの、入力欄。 */
+internal const val TITLE_FIELD_LABEL = "タイトル"
+
+/** フォルダの名前を入れるダイアログの、入力欄。 */
+internal const val NAME_FIELD_LABEL = "名前"
+
+/** 名前とタイトルを変えるダイアログの、確定のボタン。 */
+internal const val CHANGE_LABEL = "変更"
+
+/** フォルダを作るダイアログの、確定のボタン。 */
+internal const val CREATE_LABEL = "作成"
+
+/** ダイアログを閉じるボタン。 */
+internal const val CANCEL_LABEL = "キャンセル"
+
+/** フォルダの名前を入れるダイアログで、名前が空のときに欄の下に添える文。 */
+internal const val EMPTY_NAME_NOTICE = "名前を入力してください。"
+
+/** フォルダの削除の確認の題。 */
+internal const val DELETE_FOLDER_TITLE = "フォルダを削除しますか？"
+
+/** 移動先を選ぶダイアログの題。 */
+internal const val MOVE_DESTINATION_TITLE = "移動先のフォルダを選んでください"
+
+/** 項目の削除を戻す、お知らせのボタン。 */
+internal const val UNDO_LABEL = "元に戻す"
+
+/** 書き込みの結果の帯と、マニフェストの読み込みの失敗の帯を閉じるボタン。 */
+internal const val CLOSE_LABEL = "閉じる"
+
+/** データを変える操作を書いている最中であることを伝える文。 */
+internal const val WRITING_NOTICE = "保存しています…"
+
+/** AppBar の、ツリーを出し入れするボタン。ボタンの説明とツールチップに使う。 */
+internal const val TREE_PANE_DESCRIPTION = "フォルダの一覧"
+
+/** AppBar の、戻るボタン。ボタンの説明とツールチップに使う。 */
+internal const val BACK_DESCRIPTION = "戻る"
+
+/** ドロワーの、ドロワーを閉じるボタン。ボタンの説明とツールチップに使う。 */
+internal const val CLOSE_DRAWER_DESCRIPTION = "フォルダの一覧を閉じる"
+
+/** AppBar の、マニフェストを読み直すボタン。ボタンの説明とツールチップに使う。 */
+internal const val RELOAD_DESCRIPTION = "再読み込み"
+
+/** AppBar の、設定の画面を開くボタン。ボタンの説明とツールチップに使う。 */
+internal const val SETTINGS_DESCRIPTION = "設定"
+
+/** ツリーの、閉じたノードを開くボタン。ボタンの説明とツールチップに使う。 */
+internal const val EXPAND_DESCRIPTION = "展開"
+
+/** ツリーの、開いたノードを閉じるボタン。ボタンの説明とツールチップに使う。 */
+internal const val COLLAPSE_DESCRIPTION = "折りたたみ"
+
+/** 設定の画面の、表示の大きさを選ぶ欄の題。 */
+internal const val DISPLAY_SCALE_LABEL = "表示の大きさ"
+
+/** 表示の大きさの段 [scale] の表記。`80%` のように、百分率の数字に `%` を付ける。 */
+internal fun displayScaleLabel(scale: DisplayScale): String = "${scale.percent}%"
+
+/** 項目を [count] 件消したあとの、お知らせの本文。 */
+internal fun deletedItemsNotice(count: Int): String = "$count 件の項目を削除しました。"
+
+/** 2 つ以上の項目をドラッグしているあいだの札。[count] はドラッグしている項目の数。 */
+internal fun draggedItemsLabel(count: Int): String = "$count 件の項目"
+
+/** フォルダ [name] の削除の確認の本文。 */
+internal fun deleteFolderConfirmation(name: String): String =
+    "「$name」と、その中のフォルダと項目をすべて削除します。この操作は元に戻せません。"
+
+/** データを変える操作の結果を、利用者に見せる文にする。書けて、伝えることが無ければ null。 */
+internal fun describeWriteOutcome(outcome: WriteOutcome): UiMessage? =
+    when (outcome) {
+        WriteOutcome.Written -> null
+        is WriteOutcome.NotApplied -> UiMessage("対象が見つからなかったため、一部の変更を反映できませんでした。")
+        is WriteOutcome.Unconfirmed ->
+            UiMessage("変更を保存できたかどうかを確認できませんでした。再読み込みして確認してください。")
+        is WriteOutcome.Failed ->
+            describeSyncFailure(outcome.failure).let { failure ->
+                failure.copy(text = "変更を保存できませんでした。\n${failure.text}")
+            }
+    }
 
 /**
  * 利用者に見せる文。

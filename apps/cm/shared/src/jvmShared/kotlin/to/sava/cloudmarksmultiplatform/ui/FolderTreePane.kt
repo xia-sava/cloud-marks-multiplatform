@@ -18,10 +18,11 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
@@ -31,8 +32,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import to.sava.cloudmarksmultiplatform.browse.BrowseState
+import to.sava.cloudmarksmultiplatform.browse.DropRow
 import to.sava.cloudmarksmultiplatform.browse.FolderTreeRow
+import to.sava.cloudmarksmultiplatform.browse.MoveSubject
 import to.sava.cloudmarksmultiplatform.browse.flattenFolderTree
+import to.sava.cloudmarksmultiplatform.browse.treeDrop
+import to.sava.cloudmarksmultiplatform.browse.treeEndDrop
 
 /** ツリーの 1 行の高さ。 */
 private val TREE_ROW_HEIGHT = 36.dp
@@ -49,12 +54,24 @@ private val TREE_ICON_SIZE = 20.dp
 private val TREE_ICON_GAP = 8.dp
 private val TREE_ROW_END_PADDING = 8.dp
 
+/** 押せない行の、アイコンと文字の不透明度。Material Design の、無効にした要素の中身の不透明度。 */
+private const val DISABLED_CONTENT_ALPHA = 0.38f
+
 /**
- * フォルダのツリー。マニフェストだけで描き、開いているノードの子だけを平らにして並べる。
+ * メインの画面の、フォルダのツリー。マニフェストだけで描き、開いているノードの子だけを平らにして並べる。
  * ルートフォルダは最上段に、家のアイコンと「トップ」で出す。開いているフォルダの行を強調し、開いているフォルダが替わったら、
  * その行が見える位置までスクロールする。
  *
+ * 行を右クリックするとフォルダのメニュー（[FolderMenuItems]）を出す。[dragsToMove] のプラットフォームでは、ルートフォルダ以外の行を
+ * ドラッグして、別の行へ落とせる（[treeDrop]）。行の上の端に落とすとその行の前へ、下の端に落とすとその行の後ろへ（開いていて子のある
+ * 行なら、その先頭の子の前へ）並べ替え、真ん中に落とすと、その行のフォルダの子のフォルダの末尾へ移す。リストの項目とフォルダを
+ * ドラッグしてきたときも同じ（項目は行のどこでも中へ）。最後の行より下の空いたところに落とすと、フォルダはルートフォルダの子の末尾へ、
+ * 項目はルートフォルダの中へ移す（[treeEndDrop]）。
+ * ドラッグしているあいだは、中へ移すならその行を強調し、並べ替えるならその行の端に、挿入先の深さで字下げした線を引く。
+ * ポインターがツリーの上下の端にあれば、その向きへスクロールし続ける（[moveDropTargets]）。
+ *
  * @param listState スクロール位置
+ * @param actions データを変える操作の入口
  * @param onOpen 行を押したときに、そのフォルダを開く
  * @param onToggle 開閉ボタンを押したときに、そのノードを開く、または閉じる
  */
@@ -62,6 +79,7 @@ private val TREE_ROW_END_PADDING = 8.dp
 internal fun FolderTreePane(
     browse: BrowseState,
     listState: LazyListState,
+    actions: OperationActions,
     onOpen: (String) -> Unit,
     onToggle: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -73,15 +91,37 @@ internal fun FolderTreePane(
     }
     val rows = remember(tree, browse.expandedFolders) { flattenFolderTree(tree, browse.expandedFolders) }
     ScrollToCurrentFolder(rows, browse.currentFolderId, listState)
+    val dropTargets = modifier.moveDropTargets(
+        actions.dragState,
+        listState,
+        dropBelowRows = { subject -> browse.treeEndDrop(rows, subject) },
+    ) { hit, subject ->
+        (hit.key as? String)?.let { folderId -> browse.treeDrop(rows, folderId, hit.y, hit.height, subject) }
+    }
+    FolderTree(rows, listState, dropTargets) { row ->
+        OperableFolderTreeRow(
+            row = row,
+            current = row.folderId == browse.currentFolderId,
+            actions = actions,
+            onOpen = { onOpen(row.folderId) },
+            onToggle = { onToggle(row.folderId) },
+        )
+    }
+}
+
+/**
+ * フォルダのツリーの行 [rows]（[flattenFolderTree] の並び）を、上から並べる。行の中身は [rowContent] で描く。
+ * メインの画面のツリーと、移動先を選ぶダイアログのツリーが使う。
+ */
+@Composable
+internal fun FolderTree(
+    rows: List<FolderTreeRow>,
+    listState: LazyListState,
+    modifier: Modifier = Modifier,
+    rowContent: @Composable (FolderTreeRow) -> Unit,
+) {
     LazyColumn(modifier, state = listState) {
-        items(rows, key = { it.folderId }) { row ->
-            FolderTreeRowView(
-                row = row,
-                current = row.folderId == browse.currentFolderId,
-                onOpen = { onOpen(row.folderId) },
-                onToggle = { onToggle(row.folderId) },
-            )
-        }
+        items(rows, key = { it.folderId }) { row -> rowContent(row) }
     }
 }
 
@@ -109,38 +149,118 @@ private fun LazyListState.isFullyVisible(key: String?): Boolean {
     return row.offset >= info.viewportStartOffset && row.offset + row.size <= info.viewportEndOffset
 }
 
+/**
+ * メインの画面のツリーの行。右クリックのメニューと、ドラッグして移す元を付ける。ドラッグして移すものを、この行のフォルダの中へ移すなら
+ * 強調し、この行の端が挿入する位置なら、その端に、挿入先の深さの行と同じだけ字下げした線を引く。
+ *
+ * @param current 開いているフォルダの行か
+ */
 @Composable
-private fun FolderTreeRowView(row: FolderTreeRow, current: Boolean, onOpen: () -> Unit, onToggle: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(TREE_ROW_HEIGHT)
-            .background(if (current) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
-            .clickable(onClick = onOpen)
-            .padding(start = TREE_INDENT * row.depth, end = TREE_ROW_END_PADDING),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (row.hasChildren) {
-            IconButton(onClick = onToggle, modifier = Modifier.size(TREE_TOGGLE_SIZE)) {
-                Icon(
-                    imageVector = if (row.expanded) Icons.Filled.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = if (row.expanded) "折りたたみ" else "展開",
-                )
+private fun OperableFolderTreeRow(
+    row: FolderTreeRow,
+    current: Boolean,
+    actions: OperationActions,
+    onOpen: () -> Unit,
+    onToggle: () -> Unit,
+) {
+    val drag = actions.dragState
+    val menu = rememberContextMenuState()
+    val mark = drag.drop?.takeIf { actions.canWrite && it.row == DropRow.TreeFolder(row.folderId) }
+    val dragSource = if (row.isRoot) {
+        Modifier
+    } else {
+        Modifier.moveDragSource(
+            state = drag,
+            canWrite = actions.canWrite,
+            onDragStart = { MoveSubject.Folder(row.folderId) },
+        )
+    }
+    Box(Modifier.dropLine(mark?.line, depthIndent = TREE_INDENT)) {
+        FolderTreeRowView(
+            row = row,
+            highlighted = current,
+            dropTarget = mark != null && mark.line == null,
+            onOpen = onOpen,
+            onToggle = onToggle,
+            modifier = Modifier
+                .onPointerPress { press -> if (press.secondary) menu.open(press.position) }
+                .then(dragSource),
+        )
+        ContextMenu(menu) {
+            val open = { dialog: OperationDialog ->
+                menu.close()
+                actions.onOpenDialog(dialog)
             }
-        } else {
-            Spacer(Modifier.width(TREE_TOGGLE_SIZE))
+            FolderMenuItems(
+                isRoot = row.isRoot,
+                enabled = actions.canWrite,
+                onNewFolder = { open(OperationDialog.NewFolder(row.folderId)) },
+                onRename = { open(OperationDialog.RenameFolder(row.folderId, row.name)) },
+                onMove = { open(OperationDialog.Move(MoveSubject.Folder(row.folderId))) },
+                onDelete = { open(OperationDialog.DeleteFolder(row.folderId, row.name)) },
+            )
         }
-        Icon(
-            imageVector = if (row.isRoot) Icons.Filled.Home else FolderIcon,
-            contentDescription = null,
-            modifier = Modifier.size(TREE_ICON_SIZE),
-        )
-        Spacer(Modifier.width(TREE_ICON_GAP))
-        Text(
-            text = if (row.isRoot) ROOT_FOLDER_LABEL else row.name,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            style = MaterialTheme.typography.bodyMedium,
-        )
+    }
+}
+
+/**
+ * ツリーの 1 行。字下げ、開閉ボタン、フォルダのアイコン、名前を並べる。開閉ボタンは、ボタンの説明をツールチップに出す。
+ *
+ * @param highlighted 強調するか。メインの画面では開いているフォルダ、移動先を選ぶダイアログでは選んだ移動先
+ * @param onOpen 行を押したとき
+ * @param onToggle 開閉ボタンを押したとき
+ * @param modifier 行に付ける、押す操作の扱い
+ * @param enabled 行を押せるか。偽なら、アイコンと名前を薄くする。開閉ボタンは押せる
+ * @param dropTarget ドラッグして移すものを、この行のフォルダの中へ移すか。そうなら、[highlighted] と違う色で強調する
+ */
+@Composable
+internal fun FolderTreeRowView(
+    row: FolderTreeRow,
+    highlighted: Boolean,
+    onOpen: () -> Unit,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    dropTarget: Boolean = false,
+) {
+    val background = when {
+        dropTarget -> MaterialTheme.colorScheme.primaryContainer
+        highlighted -> MaterialTheme.colorScheme.secondaryContainer
+        else -> Color.Transparent
+    }
+    val contentColor = LocalContentColor.current.let { if (enabled) it else it.copy(alpha = DISABLED_CONTENT_ALPHA) }
+    CompositionLocalProvider(LocalContentColor provides contentColor) {
+        Row(
+            modifier = modifier
+                .fillMaxWidth()
+                .height(TREE_ROW_HEIGHT)
+                .background(background)
+                .clickable(enabled = enabled, onClick = onOpen)
+                .padding(start = TREE_INDENT * row.depth, end = TREE_ROW_END_PADDING),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (row.hasChildren) {
+                TooltipIconButton(
+                    imageVector = if (row.expanded) Icons.Filled.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = if (row.expanded) COLLAPSE_DESCRIPTION else EXPAND_DESCRIPTION,
+                    onClick = onToggle,
+                    modifier = Modifier.size(TREE_TOGGLE_SIZE),
+                )
+            } else {
+                Spacer(Modifier.width(TREE_TOGGLE_SIZE))
+            }
+            Icon(
+                imageVector = if (row.isRoot) Icons.Filled.Home else FolderIcon,
+                contentDescription = null,
+                modifier = Modifier.size(TREE_ICON_SIZE),
+            )
+            Spacer(Modifier.width(TREE_ICON_GAP))
+            Text(
+                text = if (row.isRoot) ROOT_FOLDER_LABEL else row.name,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
     }
 }

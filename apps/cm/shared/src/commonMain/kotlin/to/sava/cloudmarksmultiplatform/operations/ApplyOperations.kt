@@ -275,8 +275,11 @@ private fun TreeState.resolve(targets: List<ItemRef>): Pair<List<Pair<ItemRef, I
     return found to missing
 }
 
-/** [beforeId] の要素の前に [inserted] を入れる。[beforeId] が null または並びに無ければ末尾に入れる。 */
-private fun <T> List<T>.insertedBefore(inserted: List<T>, beforeId: String?, idOf: (T) -> String): List<T> {
+/**
+ * [beforeId] の要素の前に [inserted] を入れる。[beforeId] が null または並びに無ければ末尾に入れる。
+ * `docs/operations.md` の、位置（どの項目・フォルダの前か）の決め方。移すときは、対象を外したあとの並びに対して使う。
+ */
+internal fun <T> List<T>.insertedBefore(inserted: List<T>, beforeId: String?, idOf: (T) -> String): List<T> {
     val index = indexOfFirst { idOf(it) == beforeId }.let { if (it < 0) size else it }
     return take(index) + inserted + drop(index)
 }

@@ -1,6 +1,7 @@
 package to.sava.cloudmarksmultiplatform.app
 
 import to.sava.cloudmarksmultiplatform.browse.BrowseState
+import to.sava.cloudmarksmultiplatform.settings.DisplayScale
 import to.sava.cloudmarksmultiplatform.settings.SettingsField
 import to.sava.cloudmarksmultiplatform.settings.SettingsForm
 import to.sava.cloudmarksmultiplatform.settings.SettingsReadResult
@@ -65,11 +66,18 @@ data class SettingsScreenState(
     val canReturn: Boolean = false,
 )
 
-/** 画面全体の状態。 */
+/**
+ * 画面全体の状態。
+ *
+ * @property write データを変える操作の、書き込みの進み具合と結果
+ * @property displayScale 画面全体の表示の大きさ。端末ごとの設定で、どの画面でも同じ
+ */
 data class AppState(
     val screen: Screen = Screen.STARTING,
     val browse: BrowseState = BrowseState(),
     val settings: SettingsScreenState = SettingsScreenState(),
+    val write: WriteState = WriteState(),
+    val displayScale: DisplayScale = DisplayScale.DEFAULT,
 ) {
     /**
      * 戻る操作でできることがあるか。設定の画面では、メインの画面へ戻れて、保存の最中でないとき。
@@ -82,8 +90,15 @@ data class AppState(
             Screen.SETTINGS -> settings.canReturn && !settings.status.busy
         }
 
-    /** S3 から読み直せるか。メインの画面で、マニフェストを読んでいる最中でないとき。 */
-    val canReload: Boolean get() = screen == Screen.MAIN && !browse.loading
+    /** S3 から読み直せるか。メインの画面で、マニフェストを読んでいる最中でも、操作を書いている最中でもないとき。 */
+    val canReload: Boolean get() = screen == Screen.MAIN && !browse.loading && !write.writing
+
+    /**
+     * データを変える操作を受け付けるか。メインの画面で、読み書きできるツリーがあり、マニフェストを読んでいる最中でも、
+     * 操作を書いている最中でもないとき。
+     */
+    val canWrite: Boolean
+        get() = screen == Screen.MAIN && browse.tree != null && !browse.readOnly && !browse.loading && !write.writing
 
     /**
      * 戻る。Android の戻る操作と画面の戻るボタンが呼ぶ。
