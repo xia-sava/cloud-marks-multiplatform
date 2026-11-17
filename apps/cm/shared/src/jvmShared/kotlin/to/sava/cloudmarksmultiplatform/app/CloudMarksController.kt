@@ -2,12 +2,14 @@ package to.sava.cloudmarksmultiplatform.app
 
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.job
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -48,11 +50,11 @@ import to.sava.cloudmarksmultiplatform.settings.toSettings
 import to.sava.cloudmarksmultiplatform.storage.newId
 import to.sava.cloudmarksmultiplatform.sync.CreateManifestResult
 import to.sava.cloudmarksmultiplatform.sync.FolderReadResult
-import to.sava.cloudmarksmultiplatform.sync.StorageSync
 import to.sava.cloudmarksmultiplatform.sync.SyncFailure
 import to.sava.cloudmarksmultiplatform.sync.TreeReadResult
 import to.sava.cloudmarksmultiplatform.sync.WriteResult
 import to.sava.cloudmarksmultiplatform.sync.connectionCacheDirectory
+import to.sava.cloudmarksmultiplatform.sync.writeConfirming
 import java.io.IOException
 import java.nio.file.Path
 import kotlin.io.path.ExperimentalPathApi
@@ -70,8 +72,8 @@ private typealias TreeRead = suspend (foldersToLoad: (TreeState) -> Set<String>)
  * [start] は [scope] で走らせるだけなので、画面を出す前に別のスレッドから呼んでもよい。
  * 使い終えたら [close] を呼ぶ。[scope] の取り消しは渡した側が行う。
  *
- * S3 からマニフェストを読み直すのは、[start] で設定を読めたとき、[reload] を呼んだとき、設定を保存したとき、
- * マニフェストを作ろうとして既にあったとき、開いたフォルダの項目ファイルが `404` を返したときだけ。
+ * S3 からマニフェストを読み直すのは、[start] で設定を読めたとき、[reload] を呼んだとき、[storageChanges] で知らせを受けたとき、
+ * 設定を保存したとき、マニフェストを作ろうとして既にあったとき、開いたフォルダの項目ファイルが `404` を返したときだけ。
  * フォルダを開いたときはマニフェストを GET せず、読んであるツリーからそのフォルダの項目ファイルだけを読む。
  *
  * データを変える操作（`docs/operations.md`）は、一度に 1 つだけ書く。書いているあいだは、ほかの操作も読み直しも受け付けない。
@@ -82,6 +84,9 @@ private typealias TreeRead = suspend (foldersToLoad: (TreeState) -> Set<String>)
  *
  * @param connect 設定から S3 への接続を作る。[ioDispatcher] で呼ぶ
  * @param log 利用者への誤りとしては見せない失敗と、古いファイルの削除の結果を書く。認証情報は渡さない
+ * @param storageChanges ほかのプロセスが S3 へ書いた知らせ。[start] から集め、知らせを受けるたびに [reload] を呼ぶ。
+ * [reload] が何もしないとき（メインの画面でないとき・読んでいる最中・書いている最中・接続が無いとき）の知らせは捨てる。
+ * 知らせを出さない Flow を渡してもよい
  * @param deletesStaleFiles 古いファイルの削除を行うか。デスクトップのアプリだけが行う
  * @param ioDispatcher 設定のファイルと表示の設定のファイルの読み書き、接続を作ること、ローカルキャッシュのディレクトリを消すこと、
  * 古いファイルの削除の記録の読み書きに使う
@@ -93,6 +98,7 @@ class CloudMarksController(
     private val connect: (ConnectionSettings) -> Connection,
     private val log: (String) -> Unit,
     private val scope: CoroutineScope,
+    private val storageChanges: Flow<Unit>,
     deletesStaleFiles: Boolean,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     clock: Clock = Clock.System,
@@ -122,6 +128,9 @@ class CloudMarksController(
     /** いまの S3 への接続。設定を読めていなければ null。 */
     private var active: ActiveConnection? = null
 
+    /** [storageChanges] を集めて [reload] を呼ぶ処理。[start] で走り始め、[close] で取り消す。 */
+    private val storageChangeWatching: Job = scope.launch(start = CoroutineStart.LAZY) { storageChanges.collect { reload() } }
+
     /**
      * S3 への接続と、その設定、それを使う処理を走らせるスコープ。スコープは [scope] の子で、1 つの処理の失敗がほかを止めない。
      * 接続を替えるときと閉じるときは、スコープを取り消してから接続を閉じる。
@@ -132,8 +141,10 @@ class CloudMarksController(
      * 表示の設定と設定を読む。表示の大きさは読めたものにし、読めなければ既定の大きさのままにする。
      * 設定を読めたら S3 への接続を作ってメインの画面を出し、マニフェストとルートフォルダの項目を読む。
      * 設定がまだ無いか読めなければ、設定の画面を出して理由を見せる。
+     * あわせて [storageChanges] を集め始める。
      */
     fun start() {
+        storageChangeWatching.start()
         scope.launch {
             val displayScale = withContext(ioDispatcher) { displaySettingsFile.read() }
             update { it.copy(displayScale = displayScale) }
@@ -305,7 +316,7 @@ class CloudMarksController(
 
     /**
      * マニフェストを読み直す。開いているフォルダが残っていれば、その項目も一緒に読む。
-     * マニフェストを読んでいる最中か、操作を書いている最中なら何もしない。
+     * メインの画面でないとき、マニフェストを読んでいる最中、操作を書いている最中、接続が無いときは何もしない。
      */
     fun reload() {
         val connection = active ?: return
@@ -379,8 +390,9 @@ class CloudMarksController(
         }
     }
 
-    /** 走っている読み書きを取り消し、S3 のクライアントを閉じる。 */
+    /** [storageChanges] を集める処理と走っている読み書きを取り消し、S3 のクライアントを閉じる。 */
     override fun close() {
+        storageChangeWatching.cancel()
         active?.let { previous ->
             previous.scope.cancel()
             previous.connection.close()
@@ -600,21 +612,8 @@ class CloudMarksController(
 }
 
 /**
- * [operations] を書く。[WriteResult.Unconfirmed] なら、[StorageSync.write] のとおり同じ操作の並びでもう一度だけ書く。
- * やり直しが [WriteResult.Success] で終わらなければ、確かめられないままとする。
- */
-private suspend fun StorageSync.writeConfirming(operations: List<Operation>): WriteResult =
-    when (val first = write(operations)) {
-        is WriteResult.Success, is WriteResult.Failed -> first
-        is WriteResult.Unconfirmed -> when (val retried = write(operations)) {
-            is WriteResult.Success, is WriteResult.Unconfirmed -> retried
-            is WriteResult.Failed -> WriteResult.Unconfirmed(retried.failure)
-        }
-    }
-
-/**
  * [CloudMarksController] を組み立てる。Android とデスクトップのエントリポイントが、プラットフォームごとに違うもの（ファイルの場所、
- * 認証情報を暗号化する仕組み、時計、マニフェストの `updatedBy`、古いファイルの削除を行うか）を渡して呼ぶ。
+ * 認証情報を暗号化する仕組み、時計、マニフェストの `updatedBy`、ほかのプロセスが S3 へ書いた知らせ、古いファイルの削除を行うか）を渡して呼ぶ。
  * ログは [AppFiles.logDirectory] のファイルに書く。
  *
  * 呼んだ側が、作ったコントローラを [CloudMarksController.start] で動かし始め、使い終えたら [CloudMarksController.close] で閉じる。
@@ -623,6 +622,8 @@ private suspend fun StorageSync.writeConfirming(operations: List<Operation>): Wr
  * @param protector 認証情報を暗号化する仕組み
  * @param timeSource 書き込みの手順 3 から手順 4 までの経過を測る、モノトニッククロック
  * @param updatedBy 書き込むマニフェストのヘッダーの `updatedBy`。`"desktop"` か `"android"`
+ * @param storageChanges ほかのプロセスが S3 へ書いた知らせの Flow を作る関数。このコントローラのログに書く関数を受け取る。
+ * デスクトップのアプリはファイルの変化を見張る Flow を作り、Android は知らせを出さない Flow を作る
  * @param deletesStaleFiles 古いファイルの削除を行うか。デスクトップのアプリは行い、Android は行わない
  * @param scope メインのスレッドで動くスコープ。取り消しは呼んだ側が行う
  */
@@ -631,6 +632,7 @@ fun createCloudMarksController(
     protector: SecretProtector,
     timeSource: TimeSource,
     updatedBy: String,
+    storageChanges: (log: (String) -> Unit) -> Flow<Unit>,
     deletesStaleFiles: Boolean,
     scope: CoroutineScope,
 ): CloudMarksController {
@@ -641,6 +643,7 @@ fun createCloudMarksController(
         connect = { settings -> openS3Connection(settings, appFiles.cacheDirectory, updatedBy, timeSource, log::write) },
         log = log::write,
         scope = scope,
+        storageChanges = storageChanges(log::write),
         deletesStaleFiles = deletesStaleFiles,
     )
 }

@@ -5,6 +5,7 @@ import to.sava.cloudmarksmultiplatform.remote.S3ObjectStore
 import to.sava.cloudmarksmultiplatform.settings.ConnectionSettings
 import to.sava.cloudmarksmultiplatform.sync.FileSyncCache
 import to.sava.cloudmarksmultiplatform.sync.StorageSync
+import to.sava.cloudmarksmultiplatform.sync.SyncCache
 import to.sava.cloudmarksmultiplatform.sync.connectionCacheDirectory
 import java.nio.file.Path
 import kotlin.time.TimeSource
@@ -37,6 +38,26 @@ fun openS3Connection(
     timeSource: TimeSource,
     log: (String) -> Unit,
 ): Connection {
+    val cache = FileSyncCache(connectionCacheDirectory(cacheRoot, settings.bucket, settings.prefix)) { failure ->
+        log("ローカルキャッシュを読み書きできなかった: ${describeIoFailure(failure)}")
+    }
+    return openS3Connection(settings, cache, updatedBy, timeSource)
+}
+
+/**
+ * [settings] の S3 への接続を、キャッシュに [cache] を使って作る。
+ * S3 のクライアントを作るので、I/O 用のスレッドで呼ぶ。
+ *
+ * @param cache 接続先 [settings] のキャッシュ
+ * @param updatedBy 書き込むマニフェストのヘッダーの `updatedBy`
+ * @param timeSource 書き込みの手順 3 から手順 4 までの経過を測る、モノトニッククロック
+ */
+fun openS3Connection(
+    settings: ConnectionSettings,
+    cache: SyncCache,
+    updatedBy: String,
+    timeSource: TimeSource,
+): Connection {
     val store = S3ObjectStore(
         region = settings.region,
         accessKeyId = settings.credentials.accessKeyId,
@@ -44,8 +65,5 @@ fun openS3Connection(
         bucket = settings.bucket,
         prefix = settings.prefix,
     )
-    val cache = FileSyncCache(connectionCacheDirectory(cacheRoot, settings.bucket, settings.prefix)) { failure ->
-        log("ローカルキャッシュを読み書きできなかった: ${describeIoFailure(failure)}")
-    }
     return Connection(StorageSync(store, cache, updatedBy, timeSource), store::close)
 }

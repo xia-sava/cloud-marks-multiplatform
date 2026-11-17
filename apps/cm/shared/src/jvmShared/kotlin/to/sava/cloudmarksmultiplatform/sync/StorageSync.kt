@@ -168,3 +168,16 @@ class StorageSync(
             }
             ?: CreateManifestResult.AlreadyExists
 }
+
+/**
+ * [operations] を書く。[WriteResult.Unconfirmed] なら、[StorageSync.write] のとおり同じ操作の並びでもう一度だけ書く。
+ * やり直しが [WriteResult.Success] で終わらなければ、確かめられないままとする。
+ */
+internal suspend fun StorageSync.writeConfirming(operations: List<Operation>): WriteResult =
+    when (val first = write(operations)) {
+        is WriteResult.Success, is WriteResult.Failed -> first
+        is WriteResult.Unconfirmed -> when (val retried = write(operations)) {
+            is WriteResult.Success, is WriteResult.Unconfirmed -> retried
+            is WriteResult.Failed -> WriteResult.Unconfirmed(retried.failure)
+        }
+    }

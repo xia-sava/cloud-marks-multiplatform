@@ -4,6 +4,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import org.junit.rules.TemporaryFolder
@@ -101,6 +102,9 @@ internal class ControllerFixture(
     /** 接続を作る直前に走らせる。 */
     var onConnect: () -> Unit = {}
 
+    /** コントローラへ渡す、ほかのプロセスが S3 へ書いた知らせ。流すと知らせを出したことになる。 */
+    val storageChanges = MutableSharedFlow<Unit>()
+
     val controller = CloudMarksController(
         appFiles = appFiles,
         protector = protector,
@@ -121,6 +125,7 @@ internal class ControllerFixture(
         },
         log = { logs += it },
         scope = scope,
+        storageChanges = storageChanges,
         deletesStaleFiles = deletesStaleFiles,
         ioDispatcher = ioDispatcher,
         clock = clock,

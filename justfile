@@ -2,6 +2,11 @@
 cm-test:
     cd apps/cm && ./gradlew check
 
+# 開発用のNative Messagingのホスト（起動するバッチと、ChromeとFirefoxに登録するJSON）を
+# apps/cm/desktopApp/build/native-messaging-host/に書き出す。レジストリには登録しない。
+cm-dev-host:
+    cd apps/cm && ./gradlew :desktopApp:writeDevNativeMessagingHost
+
 ext-build:
     cd apps/extension && npm run build
 

@@ -2,6 +2,7 @@ package to.sava.cloudmarksmultiplatform.app
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -130,6 +131,7 @@ class CloudMarksControllerTest {
             protector = FakeSecretProtector(),
             timeSource = TestTimeSource(),
             updatedBy = "desktop",
+            storageChanges = { emptyFlow() },
             deletesStaleFiles = false,
             scope = backgroundScope,
         )

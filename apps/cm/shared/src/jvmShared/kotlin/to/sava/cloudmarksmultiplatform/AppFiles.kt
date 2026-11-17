@@ -8,11 +8,14 @@ internal const val SETTINGS_FILE_NAME = "settings.json"
 /** 表示の設定のファイルの名前。 */
 internal const val DISPLAY_SETTINGS_FILE_NAME = "display.json"
 
+/** S3 へ書いたことを同じ端末のほかのプロセスへ知らせるファイルの名前。 */
+internal const val STORAGE_CHANGED_FILE_NAME = "storage-changed"
+
 /**
  * アプリが端末に置くファイルの場所。
  *
  * 場所の決め方はプラットフォームごとに違い、それぞれのアプリのエントリポイントで作って渡す。
- * パスを持つだけで、ディレクトリは作らない。作るのは書く側。
+ * パスを持つだけで、ディレクトリは作らない。作るのは書く側。[storageChangedFile] は、見張る側も見張るためにディレクトリを作る。
  *
  * @property settingsFile 設定のファイル
  * @property cacheDirectory ローカルキャッシュのルートディレクトリ。接続先ごとのディレクトリはこの下に作る
@@ -27,4 +30,10 @@ class AppFiles(
     val logDirectory: Path,
     val stateDirectory: Path,
     val displaySettingsFile: Path,
-)
+) {
+    /**
+     * S3 へ書いたことを、同じ端末のほかのプロセスへ知らせるファイル。拡張から追加したホストが書き換え、デスクトップのアプリが
+     * 書き換わったのを見て S3 から読み直す。中身は使わない。
+     */
+    val storageChangedFile: Path get() = stateDirectory.resolve(STORAGE_CHANGED_FILE_NAME)
+}

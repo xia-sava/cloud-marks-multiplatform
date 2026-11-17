@@ -1,5 +1,6 @@
 package to.sava.cloudmarksmultiplatform.storage
 
+import to.sava.cloudmarksmultiplatform.findContracts
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.zip.GZIPOutputStream
@@ -7,11 +8,10 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
-import kotlin.test.assertNotNull
 
 /** `contracts/storage/example/` の見本を読み、読み書きの実装が見本の形を扱えることを確かめる。 */
 class ContractExampleTest {
-    private val exampleDirectory: File = findContractsStorage().resolve("example")
+    private val exampleDirectory: File = findContracts("storage").resolve("example")
 
     private val manifestBytes: ByteArray = exampleDirectory.resolve("manifest.jsonl").readBytes()
 
@@ -75,12 +75,4 @@ class ContractExampleTest {
 
         assertEquals(ManifestDecodeResult.Readable(plain), viaGzip)
     }
-}
-
-/** テストの作業ディレクトリから親へ辿って `contracts/storage` を見つける。 */
-internal fun findContractsStorage(): File {
-    val found = generateSequence(File("").absoluteFile) { it.parentFile }
-        .map { it.resolve("contracts/storage") }
-        .firstOrNull { it.isDirectory }
-    return assertNotNull(found, "contracts/storage が作業ディレクトリの祖先に見つからない")
 }

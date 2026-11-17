@@ -33,7 +33,7 @@ private val HASH_NAME_PATTERN = Regex("[0-9a-f]{64}")
  * 接続先のバケットとプレフィックスから決まる名前。端末に置くファイルやディレクトリを、接続先ごとに分けるのに使う。
  *
  * バケットと（前後の `/` を除いた）プレフィックスから決まる SHA-256 の 16 進で、パスとして安全な固定長になる。
- * 接続先が同じなら、アプリと Native Messaging のホストのように別のプロセスでも同じ名前になる。
+ * 接続先が同じなら、別のプロセスでも同じ名前になる。
  */
 fun connectionName(bucket: String, prefix: String): String =
     sha256Hex(bucket + CONNECTION_NAME_SEPARATOR + normalizePrefix(prefix))
@@ -53,8 +53,8 @@ fun connectionCacheDirectory(root: Path, bucket: String, prefix: String): Path =
  * 項目ファイルの名前は、キーの SHA-256 の 16 進にする。キーをそのままパスにしない。
  * マニフェストのファイルは、ETag の長さ、ETag（UTF-8）、本文（gzip のまま）の順に並べる。
  *
- * 書くときは同じディレクトリの一時ファイルに書いてから置き換える。アプリと Native Messaging のホストのように、
- * 別のプロセスが同じディレクトリを使っても、読み手には置き換える前か後の中身が見える。
+ * 書くときは同じディレクトリの一時ファイルに書いてから置き換える。別のプロセスが同じディレクトリを使っても、
+ * 読み手には置き換える前か後の中身が見える。
  * ファイルが無い、形式が崩れている、消している最中のファイルを読んだときは、「無い」として返す。
  * プロセスをまたぐロックは持たない。
  *

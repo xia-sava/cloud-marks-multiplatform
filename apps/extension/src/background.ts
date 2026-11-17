@@ -1,8 +1,5 @@
-import { selectedTabs } from "./selected-tabs"
+import { getApi } from "./api"
+import { handleConnection } from "./connection"
 
-chrome.action.onClicked.addListener(async () => {
-  const tabs = await selectedTabs()
-  // TODO: Native Messaging のメッセージ形式（contracts/native-messaging/）が確定したら、
-  // tabs をその形にしてホストへ送る処理をここに追加する。
-  void tabs
-})
+const api = getApi()
+api.runtime.onConnect.addListener((port) => handleConnection(api, port))
