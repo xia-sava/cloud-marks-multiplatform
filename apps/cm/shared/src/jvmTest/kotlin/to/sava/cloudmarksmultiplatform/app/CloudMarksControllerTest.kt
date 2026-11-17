@@ -149,6 +149,7 @@ class CloudMarksControllerTest {
             storageChanges = { emptyFlow() },
             deletesStaleFiles = false,
             browserOpener = { FakeBrowserOpener() },
+            itemSharer = null,
             scope = backgroundScope,
         )
 

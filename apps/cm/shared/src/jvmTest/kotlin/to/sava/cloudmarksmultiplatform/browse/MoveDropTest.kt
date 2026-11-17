@@ -195,7 +195,7 @@ class MoveDropTest {
     }
 
     // ツリーの最後の行より下の空いたところへ項目を落とすと、ルートフォルダの中（ルートフォルダの行を強調）。
-    // いま開いているフォルダがルートフォルダなら、そこから移す先にならないので落とせない
+    // いま開いているフォルダがルートフォルダなら、そこからの移動先にならないので落とせない
     @Test
     fun itemDropBelowTreeRowsMovesIntoRoot() {
         val inA1 = fullyExpanded().openFolder(A1)

@@ -42,6 +42,7 @@ import to.sava.cloudmarksmultiplatform.settings.SettingsField
 import to.sava.cloudmarksmultiplatform.settings.SettingsForm
 import to.sava.cloudmarksmultiplatform.settings.SettingsReadResult
 import to.sava.cloudmarksmultiplatform.settings.TabLoading
+import to.sava.cloudmarksmultiplatform.settings.firstLineOf
 import to.sava.cloudmarksmultiplatform.settings.parseLoadAhead
 import to.sava.cloudmarksmultiplatform.settings.parseTabCount
 
@@ -234,8 +235,9 @@ private fun DisplayScaleField(scale: DisplayScale, onChange: (DisplayScale) -> U
 }
 
 /**
- * 設定の入力欄。
+ * 設定の 1 行の入力欄。入れた（貼り付けたものを含む）改行とその後ろは受け付けず、欄にも出さない（[firstLineOf]）。
  *
+ * @param onValueChange 入力を変えたときに、改行とその後ろを除いた値を渡す
  * @param missing 入力が要るのに空か。そうなら誤りの色にして、[MISSING_FIELD] を添える
  * @param hint 欄の下に常に添える文。[missing] のときは [MISSING_FIELD] を優先する
  * @param secret 伏せ字にするか
@@ -253,7 +255,7 @@ private fun SettingsTextField(
     val supporting = if (missing) MISSING_FIELD else hint
     OutlinedTextField(
         value = value,
-        onValueChange = onValueChange,
+        onValueChange = { input -> onValueChange(firstLineOf(input)) },
         label = { Text(label) },
         supportingText = supporting?.let { { Text(it) } },
         isError = missing,

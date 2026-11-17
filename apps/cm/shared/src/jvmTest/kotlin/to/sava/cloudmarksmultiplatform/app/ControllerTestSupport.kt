@@ -10,6 +10,7 @@ import kotlinx.coroutines.test.TestScope
 import org.junit.rules.TemporaryFolder
 import to.sava.cloudmarksmultiplatform.AppFiles
 import to.sava.cloudmarksmultiplatform.browser.FakeBrowserOpener
+import to.sava.cloudmarksmultiplatform.browser.FakeItemSharer
 import to.sava.cloudmarksmultiplatform.remote.FakeObjectStore
 import to.sava.cloudmarksmultiplatform.remote.FakeObjectStore.GetFault
 import to.sava.cloudmarksmultiplatform.settings.ConnectionSettings
@@ -54,6 +55,8 @@ internal class TestClock(var current: Instant) : Clock {
  * @param directory ファイルを置くディレクトリ。前のフィクスチャと同じものを渡すと、そのファイルを読むコントローラを作り直せる。
  * 渡さなければ、[temporaryFolder] の中に新しく作る
  * @param browserOpener コントローラが項目をブラウザで開く仕組み。ブラウザを起動せず、頼まれたことを記録する
+ * @param itemSharer コントローラが項目をほかのアプリで開く仕組みと共有する仕組み。アプリの一覧を出さず、頼まれたことを記録する。
+ * null なら、持たないプラットフォームとして振る舞う
  */
 internal class ControllerFixture(
     scope: CoroutineScope,
@@ -64,6 +67,7 @@ internal class ControllerFixture(
     clock: Clock = Clock.System,
     val directory: Path = temporaryFolder.newFolder().toPath(),
     val browserOpener: FakeBrowserOpener = FakeBrowserOpener(),
+    val itemSharer: FakeItemSharer? = null,
 ) {
     /**
      * コントローラの処理を [scope] の `backgroundScope` で走らせ、`runCurrent` で進める（`advanceUntilIdle` は
@@ -77,6 +81,7 @@ internal class ControllerFixture(
         clock: Clock = Clock.System,
         directory: Path = temporaryFolder.newFolder().toPath(),
         browserOpener: FakeBrowserOpener = FakeBrowserOpener(),
+        itemSharer: FakeItemSharer? = null,
     ) : this(
         scope = scope.backgroundScope,
         ioDispatcher = StandardTestDispatcher(scope.testScheduler),
@@ -86,6 +91,7 @@ internal class ControllerFixture(
         clock = clock,
         directory = directory,
         browserOpener = browserOpener,
+        itemSharer = itemSharer,
     )
 
     val appFiles = AppFiles(
@@ -134,6 +140,7 @@ internal class ControllerFixture(
         storageChanges = storageChanges,
         deletesStaleFiles = deletesStaleFiles,
         browserOpener = browserOpener,
+        itemSharer = itemSharer,
         ioDispatcher = ioDispatcher,
         clock = clock,
     )
@@ -175,3 +182,6 @@ internal class ControllerFixture(
         return gate
     }
 }
+
+/** フィクスチャに渡した、項目をほかのアプリで開く仕組みと共有する仕組み。渡していなければ失敗する。 */
+internal val ControllerFixture.sharer: FakeItemSharer get() = checkNotNull(itemSharer)

@@ -20,12 +20,6 @@ import kotlin.time.Duration.Companion.seconds
 /** まとめて開くコマンドを書いてブラウザを起動してから、コマンドのファイルが残っているかを確かめるまでの時間。 */
 internal val COMMAND_DELIVERY_TIMEOUT: Duration = 10.seconds
 
-/** 既定のブラウザで開く URL の種類。ほかの種類は、Windows がブラウザでないアプリで開くことがあるため開かない。 */
-private val WEB_SCHEMES = setOf("http", "https")
-
-/** URL の種類（scheme）の形。英字で始まり、英数字と `+`・`-`・`.` が続き、`:` で終わる。 */
-private val URL_SCHEME = Regex("^[A-Za-z][A-Za-z0-9+.\\-]*:")
-
 /** ブラウザの起動の引数に渡すときにパーセントエンコードする、URL に使えない ASCII の記号。空白と制御文字もエンコードする。 */
 private const val UNSAFE_URL_CHARACTERS = "\"<>\\^`{|}"
 
@@ -142,19 +136,19 @@ internal class DesktopBrowserOpener(
                 launchArgumentOf(url)?.let(::URI)
             } catch (e: URISyntaxException) {
                 null
-            } ?: return@withContext defaultBrowserFailed("URL の形が正しくない")
-            if (uri.scheme?.lowercase() !in WEB_SCHEMES) return@withContext defaultBrowserFailed("URL の種類が http・https でない")
+            } ?: return@withContext defaultBrowserFailed(log, "URL の形が正しくない")
+            if (!isWebUrl(url)) return@withContext defaultBrowserFailed(log, NOT_WEB_URL_REASON)
             try {
                 defaultBrowser.browse(uri)
                 BrowserOpenResult.Opened
             } catch (e: IOException) {
-                defaultBrowserFailed(e::class.simpleName)
+                defaultBrowserFailed(log, e::class.simpleName)
             } catch (e: UnsupportedOperationException) {
                 // デスクトップの機能が無い環境（HeadlessException を含む）
-                defaultBrowserFailed(e::class.simpleName)
+                defaultBrowserFailed(log, e::class.simpleName)
             } catch (e: IllegalArgumentException) {
                 // URI を URL にできない
-                defaultBrowserFailed(e::class.simpleName)
+                defaultBrowserFailed(log, e::class.simpleName)
             }
         }
 
@@ -196,12 +190,6 @@ internal class DesktopBrowserOpener(
                 emptySet()
             }
         }
-
-    /** 既定のブラウザで開けなかった理由 [reason] をログに書き、詳細の無い失敗を返す。 */
-    private fun defaultBrowserFailed(reason: String?): BrowserOpenResult {
-        log("既定のブラウザで開けなかった: $reason")
-        return BrowserOpenResult.LaunchFailed(detail = null)
-    }
 
     /** 古いコマンドのファイルを消し、トークンが [token] のコマンド [command] のファイルを書いてから、呼び出しの URL で [browser] を起動する。 */
     private fun sendCommand(browser: Browser, token: String, command: OpenTabsCommand): BrowserOpenResult {

@@ -1,24 +1,37 @@
 package to.sava.cloudmarksmultiplatform.ui
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.WindowInfo
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.v2.runComposeUiTest
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.toSize
 import kotlinx.coroutines.CoroutineDispatcher
 import org.junit.rules.TemporaryFolder
 import to.sava.cloudmarksmultiplatform.app.ControllerFixture
 import to.sava.cloudmarksmultiplatform.browser.FakeBrowserOpener
+import to.sava.cloudmarksmultiplatform.browser.FakeItemSharer
 import to.sava.cloudmarksmultiplatform.storage.Item
 import to.sava.cloudmarksmultiplatform.sync.FolderReadResult
 import to.sava.cloudmarksmultiplatform.sync.ROOT_ID
@@ -51,12 +64,20 @@ private const val EDGE_INSET = 2f
  * 偽のストレージへの読み書きが終わるまで待つ（偽のストレージは時間を使わない）。止めた読み書きは、止めているあいだは待たない。
  *
  * @param browserOpener コントローラが項目をブラウザで開く仕組み。既定では、まとめて開けるプラットフォームとして振る舞う
+ * @param itemSharer コントローラが項目をほかのアプリで開く仕組みと共有する仕組み。既定の null では、持たないプラットフォームとして振る舞う
+ * @param touchScreen 画面を、タッチの画面の振る舞い（[LocalTouchScreen]）で動かすか。偽なら、プラットフォームの値（デスクトップの振る舞い）のまま
+ * 動かす
+ * @param containerSize 窓の大きさ（[SizedWindow]）。値を替えると、端末を回したときと同じく、描く範囲と窓の幅の区分が替わる。
+ * null なら、テストの画面の大きさのまま描く
  */
 @OptIn(ExperimentalTestApi::class)
 internal fun runCloudMarksScreenTest(
     temporaryFolder: TemporaryFolder,
     arrange: (ControllerFixture) -> Unit = {},
     browserOpener: FakeBrowserOpener = FakeBrowserOpener(),
+    itemSharer: FakeItemSharer? = null,
+    touchScreen: Boolean = false,
+    containerSize: State<IntSize>? = null,
     block: suspend ComposeUiTest.(ControllerFixture) -> Unit,
 ) = runComposeUiTest {
     var created: ControllerFixture? = null
@@ -64,7 +85,7 @@ internal fun runCloudMarksScreenTest(
         val scope = rememberCoroutineScope()
         val fixture = remember {
             val dispatcher = scope.coroutineContext[ContinuationInterceptor] as CoroutineDispatcher
-            ControllerFixture(scope, dispatcher, temporaryFolder, browserOpener = browserOpener).also {
+            ControllerFixture(scope, dispatcher, temporaryFolder, browserOpener = browserOpener, itemSharer = itemSharer).also {
                 it.store.seed()
                 it.storeSettings()
                 arrange(it)
@@ -75,12 +96,36 @@ internal fun runCloudMarksScreenTest(
             fixture.controller.start()
             onDispose { fixture.controller.close() }
         }
-        CloudMarksApp(fixture.controller)
+        CompositionLocalProvider(LocalTouchScreen provides (touchScreen || usesTouchScreen)) {
+            if (containerSize == null) {
+                CloudMarksApp(fixture.controller)
+            } else {
+                SizedWindow(containerSize) { CloudMarksApp(fixture.controller) }
+            }
+        }
     }
     val fixture = checkNotNull(created)
     waitUntil(timeoutMillis = STARTUP_TIMEOUT_MILLIS) { fixture.state.browse.currentItems is FolderReadResult.Loaded }
     waitForIdle()
     block(fixture)
+}
+
+/**
+ * テストの画面の左上の、大きさが [size] の枠に [content] を描き、窓の大きさ（[LocalWindowInfo] の [WindowInfo.containerSize]）も [size] にする。
+ * [size] を替えると、端末を回したときと同じく、描く範囲と画面の幅の区分が替わる。[size] はテストの画面の大きさに収める。
+ */
+@Composable
+private fun SizedWindow(size: State<IntSize>, content: @Composable () -> Unit) {
+    val window = LocalWindowInfo.current
+    val windowInfo = remember(window, size) {
+        object : WindowInfo by window {
+            override val containerSize: IntSize get() = size.value
+        }
+    }
+    val dpSize = with(LocalDensity.current) { size.value.toSize().toDpSize() }
+    CompositionLocalProvider(LocalWindowInfo provides windowInfo) {
+        Box(Modifier.size(dpSize)) { content() }
+    }
 }
 
 /**
@@ -97,6 +142,13 @@ internal fun ComposeUiTest.listFolderRow(name: String): SemanticsNodeInteraction
 /** リストの、項目 [n]（[item]）の行。 */
 @OptIn(ExperimentalTestApi::class)
 internal fun ComposeUiTest.itemRow(n: Int): SemanticsNodeInteraction = onNodeWithText(item(n).title)
+
+/** 文が [text] の要素（メニューの行など）を、タッチで押し、描き終えるまで待つ。タッチの画面の操作は、タッチで押す。 */
+@OptIn(ExperimentalTestApi::class)
+internal fun ComposeUiTest.tapText(text: String) {
+    onNodeWithText(text).performTouchInput { click() }
+    waitForIdle()
+}
 
 /** リストの項目 [n]（[item]）を、[key] を押しながら、マウスでクリックする。Ctrl で選ぶ項目を足す・外し、Shift で範囲を選ぶ。 */
 @OptIn(ExperimentalTestApi::class)

@@ -61,6 +61,50 @@ class SettingsFormTest {
         assertEquals(SettingsFormResult.Complete(SETTINGS.copy(prefix = "")), filled.copy(prefix = "").toSettings(stored = null))
     }
 
+    // 1 行の欄に入れたものは、最初の改行（\n でも \r でも）より前だけを受け付ける。改行が無ければそのまま
+    @Test
+    fun firstLineDropsLineBreakAndRest() {
+        val cases = listOf(
+            "bucket\n─────" to "bucket",
+            "bucket\r─────" to "bucket",
+            "bucket\r\n─────\nmore" to "bucket",
+            "\nbucket" to "",
+            "bucket " to "bucket ",
+            "" to "",
+        )
+        cases.forEach { (input, expected) -> assertEquals(expected, firstLineOf(input), input) }
+    }
+
+    // 設定を作るときも、どの欄も最初の改行とその後ろを使わない（保存済みの値に改行が入っていても、保存し直せば除く）
+    @Test
+    fun toSettingsDropsLineBreakAndRest() {
+        val form = SettingsForm(
+            region = "${SETTINGS.region}\n─────",
+            bucket = "${SETTINGS.bucket}\r─────",
+            prefix = "${SETTINGS.prefix}\r\n─────",
+            accessKeyId = "${CREDENTIALS.accessKeyId} \n─────",
+            secret = "${CREDENTIALS.secretAccessKey}\n─────",
+        )
+
+        assertEquals(SettingsFormResult.Complete(SETTINGS), form.toSettings(stored = null))
+    }
+
+    // シークレットの欄が空のときに使う保存済みのシークレットも、最初の改行とその後ろを使わない
+    @Test
+    fun storedSecretDropsLineBreakAndRest() {
+        val stored = SETTINGS.copy(credentials = CREDENTIALS.copy(secretAccessKey = "${CREDENTIALS.secretAccessKey}\n─────"))
+
+        assertEquals(SettingsFormResult.Complete(SETTINGS), filled.copy(secret = "").toSettings(stored))
+    }
+
+    // 改行より前が空なら、その欄は足りないとする
+    @Test
+    fun fieldEmptyBeforeLineBreakIsMissing() {
+        val form = filled.copy(region = "\n${SETTINGS.region}", secret = "\r${CREDENTIALS.secretAccessKey}")
+
+        assertEquals(SettingsFormResult.Incomplete(setOf(SettingsField.REGION, SettingsField.SECRET)), form.toSettings(stored = null))
+    }
+
     // 文字列にしても、アクセスキー ID とシークレットを出さない
     @Test
     fun toStringRedactsCredentials() {

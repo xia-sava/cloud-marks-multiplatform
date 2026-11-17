@@ -13,11 +13,11 @@ private const val DOUBLE_CLICK_TIMEOUT = 300L
 
 /** [type] のポインターで、修飾キーを [ctrl]・[shift] のとおりに押して押下した様子。 */
 private fun press(type: PointerType, ctrl: Boolean = false, shift: Boolean = false): PointerPress =
-    PointerPress(position = Offset.Zero, type = type, secondary = false, ctrlPressed = ctrl, shiftPressed = shift)
+    PointerPress(position = Offset.Zero, type = type, secondary = false, ctrlPressed = ctrl, shiftPressed = shift, pressedAt = 0L)
 
 class ItemClickTest {
     // マウスでは、修飾キーを押していなければ開き、Ctrl で足す・外し、Shift（Ctrl と一緒でも）で範囲を選ぶ。
-    // 長押しでも、選んでいる項目があってもなくても同じ
+    // 長押しでも、選んでいる項目があってもなくても、タッチの画面の振る舞いで動かしていても同じ
     @Test
     fun mouseOpensOrSelectsByModifierKeys() {
         val cases = listOf(
@@ -29,25 +29,51 @@ class ItemClickTest {
         cases.forEach { (press, expected) ->
             listOf(false, true).forEach { longPress ->
                 listOf(false, true).forEach { hasSelection ->
-                    val name = "$press, 長押し: $longPress, 選んでいる項目: $hasSelection"
-                    assertEquals(expected, itemClickOf(press, longPress, hasSelection), name)
+                    listOf(false, true).forEach { touchScreen ->
+                        val name = "$press, 長押し: $longPress, 選んでいる項目: $hasSelection, タッチの画面: $touchScreen"
+                        assertEquals(expected, itemClickOf(press, longPress, hasSelection, touchScreen), name)
+                    }
                 }
             }
         }
     }
 
-    // タッチでは、選んでいる項目が無ければ、押下はその項目だけを選び、長押しは足す（選ぶ状態に入る）。開かない
+    // タッチの画面の振る舞いで動かしていなければ、タッチで選んでいる項目が無いとき、押下はその項目だけを選び、
+    // 長押しは足す（選ぶ状態に入る）。開かない
     @Test
     fun touchWithoutSelectionTogglesOnlyOnLongPress() {
-        assertEquals(ItemClick.Select(SelectionMode.SINGLE), itemClickOf(press(PointerType.Touch), longPress = false, hasSelection = false))
-        assertEquals(ItemClick.Select(SelectionMode.TOGGLE), itemClickOf(press(PointerType.Touch), longPress = true, hasSelection = false))
+        assertEquals(
+            ItemClick.Select(SelectionMode.SINGLE),
+            itemClickOf(press(PointerType.Touch), longPress = false, hasSelection = false, touchScreen = false),
+        )
+        assertEquals(
+            ItemClick.Select(SelectionMode.TOGGLE),
+            itemClickOf(press(PointerType.Touch), longPress = true, hasSelection = false, touchScreen = false),
+        )
     }
 
-    // タッチでは、選んでいる項目があるあいだは、押下も長押しも足す・外す
+    // タッチの画面の振る舞いで動かしていれば、タッチで選んでいる項目が無いとき、押下は開き、長押しは項目のメニューを出す（選ぶ状態には入らない）。
+    // ペンでも同じ
+    @Test
+    fun touchScreenTapOpensAndLongPressShowsMenuWithoutSelection() {
+        listOf(PointerType.Touch, PointerType.Stylus).forEach { type ->
+            assertEquals(ItemClick.Open, itemClickOf(press(type), longPress = false, hasSelection = false, touchScreen = true), "$type")
+            assertEquals(ItemClick.Menu, itemClickOf(press(type), longPress = true, hasSelection = false, touchScreen = true), "$type")
+        }
+    }
+
+    // タッチでは、選んでいる項目があるあいだは、押下も長押しも足す・外す。タッチの画面の振る舞いで動かしていても同じ
     @Test
     fun touchWithSelectionToggles() {
-        assertEquals(ItemClick.Select(SelectionMode.TOGGLE), itemClickOf(press(PointerType.Touch), longPress = false, hasSelection = true))
-        assertEquals(ItemClick.Select(SelectionMode.TOGGLE), itemClickOf(press(PointerType.Touch), longPress = true, hasSelection = true))
+        listOf(false, true).forEach { touchScreen ->
+            listOf(false, true).forEach { longPress ->
+                assertEquals(
+                    ItemClick.Select(SelectionMode.TOGGLE),
+                    itemClickOf(press(PointerType.Touch), longPress, hasSelection = true, touchScreen),
+                    "長押し: $longPress, タッチの画面: $touchScreen",
+                )
+            }
+        }
     }
 
     // 開いたクリックを離してから、決めた時間より前に押したクリックは開かない。その時間がたってから押したものは開く
@@ -71,11 +97,36 @@ class ItemClickTest {
         assertEquals(listOf(true, false, false, false, false), opened)
     }
 
-    // ポインターで押していないとき（キーボードなど）は、その項目だけを選ぶ
+    // タッチの画面の振る舞いで動かしていなければ、ポインターで押していないとき（キーボードなど）は、その項目だけを選ぶ
     @Test
     fun pressWithoutPointerSelectsSingle() {
         listOf(false, true).forEach { hasSelection ->
-            assertEquals(ItemClick.Select(SelectionMode.SINGLE), itemClickOf(null, longPress = false, hasSelection), "$hasSelection")
+            assertEquals(
+                ItemClick.Select(SelectionMode.SINGLE),
+                itemClickOf(null, longPress = false, hasSelection, touchScreen = false),
+                "選んでいる項目: $hasSelection",
+            )
+        }
+    }
+
+    // タッチの画面の振る舞いで動かしていれば、ポインターで押していないとき（画面の読み上げの操作やキーボードなど）も、タッチと同じに扱う。
+    // 選んでいる項目が無ければ押下は開き、長押しは項目のメニューを出す。選んでいる項目があるあいだは、押下も長押しも足す・外す
+    @Test
+    fun touchScreenPressWithoutPointerActsLikeTouch() {
+        val cases = listOf(
+            Pair(false, false) to ItemClick.Open,
+            Pair(true, false) to ItemClick.Menu,
+            Pair(false, true) to ItemClick.Select(SelectionMode.TOGGLE),
+            Pair(true, true) to ItemClick.Select(SelectionMode.TOGGLE),
+        )
+
+        cases.forEach { (input, expected) ->
+            val (longPress, hasSelection) = input
+            assertEquals(
+                expected,
+                itemClickOf(null, longPress, hasSelection, touchScreen = true),
+                "長押し: $longPress, 選んでいる項目: $hasSelection",
+            )
         }
     }
 }

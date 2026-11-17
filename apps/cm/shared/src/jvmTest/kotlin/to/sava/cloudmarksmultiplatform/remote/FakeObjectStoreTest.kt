@@ -52,6 +52,26 @@ class FakeObjectStoreTest {
         assertEquals(GetObjectResult.NotFound, store.get("other"))
     }
 
+    // つながらないあいだは、GET・PUT・一覧・DELETE のどれも結果が不明を返し、何も書き換えない。リクエストは記録する。
+    // つながるようになれば、ふつうに扱う
+    @Test
+    fun unreachableStoreAnswersUnknownWithoutChanges() = runTest {
+        val store = FakeObjectStore()
+        val eTag = store.overwrite(key, body)
+        store.unreachable = true
+
+        assertIs<GetObjectResult.Unknown>(store.get(key))
+        assertIs<PutObjectResult.Unknown>(store.put(key, byteArrayOf(4), "application/gzip", PutCondition.IfMatch(eTag)))
+        assertIs<ListObjectsResult.Unknown>(store.list("cm/data/"))
+        assertIs<DeleteObjectResult.Unknown>(store.delete(key))
+        assertContentEquals(body, store.objectAt(key)?.body)
+        assertEquals(4, store.requests.size)
+
+        store.unreachable = false
+
+        assertIs<GetObjectResult.Found>(store.get(key))
+    }
+
     // 遅れて届く PUT は、次の PUT より先に、届いた時点の条件で扱われる
     @Test
     fun latePutArrivesBeforeTheNextPut() = runTest {

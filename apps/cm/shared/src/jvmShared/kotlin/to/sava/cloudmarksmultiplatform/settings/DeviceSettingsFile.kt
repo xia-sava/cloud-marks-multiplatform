@@ -4,9 +4,9 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import to.sava.cloudmarksmultiplatform.files.describeIoFailure
+import to.sava.cloudmarksmultiplatform.files.readUtf8File
 import to.sava.cloudmarksmultiplatform.files.replaceFileAtomically
 import java.io.IOException
-import java.nio.file.Files
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 
@@ -50,7 +50,7 @@ class DeviceSettingsFile(private val path: Path, private val log: (String) -> Un
      */
     fun read(): DeviceSettings {
         val text = try {
-            Files.readString(path)
+            readUtf8File(path)
         } catch (e: NoSuchFileException) {
             return DEFAULTS
         } catch (e: IOException) {

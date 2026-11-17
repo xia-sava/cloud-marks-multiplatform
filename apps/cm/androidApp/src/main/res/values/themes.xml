@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ウィンドウのテーマ。端末の明暗に従うので、起動したときのウィンドウの背景も、暗い表示なら暗い色になる。
+         AppBar は画面の側で描くので、ウィンドウの AppBar と題は出さない。 -->
+    <style name="Theme.CloudMarks" parent="android:Theme.DeviceDefault.DayNight">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+</resources>

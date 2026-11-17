@@ -70,9 +70,9 @@ data class SettingsScreenState(
     val canReturn: Boolean = false,
 )
 
-/** 項目をブラウザで開こうとして、利用者に伝えること。 */
+/** 項目をブラウザかほかのアプリで開こうとして（共有を含む）、利用者に伝えること。 */
 sealed interface BrowserNotice {
-    /** ブラウザの一覧に既定のブラウザが無く、Windows に既定のブラウザで開かせようとして、開けなかった。 */
+    /** ブラウザの一覧に既定のブラウザが無く、ブラウザを調べずに既定のブラウザで開こうとして、開けなかった。 */
     data object DefaultBrowserLaunchFailed : BrowserNotice
 
     /** ブラウザ [browserName] を起動できなかった。[detail] は詳細の行に出す文。無ければ null。 */
@@ -86,6 +86,12 @@ sealed interface BrowserNotice {
 
     /** 開くフォルダの項目ファイルが壊れている。 */
     data class FolderBroken(val problem: StorageProblem) : BrowserNotice
+
+    /** 項目をほかのアプリで開くか共有しようとして、受け取れるアプリが無かった。 */
+    data object NoAppForItem : BrowserNotice
+
+    /** 項目をほかのアプリで開くか共有しようとして、ほかの理由で、受け取るアプリの一覧を出せなかった。理由はログにだけ書く。 */
+    data object ShareFailed : BrowserNotice
 }
 
 /**
@@ -95,8 +101,13 @@ sealed interface BrowserNotice {
  * @property displayScale 画面全体の表示の大きさ。端末ごとの設定で、どの画面でも同じ
  * @property tabLoading 2 つ以上の項目をまとめてブラウザで開くときの、タブの読み込み方。端末ごとの設定
  * @property opensMultipleItems 2 つ以上の項目をまとめてブラウザで開けるプラットフォームか。偽なら、[tabLoading] の欄を出さない
- * @property browsers PC に入っているブラウザ。項目とフォルダのメニューに、ブラウザで開く行として並べる
- * @property browserNotice 項目をブラウザで開こうとして、利用者に伝えること。無いか、閉じたら null
+ * @property sharesItems 項目をほかのアプリで開くことと共有することができるプラットフォームか。偽なら、タッチの画面の、
+ * 項目を選んでいるあいだの AppBar の、その他のオプションのメニューと、項目の行を長押ししたときのメニューに、ほかのアプリで開く行と
+ * 共有の行を出さない
+ * @property browsers この端末に入っているブラウザ。項目とフォルダのメニューに、ブラウザで開く行として並べる
+ * @property browserNotice 項目をブラウザかほかのアプリで開こうとして（共有を含む）、利用者に伝えること。無いか、閉じたら null
+ * @property lastOpenedItemId 最後に開いた項目の ID。端末ごとの記録で、リストのその項目の行を強調する。項目が消えたり別のフォルダへ
+ * 移ったりしても替えない。覚えていなければ null
  */
 data class AppState(
     val screen: Screen = Screen.STARTING,
@@ -106,8 +117,10 @@ data class AppState(
     val displayScale: DisplayScale = DisplayScale.DEFAULT,
     val tabLoading: TabLoading = TabLoading(),
     val opensMultipleItems: Boolean = false,
+    val sharesItems: Boolean = false,
     val browsers: List<Browser> = emptyList(),
     val browserNotice: BrowserNotice? = null,
+    val lastOpenedItemId: String? = null,
 ) {
     /** 端末ごとの設定。 */
     val deviceSettings: DeviceSettings get() = DeviceSettings(displayScale, tabLoading)

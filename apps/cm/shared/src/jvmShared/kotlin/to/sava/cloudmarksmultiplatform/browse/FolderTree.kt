@@ -46,8 +46,8 @@ fun TreeState.ancestorsOf(folderId: String): List<String> =
     generateSequence(folders[folderId]?.parent) { folders[it]?.parent }.toList()
 
 /**
- * フォルダ [folderId] と、その子孫のフォルダの項目の数の合計。マニフェストの各フォルダの `count` を足す（項目ファイルは読まない）。
- * ツリーに無いフォルダは 0。
+ * フォルダ [folderId] と、その子孫のフォルダの項目の数の合計。各フォルダの数は [countOf] で決め、既定ではマニフェストの `count` を足す
+ * （項目ファイルは読まない）。ツリーに無いフォルダは 0。
  */
-fun TreeState.itemCountWithDescendants(folderId: String): Int =
-    folders[folderId]?.let { node -> node.count + node.children.sumOf { itemCountWithDescendants(it) } } ?: 0
+fun TreeState.itemCountWithDescendants(folderId: String, countOf: (String) -> Int = { folders[it]?.count ?: 0 }): Int =
+    folders[folderId]?.let { node -> countOf(node.id) + node.children.sumOf { itemCountWithDescendants(it, countOf) } } ?: 0

@@ -14,6 +14,7 @@ dependencies {
     implementation(project(":shared"))
 
     implementation(libs.androidx.activity.compose)
+    implementation(libs.kotlinx.coroutinesAndroid)
 }
 
 // バージョンは配布時に -Pcloudmarks.versionCode / -Pcloudmarks.versionName で渡す。

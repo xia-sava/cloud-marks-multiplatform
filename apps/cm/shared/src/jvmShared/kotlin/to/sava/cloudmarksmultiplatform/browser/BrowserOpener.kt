@@ -3,7 +3,7 @@ package to.sava.cloudmarksmultiplatform.browser
 import to.sava.cloudmarksmultiplatform.settings.TabLoading
 
 /**
- * PC に入っているブラウザ。
+ * この端末に入っているブラウザ。
  *
  * @property name 画面に出す名前
  * @property executable 実行ファイルの絶対パス
@@ -44,7 +44,7 @@ interface BrowserOpener {
     /** 2 つ以上の項目をまとめて開けるか。偽なら、まとめて開くときの設定の欄を出さない。 */
     val opensMultipleItems: Boolean
 
-    /** PC に入っているブラウザ。読めなければ空。 */
+    /** この端末に入っているブラウザ。読めなければ空。 */
     suspend fun browsers(): List<Browser>
 
     /**

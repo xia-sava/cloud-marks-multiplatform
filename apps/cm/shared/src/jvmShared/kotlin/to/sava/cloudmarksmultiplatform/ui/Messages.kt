@@ -83,6 +83,27 @@ internal const val RELOAD_DESCRIPTION = "再読み込み"
 /** AppBar の、設定の画面を開くボタン。ボタンの説明とツールチップに使う。 */
 internal const val SETTINGS_DESCRIPTION = "設定"
 
+/** タッチの画面の、項目を選んでいるあいだの AppBar の題。[count] は選んでいる項目の数。 */
+internal fun selectionTitle(count: Int): String = "$count 件を選択中"
+
+/** タッチの画面の、項目を選んでいるあいだの AppBar の、選ぶのをやめるボタン。ボタンの説明とツールチップに使う。 */
+internal const val CLEAR_SELECTION_DESCRIPTION = "選択を解除"
+
+/** タッチの画面の、項目を選んでいるあいだの AppBar の、その他のオプションのメニューを出すボタン。ボタンの説明とツールチップに使う。 */
+internal const val MORE_OPTIONS_DESCRIPTION = "その他のオプション"
+
+/** 項目を、既定のブラウザで開く操作。タッチの画面の、項目を長押ししたときのメニューの項目。 */
+internal const val OPEN_LABEL = "開く"
+
+/** 項目を、ほかのアプリで開く操作。AppBar のその他のオプションのメニューと、タッチの画面の、項目を長押ししたときのメニューの項目。 */
+internal const val OPEN_IN_OTHER_APP_LABEL = "アプリを選んで開く"
+
+/** 項目を共有する操作。AppBar のその他のオプションのメニューと、タッチの画面の、項目を長押ししたときのメニューの項目。 */
+internal const val SHARE_LABEL = "共有"
+
+/** 長押しした項目だけを選び、選ぶ状態に入る操作。タッチの画面の、項目を長押ししたときのメニューの項目。 */
+internal const val SELECT_LABEL = "選択"
+
 /** ツリーの、閉じたノードを開くボタン。ボタンの説明とツールチップに使う。 */
 internal const val EXPAND_DESCRIPTION = "展開"
 
@@ -118,11 +139,17 @@ internal const val EXTENSION_REQUIRED_NOTICE =
     "このブラウザに Cloud Marks の拡張機能が入っていることを確認できていないため、まとめて開けません。" +
         "拡張機能を入れてから、ブラウザを起動し直してください。"
 
-/** 既定のブラウザを起動できなかったことを伝える文。 */
+/**
+ * 既定のブラウザを起動できなかったことを伝える文。項目をほかのアプリで開くか共有しようとして、受け取れるアプリが無かったこと以外の理由で
+ * 受け取るアプリの一覧を出せなかったときにも使う。
+ */
 internal const val DEFAULT_BROWSER_LAUNCH_FAILED = "ブラウザを起動できませんでした。"
 
 /** フォルダのメニューからブラウザで開こうとして、そのフォルダの項目ファイルが壊れていたことを伝える文。詳細の行に壊れ方を出す。 */
 internal const val FOLDER_BROKEN_FOR_BROWSER_NOTICE = "フォルダのデータが壊れているため、ブラウザで開けません。"
+
+/** 項目をほかのアプリで開くか共有しようとして、受け取れるアプリが無かったことを伝える文。 */
+internal const val NO_APP_FOR_URL_NOTICE = "この URL を開けるアプリがありません。"
 
 /** 項目とフォルダのメニューの、ブラウザ [browserName] で開く行。 */
 internal fun openInBrowserLabel(browserName: String): String = "$browserName で開く"
@@ -135,7 +162,11 @@ internal fun commandUndeliveredNotice(browserName: String): String =
     "$browserName でタブを開けなかった可能性があります。" +
         "$browserName に Cloud Marks の拡張機能が入っていて、有効になっているか確認してください。"
 
-/** 項目をブラウザで開こうとして伝えることを、利用者に見せる文にする。フォルダの項目を読めなかったときは、読めなかった理由の文にする。 */
+/**
+ * 項目をブラウザかほかのアプリで開こうとして（共有を含む）伝えることを、利用者に見せる文にする。フォルダの項目を読めなかったときは、
+ * 読めなかった理由の文にする。ほかのアプリで開くか共有しようとして、受け取れるアプリが無かったこと以外の理由で出せなかったときは、
+ * 既定のブラウザを起動できなかったときと同じ文にする。
+ */
 internal fun describeBrowserNotice(notice: BrowserNotice): UiMessage =
     when (notice) {
         BrowserNotice.DefaultBrowserLaunchFailed -> UiMessage(DEFAULT_BROWSER_LAUNCH_FAILED)
@@ -143,10 +174,19 @@ internal fun describeBrowserNotice(notice: BrowserNotice): UiMessage =
         is BrowserNotice.CommandUndelivered -> UiMessage(commandUndeliveredNotice(notice.browserName))
         is BrowserNotice.FolderReadFailed -> describeSyncFailure(notice.failure)
         is BrowserNotice.FolderBroken -> UiMessage(FOLDER_BROKEN_FOR_BROWSER_NOTICE, notice.problem.toString())
+        BrowserNotice.NoAppForItem -> UiMessage(NO_APP_FOR_URL_NOTICE)
+        BrowserNotice.ShareFailed -> UiMessage(DEFAULT_BROWSER_LAUNCH_FAILED)
     }
 
 /** 項目を [count] 件消したあとの、お知らせの本文。 */
 internal fun deletedItemsNotice(count: Int): String = "$count 件の項目を削除しました。"
+
+/** 項目を [count] 件消し、S3 につながらないために溜めたあとの、お知らせの本文。[deletedItemsNotice] の代わりに出す。 */
+internal fun pendingDeletedItemsNotice(count: Int): String = "$count 件の項目を削除しました。ネットワークにつながったら保存先に反映します。"
+
+/** 溜めた削除があるあいだ、メインの画面の帯に出す文。[count] は溜めた項目の数。 */
+internal fun pendingDeletesNotice(count: Int): String =
+    "削除した $count 件の項目は、まだ保存先に反映していません。ネットワークにつながったら反映します。"
 
 /** 2 つ以上の項目をドラッグしているあいだの札。[count] はドラッグしている項目の数。 */
 internal fun draggedItemsLabel(count: Int): String = "$count 件の項目"
@@ -201,6 +241,12 @@ internal fun describeBrokenFolder(problem: StorageProblem): UiMessage =
     UiMessage("このフォルダのデータが壊れているため、表示できません。", problem.toString())
 
 /**
+ * 保存されているアクセスキーを復号できなかったことを伝える文。プラットフォームごとに違い、デスクトップは、別のユーザーや別の PC で
+ * 保存した設定は使えないことを添える。
+ */
+internal expect val UNDECRYPTABLE_CREDENTIALS_NOTICE: String
+
+/**
  * 起動したときに設定を読めなかった理由を、利用者に見せる文にする。読めたときは null。
  * 認証情報を復号できなかったときは、詳細を付けない（暗号化の仕組みが返した文は、ログにだけ書く）。
  */
@@ -209,11 +255,7 @@ internal fun describeSettingsReadProblem(problem: SettingsReadResult): UiMessage
         SettingsReadResult.NotFound -> UiMessage("データを保存する S3 のバケットと、アクセスキーを入力してください。")
         is SettingsReadResult.Corrupt ->
             UiMessage("設定ファイルを読み込めませんでした。もう一度入力して保存してください。", problem.detail)
-        is SettingsReadResult.Undecryptable ->
-            UiMessage(
-                "保存されているアクセスキーを読み込めませんでした。" +
-                    "別のユーザーや別の PC で保存した設定は使えないため、もう一度入力して保存してください。",
-            )
+        is SettingsReadResult.Undecryptable -> UiMessage(UNDECRYPTABLE_CREDENTIALS_NOTICE)
         is SettingsReadResult.Failed -> UiMessage("設定ファイルを読み込めませんでした。", problem.detail)
         is SettingsReadResult.Found -> null
     }

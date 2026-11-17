@@ -1,7 +1,6 @@
 package to.sava.cloudmarksmultiplatform.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -62,7 +61,8 @@ private const val DISABLED_CONTENT_ALPHA = 0.38f
  * ルートフォルダは最上段に、家のアイコンと「トップ」で出す。開いているフォルダの行を強調し、開いているフォルダが替わったら、
  * その行が見える位置までスクロールする。
  *
- * 行を右クリックするとフォルダのメニュー（[FolderContextMenu]）を出す。[dragsToMove] のプラットフォームでは、ルートフォルダ以外の行を
+ * 行を右クリックするとフォルダのメニュー（[FolderContextMenu]）を出す。タッチの画面（[LocalTouchScreen]）では、行を長押ししても出す。
+ * [dragsToMove] のプラットフォームでは、ルートフォルダ以外の行を
  * ドラッグして、別の行へ落とせる（[treeDrop]）。行の上の端に落とすとその行の前へ、下の端に落とすとその行の後ろへ（開いていて子のある
  * 行なら、その先頭の子の前へ）並べ替え、真ん中に落とすと、その行のフォルダの子のフォルダの末尾へ移す。リストの項目とフォルダを
  * ドラッグしてきたときも同じ（項目は行のどこでも中へ）。最後の行より下の空いたところに落とすと、フォルダはルートフォルダの子の末尾へ、
@@ -104,7 +104,7 @@ internal fun FolderTreePane(
         OperableFolderTreeRow(
             row = row,
             current = row.folderId == browse.currentFolderId,
-            itemCount = tree.folders[row.folderId]?.count ?: 0,
+            itemCount = browse.itemCountOf(row.folderId),
             actions = actions,
             browserActions = browserActions,
             onOpen = { onOpen(row.folderId) },
@@ -154,11 +154,12 @@ private fun LazyListState.isFullyVisible(key: String?): Boolean {
 }
 
 /**
- * メインの画面のツリーの行。右クリックのメニューと、ドラッグして移す元を付ける。ドラッグして移すものを、この行のフォルダの中へ移すなら
+ * メインの画面のツリーの行。右クリック（タッチの画面では長押しでも）のメニューと、ドラッグして移す元を付ける。
+ * ドラッグして移すものを、この行のフォルダの中へ移すなら
  * 強調し、この行の端が挿入する位置なら、その端に、挿入先の深さの行と同じだけ字下げした線を引く。
  *
  * @param current 開いているフォルダの行か
- * @param itemCount 行のフォルダの直下の項目の数（マニフェストの `count`）
+ * @param itemCount 行のフォルダの直下の項目の数（溜めた削除の項目は数えない。[BrowseState.itemCountOf]）
  */
 @Composable
 private fun OperableFolderTreeRow(
@@ -172,6 +173,7 @@ private fun OperableFolderTreeRow(
 ) {
     val drag = actions.dragState
     val menu = rememberContextMenuState()
+    val touchScreen = LocalTouchScreen.current
     val mark = drag.drop?.takeIf { actions.canWrite && it.row == DropRow.TreeFolder(row.folderId) }
     val dragSource = if (row.isRoot) {
         Modifier
@@ -189,13 +191,8 @@ private fun OperableFolderTreeRow(
             dropTarget = mark != null && mark.line == null,
             onOpen = onOpen,
             onToggle = onToggle,
-            modifier = Modifier
-                .onPointerPress { press ->
-                    if (!press.secondary) return@onPointerPress
-                    browserActions.onMenuOpen()
-                    menu.open(press.position)
-                }
-                .then(dragSource),
+            onLongClick = folderMenuOnLongPress(touchScreen, menu, browserActions.onMenuOpen),
+            modifier = Modifier.folderMenuPress(menu, browserActions.onMenuOpen).then(dragSource),
         )
         FolderContextMenu(
             state = menu,
@@ -218,6 +215,7 @@ private fun OperableFolderTreeRow(
  * @param modifier 行に付ける、押す操作の扱い
  * @param enabled 行を押せるか。偽なら、アイコンと名前を薄くする。開閉ボタンは押せる
  * @param dropTarget ドラッグして移すものを、この行のフォルダの中へ移すか。そうなら、[highlighted] と違う色で強調する
+ * @param onLongClick 行を長押ししたとき。null なら長押しを扱わない
  */
 @Composable
 internal fun FolderTreeRowView(
@@ -228,6 +226,7 @@ internal fun FolderTreeRowView(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     dropTarget: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
 ) {
     val background = when {
         dropTarget -> MaterialTheme.colorScheme.primaryContainer
@@ -241,7 +240,7 @@ internal fun FolderTreeRowView(
                 .fillMaxWidth()
                 .height(TREE_ROW_HEIGHT)
                 .background(background)
-                .clickable(enabled = enabled, onClick = onOpen)
+                .clickableWithLongClick(enabled = enabled, onClick = onOpen, onLongClick = onLongClick)
                 .padding(start = TREE_INDENT * row.depth, end = TREE_ROW_END_PADDING),
             verticalAlignment = Alignment.CenterVertically,
         ) {

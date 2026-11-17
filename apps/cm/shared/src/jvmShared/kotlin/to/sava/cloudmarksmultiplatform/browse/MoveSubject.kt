@@ -86,8 +86,9 @@ fun reordered(order: List<String>, moved: List<String>, beforeId: String?): List
  *
  * [MoveDestination.Into] は [canMoveTo] で決める。
  * [MoveDestination.At] は、移動先のフォルダがツリーにあれば、同じフォルダ（同じ親）の中の並べ替えも受け付ける。ただし、並びが変わらない
- * もの（[reordered] が元の並びと同じ。自分のすぐ前やすぐ後ろへ置くなど）は受け付けない。並びは、項目なら移動先のフォルダの読めた項目、
- * フォルダなら移動先の子のフォルダで確かめる。移動先のフォルダの項目を読めていなければ、並びが変わるものとする。
+ * もの（[reordered] が元の並びと同じ。自分のすぐ前やすぐ後ろへ置くなど）は受け付けない。並びは、項目なら移動先のフォルダの読めた項目
+ * （溜めた削除の項目を除く。[BrowseState.shownItems]）、フォルダなら移動先の子のフォルダで確かめる。移動先のフォルダの項目を読めていなければ、
+ * 並びが変わるものとする。
  * フォルダは、ルートフォルダを動かせず、自身と子孫へは移せない。移す項目が無ければ移せない。
  */
 fun BrowseState.canMove(subject: MoveSubject, destination: MoveDestination): Boolean {
@@ -104,7 +105,9 @@ fun BrowseState.canMove(subject: MoveSubject, destination: MoveDestination): Boo
 /** 項目 [subject] を [destination] へ置くと、並びが変わるか。別のフォルダへ移すなら変わる。 */
 private fun BrowseState.changesItemOrder(subject: MoveSubject.Items, destination: MoveDestination.At): Boolean {
     if (subject.folderId != destination.folderId) return true
-    val order = (folderReads[destination.folderId] as? FolderReadResult.Loaded)?.items?.map { it.id } ?: return true
+    val order = (folderReads[destination.folderId] as? FolderReadResult.Loaded)?.items
+        ?.let { items -> shownItems(destination.folderId, items).map { it.id } }
+        ?: return true
     return reordered(order, subject.itemIds, destination.beforeId) != order
 }
 

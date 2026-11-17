@@ -1,17 +1,21 @@
 package to.sava.cloudmarksmultiplatform.app
 
 import to.sava.cloudmarksmultiplatform.operations.InsertItems
+import to.sava.cloudmarksmultiplatform.operations.ItemRef
 import to.sava.cloudmarksmultiplatform.operations.OperationResult
 import to.sava.cloudmarksmultiplatform.storage.Item
 import to.sava.cloudmarksmultiplatform.sync.SyncFailure
+import to.sava.cloudmarksmultiplatform.sync.WriteResult
 
 /**
  * データを変える操作の、書き込みの進み具合と結果。
  *
  * @property writing 操作を書いている最中か。そのあいだは、ほかの操作も読み直しも受け付けない
- * @property outcome 直前の操作の結果。まだ無いか、閉じたか、そのあとマニフェストを読み直せたら null
+ * @property outcome 直前の操作の結果。まだ無いか、閉じたか、そのあと読み直すボタンなどでマニフェストを読み直せたら null。
+ * S3 から読み直すきっかけの知らせで読み直したときは消さない
  * @property undoableDelete 元に戻せる、直前の項目の削除。無ければ null。ほかの操作を書き始めたときと、
- * 元に戻すお知らせを閉じたときに null にする。元に戻す書き込みが書けなかったか確かめられなかったときは、同じものを残す
+ * 元に戻すお知らせを閉じたときに null にする。元に戻す書き込みが書けなかったか確かめられなかったときは、同じものを残す。
+ * 溜めた削除（[UndoableDelete.pending]）を元に戻したら null にする
  */
 data class WriteState(
     val writing: Boolean = false,
@@ -42,11 +46,35 @@ sealed interface WriteOutcome {
  * 元に戻せる、直前の項目の削除。
  *
  * @property restore 消した項目を元の位置へ戻す、項目の挿入
+ * @property pendingTargets S3 につながらないために溜めた削除なら、そのとき溜めた対象。元に戻すときは、これを溜めた削除から外し、
+ * S3 には書かない。S3 に書けた削除なら null
  */
-data class UndoableDelete(val restore: List<InsertItems>) {
+data class UndoableDelete(val restore: List<InsertItems>, val pendingTargets: Set<ItemRef>? = null) {
     /** 消した項目の数。 */
     val count: Int get() = restore.sumOf { it.items.size }
+
+    /** 溜めた削除か。 */
+    val pending: Boolean get() = pendingTargets != null
+
+    /**
+     * 溜めた削除のうち [applied] を S3 に書けたあとの、元に戻せる削除。この削除で溜めた対象がすべて [applied] に含まれていれば、
+     * S3 に書けた削除（項目の挿入で戻すもの）にする。そうでなければ、このまま。
+     */
+    fun afterApplying(applied: Set<ItemRef>): UndoableDelete =
+        if (pendingTargets != null && applied.containsAll(pendingTargets)) copy(pendingTargets = null) else this
 }
+
+/**
+ * 書き込みの結果 [result] が、S3 につながらないための失敗か。つながらない失敗と、結果が不明のまま終わったもの
+ * （[SyncFailure.Unreachable]。書けなかったときも、書けたかどうかを確かめられなかったときも）が当たる。
+ * 項目の削除の書き込みがこれに当たれば、その削除を溜める。
+ */
+internal fun isUnreachable(result: WriteResult): Boolean =
+    when (result) {
+        is WriteResult.Success -> false
+        is WriteResult.Failed -> result.failure is SyncFailure.Unreachable
+        is WriteResult.Unconfirmed -> result.failure is SyncFailure.Unreachable
+    }
 
 /**
  * フォルダ [folderId] の項目 [itemsBefore]（消す前の並び）から [deletedIds] の項目を消したあとで、消した項目を元の位置へ戻す項目の挿入。

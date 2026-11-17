@@ -29,6 +29,8 @@ import to.sava.cloudmarksmultiplatform.browser.Browser
 import to.sava.cloudmarksmultiplatform.browser.BrowserOpenResult
 import to.sava.cloudmarksmultiplatform.browser.BrowserOpener
 import to.sava.cloudmarksmultiplatform.browser.BrowserTab
+import to.sava.cloudmarksmultiplatform.browser.ItemShareResult
+import to.sava.cloudmarksmultiplatform.browser.ItemSharer
 import to.sava.cloudmarksmultiplatform.files.describeIoFailure
 import to.sava.cloudmarksmultiplatform.logging.FileLog
 import to.sava.cloudmarksmultiplatform.operations.ChangeItemTitle
@@ -60,6 +62,7 @@ import to.sava.cloudmarksmultiplatform.sync.SyncFailure
 import to.sava.cloudmarksmultiplatform.sync.TreeReadResult
 import to.sava.cloudmarksmultiplatform.sync.WriteResult
 import to.sava.cloudmarksmultiplatform.sync.connectionCacheDirectory
+import to.sava.cloudmarksmultiplatform.sync.connectionName
 import to.sava.cloudmarksmultiplatform.sync.writeConfirming
 import java.io.IOException
 import java.nio.file.Path
@@ -86,20 +89,33 @@ private typealias TreeRead = suspend (foldersToLoad: (TreeState) -> Set<String>)
  * データを変える操作（`docs/operations.md`）は、一度に 1 つだけ書く。書いているあいだは、ほかの操作も読み直しも受け付けない。
  * 書けたら書いたあとのツリーに替え、マニフェストは GET し直さない。
  *
+ * 項目の削除（選んでいる項目の削除）が S3 につながらないために書けなかったら（[isUnreachable]）、その削除を端末に溜め、接続先ごとの
+ * 溜めた削除の記録のファイル（[pendingDeletesFile]）に書く。ほかの失敗では溜めず、ほかの操作も溜めない。溜めた削除の項目は、
+ * リストとフォルダの件数から消して見せる（[BrowseState.pendingDeletes]）。
+ * 溜めた削除は、起動したときと設定を保存したとき、読み直したとき（[reload] と [storageChanges]）にマニフェストを読み書きできるツリーとして
+ * 読めたあとと、ほかの操作を書く前に、すべてまとめて 1 回の書き込みとして書く。ほかの操作を書く前に書けなければ、その操作は書かない。
+ * 書けたら溜めた削除を空にし、記録のファイルを消す。S3 につながらなければ溜めたままにし、失敗としては知らせない。
+ * ほかの理由で書けなければ溜めたままにし、操作を書けなかったときと同じく結果に出す。
+ *
  * [deletesStaleFiles] なら、起動して初めてツリーを読めたときに、前に古いファイルの削除を終えてから間隔を過ぎていれば、
  * 裏で古いファイルの削除を走らせる。結果はログにだけ書く。
  *
- * 項目をブラウザで開くことは、データを変えないので、書いている最中も、読むだけのツリーでも受け付ける。
+ * 項目をブラウザで開くこと、ほかのアプリで開くこと、共有することは、データを変えないので、書いている最中も、読むだけのツリーでも受け付ける。
+ * 項目を 1 つだけ開けたら（既定のブラウザ・選んだブラウザ・ほかのアプリで）、その項目を最後に開いた項目（[AppState.lastOpenedItemId]）として
+ * 覚え、最後に開いた項目の記録のファイルに書く。開けなかったとき、2 つ以上をまとめて開いたとき、共有したときは替えない。
  *
  * @param connect 設定から S3 への接続を作る。[ioDispatcher] で呼ぶ
  * @param log 利用者への誤りとしては見せない失敗と、古いファイルの削除の結果を書く。認証情報は渡さない
- * @param storageChanges ほかのプロセスが S3 へ書いた知らせ。[start] から集め、知らせを受けるたびに [reload] を呼ぶ。
+ * @param storageChanges S3 から読み直すきっかけの知らせ（ほかのプロセスが S3 へ書いたこと、Android では画面が前面に戻ったことと、
+ * ネットワークにつながったこと）。[start] から集め、知らせを受けるたびに [reload] と同じく読み直し、溜めた削除を書く。
+ * ただし、直前の操作の結果は消さない。
  * [reload] が何もしないとき（メインの画面でないとき・読んでいる最中・書いている最中・接続が無いとき）の知らせは捨てる。
  * 知らせを出さない Flow を渡してもよい
  * @param deletesStaleFiles 古いファイルの削除を行うか。デスクトップのアプリだけが行う
  * @param browserOpener 項目をブラウザで開く仕組み
+ * @param itemSharer 項目をほかのアプリで開く仕組みと、共有する仕組み。持たないプラットフォームでは null
  * @param ioDispatcher 設定のファイルと端末ごとの設定のファイルの読み書き、接続を作ること、ローカルキャッシュのディレクトリを消すこと、
- * 古いファイルの削除の記録の読み書きに使う
+ * 古いファイルの削除の記録と最後に開いた項目の記録と溜めた削除の記録の読み書きに使う
  * @param clock 古いファイルの削除を前に終えてからの経過を測る、端末の時計
  */
 class CloudMarksController(
@@ -111,15 +127,24 @@ class CloudMarksController(
     private val storageChanges: Flow<Unit>,
     deletesStaleFiles: Boolean,
     private val browserOpener: BrowserOpener,
+    private val itemSharer: ItemSharer?,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     clock: Clock = Clock.System,
 ) : AutoCloseable {
     private val settingsFile = SettingsFile(appFiles.settingsFile, protector)
     private val deviceSettingsFile = DeviceSettingsFile(appFiles.deviceSettingsFile, log)
+    private val lastOpenedItemFile = LastOpenedItemFile(appFiles.lastOpenedItemFile, log)
     private val cacheRoot: Path = appFiles.cacheDirectory
+    private val stateDirectory: Path = appFiles.stateDirectory
 
     /** 端末ごとの設定のファイルへの書き込みを、1 つずつ順に行う。 */
     private val deviceSettingsWriting = Mutex()
+
+    /** 溜めた削除の記録のファイルの読み書きと削除を、始めた順に 1 つずつ行う。 */
+    private val pendingDeletesWriting = Mutex()
+
+    /** 最後に開いた項目の記録のファイルへの書き込みを、1 つずつ順に行う。 */
+    private val lastOpenedItemWriting = Mutex()
 
     /** 古いファイルの削除。行わないなら null。 */
     private val staleFileDeletion: StaleFileDeletion? =
@@ -128,7 +153,9 @@ class CloudMarksController(
     /** 起動してから、古いファイルの削除を走らせるかを確かめたか。初めてツリーを読めたときに確かめる。 */
     private var staleFilesChecked = false
 
-    private val mutableState = MutableStateFlow(AppState(opensMultipleItems = browserOpener.opensMultipleItems))
+    private val mutableState = MutableStateFlow(
+        AppState(opensMultipleItems = browserOpener.opensMultipleItems, sharesItems = itemSharer != null),
+    )
 
     /** 画面全体の状態。 */
     val state: StateFlow<AppState> = mutableState.asStateFlow()
@@ -139,8 +166,11 @@ class CloudMarksController(
     /** いまの S3 への接続。設定を読めていなければ null。 */
     private var active: ActiveConnection? = null
 
-    /** [storageChanges] を集めて [reload] を呼ぶ処理。[start] で走り始め、[close] で取り消す。 */
-    private val storageChangeWatching: Job = scope.launch(start = CoroutineStart.LAZY) { storageChanges.collect { reload() } }
+    /**
+     * [storageChanges] を集めて、知らせのたびに読み直す処理（[reread]。直前の操作の結果は消さない）。[start] で走り始め、[close] で取り消す。
+     */
+    private val storageChangeWatching: Job =
+        scope.launch(start = CoroutineStart.LAZY) { storageChanges.collect { reread(clearsWriteOutcome = false) } }
 
     /**
      * S3 への接続と、その設定、それを使う処理を走らせるスコープ。スコープは [scope] の子で、1 つの処理の失敗がほかを止めない。
@@ -149,17 +179,21 @@ class CloudMarksController(
     private class ActiveConnection(val connection: Connection, val settings: ConnectionSettings, val scope: CoroutineScope)
 
     /**
-     * 端末ごとの設定と設定を読む。表示の大きさとタブの読み込み方は読めたものにし、読めなければ既定のままにする。
-     * 設定を読めたら S3 への接続を作ってメインの画面を出し、マニフェストとルートフォルダの項目を読む。
+     * 端末ごとの設定と、最後に開いた項目の記録と、設定を読む。表示の大きさとタブの読み込み方は読めたものにし、読めなければ既定のままにする。
+     * 最後に開いた項目は、記録を読めなければ覚えていないものとする。
+     * 設定を読めたら S3 への接続を作り、その接続先の溜めた削除の記録を読んでメインの画面を出し、マニフェストとルートフォルダの項目を読む。
+     * 読み書きできるツリーとして読めたら、溜めた削除を書く（[flushPendingDeletes]）。
      * 設定がまだ無いか読めなければ、設定の画面を出して理由を見せる。認証情報を復号できなかったときは、復号できなかった理由をログにだけ書く。
-     * あわせて [storageChanges] を集め始め、PC に入っているブラウザを読む（[refreshBrowsers]）。
+     * あわせて [storageChanges] を集め始め、この端末に入っているブラウザを読む（[refreshBrowsers]）。
      */
     fun start() {
         storageChangeWatching.start()
         refreshBrowsers()
         scope.launch {
-            val device = withContext(ioDispatcher) { deviceSettingsFile.read() }
-            update { it.copy(displayScale = device.displayScale, tabLoading = device.tabLoading) }
+            val (device, lastOpenedItemId) = withContext(ioDispatcher) { deviceSettingsFile.read() to lastOpenedItemFile.read() }
+            update {
+                it.copy(displayScale = device.displayScale, tabLoading = device.tabLoading, lastOpenedItemId = lastOpenedItemId)
+            }
             val read = withContext(ioDispatcher) { settingsFile.read() }
             if (read !is SettingsReadResult.Found) {
                 if (read is SettingsReadResult.Undecryptable) log("保存されている認証情報を復号できなかった: ${read.detail}")
@@ -168,13 +202,15 @@ class CloudMarksController(
             }
             storedSettings = read.settings
             val connection = replaceConnection(read.settings)
+            val pending = readPendingDeletes(read.settings)
             update {
                 it.copy(
                     screen = Screen.MAIN,
+                    browse = it.browse.withPendingDeletes(pending),
                     settings = storedSettingsScreen(read.settings),
                 )
             }
-            readTree(connection)
+            readTree(connection, appliesPendingDeletes = true)
         }
     }
 
@@ -230,18 +266,26 @@ class CloudMarksController(
         updateBrowse { it.clearSelection() }
     }
 
-    /**
-     * 選んでいる項目を消す。選んでいる項目が無ければ何もしない。
-     * 書けたら、消した項目を元の位置へ戻せるようにする（[undoDelete]）。
-     */
+    /** 選んでいる項目を消す（[deleteItems]）。選んでいる項目が無ければ何もしない。 */
     fun deleteSelectedItems() {
+        deleteItems(state.value.browse.selectedItemIds)
+    }
+
+    /**
+     * 開いているフォルダの読めた項目のうち、ID が [itemIds] にあるものを消す。消すものが無ければ何もしない。選んでいる項目は変えない。
+     * 書けたら、消した項目を元の位置へ戻せるようにする（[undoDelete]）。S3 につながらないために書けなければ（[isUnreachable]）、
+     * その削除を溜め（[pendDeletes]）、溜めた削除として元に戻せるようにする。
+     */
+    fun deleteItems(itemIds: Set<String>) {
         val browse = state.value.browse
         val folderId = browse.currentFolderId ?: return
-        val deletedIds = browse.selectedItems.map { it.id }.toSet()
+        val deletedIds = browse.currentLoadedItems.map { it.id }.filter { it in itemIds }.toSet()
         if (deletedIds.isEmpty()) return
+        val targets = deletedIds.map { ItemRef(folderId, it) }
         writeOperations(
-            listOf(DeleteItems(deletedIds.map { ItemRef(folderId, it) })),
+            listOf(DeleteItems(targets)),
             undoOnSuccess = UndoableDelete(restoringInsertions(folderId, browse.currentLoadedItems, deletedIds)),
+            pendsWhenUnreachable = targets.toSet(),
         )
     }
 
@@ -303,13 +347,27 @@ class CloudMarksController(
     }
 
     /**
-     * 直前の項目の削除を、消した項目を元の位置へ挿入して戻す。書き始めたら true を返す。
+     * 直前の項目の削除を戻す。戻し始めたら true を返す。
      * 元に戻せる削除が無いか、操作を受け付けないとき（[AppState.canWrite]）は何もせず、false を返す。元に戻せる削除は残る。
-     * 書けなかったか確かめられなかったときは、同じ削除をもう一度戻せるようにする。挿入は ID が同じなら適用済みになるので、二重にはならない。
+     *
+     * S3 に書けた削除なら、消した項目を元の位置へ挿入して戻す。書けなかったか確かめられなかったときは、同じ削除をもう一度戻せるようにする。
+     * 挿入は ID が同じなら適用済みになるので、二重にはならない。
+     * 溜めた削除（[UndoableDelete.pending]）なら、その回に溜めた対象を溜めた削除から外し、溜めた削除の記録のファイルを書き直す。
+     * S3 には書かない。外した項目は、リストとフォルダの件数にまた出る。
      */
     fun undoDelete(): Boolean {
         val undoable = state.value.write.undoableDelete ?: return false
-        return writeOperations(undoable.restore, undoOnFailure = undoable)
+        val pendingTargets = undoable.pendingTargets ?: return writeOperations(undoable.restore, undoOnFailure = undoable)
+        val connection = active ?: return false
+        if (!state.value.canWrite) return false
+        update {
+            it.copy(
+                browse = it.browse.withPendingDeletes(it.browse.pendingDeletes - pendingTargets),
+                write = it.write.copy(undoableDelete = null),
+            )
+        }
+        storePendingDeletes(connection.settings)
+        return true
     }
 
     /** 元に戻すお知らせを閉じる。直前の項目の削除は、もう戻せなくなる。 */
@@ -328,13 +386,12 @@ class CloudMarksController(
     }
 
     /**
-     * マニフェストを読み直す。開いているフォルダが残っていれば、その項目も一緒に読む。
+     * マニフェストを読み直す。開いているフォルダが残っていれば、その項目も一緒に読む。読めたら、直前の操作の結果を消す。
+     * 読み書きできるツリーとして読めたら、溜めた削除を書く（[flushPendingDeletes]）。
      * メインの画面でないとき、マニフェストを読んでいる最中、操作を書いている最中、接続が無いときは何もしない。
      */
     fun reload() {
-        val connection = active ?: return
-        if (!state.value.canReload) return
-        readTree(connection)
+        reread(clearsWriteOutcome = true)
     }
 
     /** 設定の画面を出す。入力は保存済みの設定に戻し、シークレットの欄は空にする。 */
@@ -367,7 +424,7 @@ class CloudMarksController(
     }
 
     /**
-     * PC に入っているブラウザを読み直し、状態に入れる。起動したときと、項目とフォルダのメニューを開くたびに呼ぶ。
+     * この端末に入っているブラウザを読み直し、状態に入れる。起動したときと、項目とフォルダのメニューを開くたびに呼ぶ。
      * 拡張機能を入れてブラウザを起動し直したあと、アプリを起動し直さなくても、そのブラウザでまとめて開けるようにする。
      */
     fun refreshBrowsers() {
@@ -381,9 +438,9 @@ class CloudMarksController(
      * 開いているフォルダの項目 [itemId] を、既定のブラウザで開く。開いているフォルダの読めた項目に無ければ何もしない。
      * 選んでいる項目は変えない。
      *
-     * PC に入っているブラウザ（[AppState.browsers]）に既定のブラウザがあれば、メニューでそのブラウザを選んだときと同じく
-     * [openInBrowser] で開く。無ければ、Windows に既定のブラウザで開かせる（[BrowserOpener.openInDefaultBrowser]）。
-     * 起動できなければ知らせる。
+     * この端末に入っているブラウザ（[AppState.browsers]）に既定のブラウザがあれば、メニューでそのブラウザを選んだときと同じく
+     * [openInBrowser] で開く。無ければ、ブラウザを調べずに既定のブラウザで開く（[BrowserOpener.openInDefaultBrowser]）。
+     * 開けたら、その項目を最後に開いた項目として覚える（[rememberOpenedItem]）。起動できなければ知らせる。
      */
     fun openItem(itemId: String) {
         val item = state.value.browse.currentLoadedItems.firstOrNull { it.id == itemId } ?: return
@@ -393,8 +450,10 @@ class CloudMarksController(
         }
         updateBrowserNotice(null)
         scope.launch {
-            if (browserOpener.openInDefaultBrowser(item.url) is BrowserOpenResult.LaunchFailed) {
-                updateBrowserNotice(BrowserNotice.DefaultBrowserLaunchFailed)
+            when (browserOpener.openInDefaultBrowser(item.url)) {
+                BrowserOpenResult.Opened -> rememberOpenedItem(item.id)
+                is BrowserOpenResult.LaunchFailed -> updateBrowserNotice(BrowserNotice.DefaultBrowserLaunchFailed)
+                BrowserOpenResult.CommandUndelivered -> Unit
             }
         }
     }
@@ -409,20 +468,21 @@ class CloudMarksController(
      *
      * 項目を読んであればそれを使い、読んでいなければ、読んであるツリーからそのフォルダの項目を読む（マニフェストは GET しない）。
      * 項目ファイルが `404` を返したら、開いているフォルダと同じく、マニフェストを一度だけ読み直してから読む。
-     * 読めなかったか、項目ファイルが壊れていれば知らせる。マニフェストで項目が無いフォルダは、何もしない。
+     * 読めなかったか、項目ファイルが壊れていれば知らせる。項目が無いフォルダ（溜めた削除の項目は数えない。[BrowseState.itemCountOf]）は、
+     * 何もしない。溜めた削除の項目は開かない。
      */
     fun openFolderItems(folderId: String, browser: Browser) {
         val browse = state.value.browse
         val tree = browse.tree ?: return
-        if ((tree.state.folders[folderId]?.count ?: 0) == 0) return
+        if (browse.itemCountOf(folderId) == 0) return
         (browse.folderReads[folderId] as? FolderReadResult.Loaded)?.let { loaded ->
-            openInBrowser(browser, loaded.items)
+            openInBrowser(browser, browse.shownItems(folderId, loaded.items))
             return
         }
         val connection = active ?: return
         connection.scope.launch {
             when (val read = connection.connection.sync.readFolder(tree, folderId)) {
-                is FolderReadResult.Loaded -> openInBrowser(browser, read.items)
+                is FolderReadResult.Loaded -> openInBrowser(browser, state.value.browse.shownItems(folderId, read.items))
                 is FolderReadResult.Broken -> updateBrowserNotice(BrowserNotice.FolderBroken(read.problem))
                 is FolderReadResult.Failed -> updateBrowserNotice(BrowserNotice.FolderReadFailed(read.failure))
                 FolderReadResult.Missing -> readTree(
@@ -439,6 +499,37 @@ class CloudMarksController(
         }
     }
 
+    /**
+     * 選んでいる項目が 1 つだけなら、選ぶのをやめてから、その項目を [openItemInOtherApp] で開く（[handOverSelectedItem]）。
+     */
+    fun openSelectedItemInOtherApp() {
+        handOverSelectedItem(::openItemInOtherApp)
+    }
+
+    /**
+     * 選んでいる項目が 1 つだけなら、選ぶのをやめてから、その項目を [shareItem] で共有する（[handOverSelectedItem]）。
+     */
+    fun shareSelectedItem() {
+        handOverSelectedItem(::shareItem)
+    }
+
+    /**
+     * 開いているフォルダの項目 [itemId] を、開けるアプリの一覧を出して開く（[ItemSharer.openInOtherApp]）。選んでいる項目は変えない。
+     * 一覧を出せたら、その項目を最後に開いた項目として覚える（[rememberOpenedItem]）。
+     * 受け取れるアプリが無いか、ほかの理由で開けなければ知らせる（[handOverItem]）。
+     */
+    fun openItemInOtherApp(itemId: String) {
+        handOverItem(itemId, onShown = { item -> rememberOpenedItem(item.id) }) { sharer, item -> sharer.openInOtherApp(item.url) }
+    }
+
+    /**
+     * 開いているフォルダの項目 [itemId] の URL を、タイトルを添えて、共有する先のアプリの一覧を出して渡す（[ItemSharer.share]）。
+     * 選んでいる項目は変えない。最後に開いた項目は替えない。受け取れるアプリが無いか、ほかの理由で渡せなければ知らせる（[handOverItem]）。
+     */
+    fun shareItem(itemId: String) {
+        handOverItem(itemId) { sharer, item -> sharer.share(item.url, item.title) }
+    }
+
     /** ブラウザで開こうとして知らせたことを閉じる。 */
     fun dismissBrowserNotice() {
         updateBrowserNotice(null)
@@ -453,10 +544,12 @@ class CloudMarksController(
      * 入力した設定を保存し、続けてマニフェストを読む。
      *
      * 入力が足りなければ保存しない。シークレットの欄が空なら、保存済みのものを使う。暗号化の仕組みが使えなければ、
-     * 保存を断ってそのことを見せ、使えない理由はログにだけ書く。保存できたら、読んであったツリーと、操作の書き込みの結果と元に戻せる削除を捨ててから
-     * S3 への接続を作り直し（前の S3 のクライアントは閉じ、書いている最中の操作は取り消す）、
-     * 接続先（バケットかプレフィックス）が替わっていれば、前の接続先のローカルキャッシュのディレクトリを消す。
-     * マニフェストを読めたらメインの画面へ戻り、マニフェストが無ければマニフェストを作れるようにし、読めなければ理由を見せる。
+     * 保存を断ってそのことを見せ、使えない理由はログにだけ書く。保存できたら、読んであったツリーと溜めた削除と、操作の書き込みの結果と
+     * 元に戻せる削除を捨ててから S3 への接続を作り直し（前の S3 のクライアントは閉じ、書いている最中の操作は取り消す）、
+     * 接続先（バケットかプレフィックス）が替わっていれば、前の接続先のローカルキャッシュのディレクトリと溜めた削除の記録のファイルを消す。
+     * そのあと、新しい接続先の溜めた削除の記録を読む。
+     * マニフェストを読めたらメインの画面へ戻り（読み書きできるツリーなら、溜めた削除を書く）、マニフェストが無ければマニフェストを作れるようにし、
+     * 読めなければ理由を見せる。
      */
     fun saveSettings() {
         val current = state.value.settings
@@ -520,13 +613,15 @@ class CloudMarksController(
             )
         }
         val connection = replaceConnection(settings)
-        previous?.let { deletePreviousCache(it, settings) }
+        previous?.let { discardPreviousTarget(it, settings) }
+        val pending = readPendingDeletes(settings)
+        updateBrowse { it.withPendingDeletes(pending) }
         checkConnection(connection)
     }
 
-    /** マニフェストとルートフォルダの項目を読み、結果を設定の画面に見せる。 */
+    /** マニフェストとルートフォルダの項目を読み、結果を設定の画面に見せる。読み書きできるツリーとして読めたら、溜めた削除を書く。 */
     private fun checkConnection(connection: ActiveConnection) {
-        readTree(connection, show = ::showConnectionResult)
+        readTree(connection, show = ::showConnectionResult, appliesPendingDeletes = true)
     }
 
     /** マニフェストを読んだ結果 [result] をツリーに入れ、読めたらメインの画面へ戻る。読めなければ、設定の画面に理由を見せる。 */
@@ -543,23 +638,39 @@ class CloudMarksController(
     }
 
     /**
+     * マニフェストを読み直す（[reload] と [storageChanges] の知らせ）。開いているフォルダが残っていれば、その項目も一緒に読む。
+     * 読めて、[clearsWriteOutcome] なら、直前の操作の結果を消す。読み書きできるツリーとして読めたら、溜めた削除を書く。
+     * メインの画面でないとき、マニフェストを読んでいる最中、操作を書いている最中、接続が無いときは何もしない。
+     */
+    private fun reread(clearsWriteOutcome: Boolean) {
+        val connection = active ?: return
+        if (!state.value.canReload) return
+        readTree(connection, show = { result -> showTree(result, clearsWriteOutcome) }, appliesPendingDeletes = true)
+    }
+
+    /**
      * [read] でマニフェストを読み、開いているフォルダ（残っていなければルートフォルダ）の項目を一緒に読んで、結果を [show] に渡す。
      * マニフェストを読んでいる最中の状態にするのは、呼んだときにする。そのため、読み直すボタンを続けて押しても、2 回は読まない。
-     * 読み書きできるツリーを読めたら、古いファイルの削除を走らせるかを確かめる（[deleteStaleFilesOnce]）。
+     * 読み書きできるツリーを読めたら、古いファイルの削除を走らせるかを確かめ（[deleteStaleFilesOnce]）、[appliesPendingDeletes] なら、
+     * 続けて溜めた削除を書く（[flushPendingDeletes]）。
      *
      * @param read マニフェストを読む
      * @param show 読んだ結果を見せる
+     * @param appliesPendingDeletes 読み書きできるツリーを読めたあとに、溜めた削除を書くか
      */
     private fun readTree(
         connection: ActiveConnection,
         read: TreeRead = connection.connection.sync::read,
         show: (TreeReadResult) -> Unit = ::showTree,
+        appliesPendingDeletes: Boolean = false,
     ) {
         updateBrowse { it.startLoading() }
         connection.scope.launch {
             val result = read { tree -> setOf(state.value.browse.folderToOpenIn(tree)) }
             show(result)
-            if (result is TreeReadResult.Readable) deleteStaleFilesOnce(connection)
+            if (result !is TreeReadResult.Readable) return@launch
+            deleteStaleFilesOnce(connection)
+            if (appliesPendingDeletes) flushPendingDeletes(connection)
         }
     }
 
@@ -578,25 +689,99 @@ class CloudMarksController(
      * [operations] を 1 回の書き込みとして書き始め、書き始めたら true を返す。操作を受け付けないとき（[AppState.canWrite]）は何もせず、
      * false を返す。
      *
-     * 書き始めるときに、前の操作の結果と、元に戻せる削除を消す。書けたら、書いたあとのツリーに替え（マニフェストは GET し直さない）、
+     * 書き始めるときに、前の操作の結果と、元に戻せる削除を消す。溜めた削除があれば、先にそれを書き（[writePendingDeletes]）、
+     * 書けなければ [operations] は書かず、溜めた削除を書いた結果を [operations] の結果として扱う。
+     * 書けたら、書いたあとのツリーに替え（マニフェストは GET し直さない）、
      * 開いているフォルダの項目を、読んであるものを引き継いだうえで足りなければ読み、[undoOnSuccess] を元に戻せる削除にする。
-     * 書けなかったか確かめられなかったときは、ツリーは書く前のままにし、[undoOnFailure] を元に戻せる削除にする。
+     * [pendsWhenUnreachable] があり、S3 につながらないために書けなければ（[isUnreachable]）、それを溜め（[pendDeletes]）、
+     * [undoOnSuccess] を、その回に溜めた削除として元に戻せるようにする。
+     * そのほかで書けなかったか確かめられなかったときは、ツリーは書く前のままにし、[undoOnFailure] を元に戻せる削除にする。
      *
      * @param undoOnSuccess 書けたときに元に戻せるようにする削除。無ければ null
      * @param undoOnFailure 書けなかったか確かめられなかったときに元に戻せるようにする削除。無ければ null
+     * @param pendsWhenUnreachable S3 につながらないために書けなかったときに溜める、項目の削除の対象。溜めないなら null
      */
     private fun writeOperations(
         operations: List<Operation>,
         undoOnSuccess: UndoableDelete? = null,
         undoOnFailure: UndoableDelete? = null,
+        pendsWhenUnreachable: Set<ItemRef>? = null,
     ): Boolean {
         val connection = active ?: return false
         if (!state.value.canWrite) return false
         updateWrite { WriteState(writing = true) }
         connection.scope.launch {
-            showWriteResult(connection.connection.sync.writeConfirming(operations), undoOnSuccess, undoOnFailure)
+            val result = writePendingDeletes(connection)?.takeUnless { it is WriteResult.Success }
+                ?: connection.connection.sync.writeConfirming(operations)
+            if (pendsWhenUnreachable != null && isUnreachable(result)) {
+                pendDeletes(connection, pendsWhenUnreachable, undoOnSuccess, result)
+            } else {
+                showWriteResult(result, undoOnSuccess, undoOnFailure)
+            }
         }
         return true
+    }
+
+    /**
+     * 溜めた削除があり、操作を受け付けるとき（[AppState.canWrite]）は、書いている最中の状態にして溜めた削除を書く（[writePendingDeletes]）。
+     * 直前の操作の結果と元に戻せる削除は残す。S3 につながらないために書けなければ（[isUnreachable]）結果を替えず、
+     * ほかの理由で書けなければ、操作を書けなかったときと同じく結果に出す。
+     */
+    private suspend fun flushPendingDeletes(connection: ActiveConnection) {
+        if (state.value.browse.pendingDeletes.isEmpty() || !state.value.canWrite) return
+        updateWrite { it.copy(writing = true) }
+        val result = writePendingDeletes(connection)
+        updateWrite { write -> write.copy(writing = false, outcome = result?.let(::failureOutcomeOf) ?: write.outcome) }
+    }
+
+    /** 溜めた削除を書いた結果 [result] のうち、結果に出す失敗。書けたときと、S3 につながらないために書けなかったときは null。 */
+    private fun failureOutcomeOf(result: WriteResult): WriteOutcome? =
+        when (result) {
+            is WriteResult.Success -> null
+            is WriteResult.Failed -> WriteOutcome.Failed(result.failure).takeUnless { isUnreachable(result) }
+            is WriteResult.Unconfirmed -> WriteOutcome.Unconfirmed(result.failure).takeUnless { isUnreachable(result) }
+        }
+
+    /**
+     * 溜めた削除があれば、それをすべてまとめて 1 回の書き込みとして書き、結果を返す。溜めた削除が無ければ何もせず null を返す。
+     *
+     * 書けたら、書いたあとのツリーに替え（[BrowseState.withWrittenTree]）、書いた対象を溜めた削除から外して記録のファイルを書き直し
+     * （空になればファイルを消す）、開いているフォルダの項目を、足りなければ読む。元に戻せる削除が、書いた対象を溜めた削除なら、
+     * S3 に書けた削除にする（[UndoableDelete.afterApplying]）。書けなければ溜めたままにし、理由をログに書く。
+     * 書いている最中の状態と結果は替えない。
+     */
+    private suspend fun writePendingDeletes(connection: ActiveConnection): WriteResult? {
+        val targets = state.value.browse.pendingDeletes
+        if (targets.isEmpty()) return null
+        val result = connection.connection.sync.writeConfirming(listOf(DeleteItems(targets.toList())))
+        if (result !is WriteResult.Success) {
+            log("溜めた削除を書けなかった: $result")
+            return result
+        }
+        update {
+            it.copy(
+                browse = it.browse.withWrittenTree(result.tree).withPendingDeletes(it.browse.pendingDeletes - targets),
+                write = it.write.copy(undoableDelete = it.write.undoableDelete?.afterApplying(targets)),
+            )
+        }
+        storePendingDeletes(connection.settings)
+        loadCurrentFolder()
+        return result
+    }
+
+    /**
+     * 項目の削除の対象 [targets] を、S3 につながらないために書けなかった（[result]）ものとして溜める。溜めた削除に足して記録のファイルに書き、
+     * 書いている最中の状態を終える。結果は出さず、[undoable] を、その回に溜めた削除として元に戻せるようにする。理由はログにだけ書く。
+     */
+    private fun pendDeletes(connection: ActiveConnection, targets: Set<ItemRef>, undoable: UndoableDelete?, result: WriteResult) {
+        log("S3 につながらないため、項目の削除を溜めた: $result")
+        update {
+            it.copy(
+                browse = it.browse.withPendingDeletes(it.browse.pendingDeletes + targets),
+                write = WriteState(undoableDelete = undoable?.copy(pendingTargets = targets)),
+            )
+        }
+        storePendingDeletes(connection.settings)
     }
 
     /** 操作を書いた結果 [result] を状態に入れる。書けたら、書いたあとのツリーに替え、開いているフォルダの項目を読む。 */
@@ -622,11 +807,14 @@ class CloudMarksController(
         }
     }
 
-    /** マニフェストを読んだ結果 [result] をツリーに入れ、開いているフォルダの項目を読む。読めたら、直前の操作の結果を消す。 */
-    private fun showTree(result: TreeReadResult) {
+    /**
+     * マニフェストを読んだ結果 [result] をツリーに入れ、開いているフォルダの項目を読む。読めて、[clearsWriteOutcome] なら、
+     * 直前の操作の結果を消す。
+     */
+    private fun showTree(result: TreeReadResult, clearsWriteOutcome: Boolean = true) {
         update { current ->
             val read = current.copy(browse = current.browse.withTreeRead(result))
-            if (result is TreeReadResult.Failed) read else read.copy(write = read.write.copy(outcome = null))
+            if (result is TreeReadResult.Failed || !clearsWriteOutcome) read else read.copy(write = read.write.copy(outcome = null))
         }
         loadCurrentFolder()
     }
@@ -668,20 +856,41 @@ class CloudMarksController(
     }
 
     /**
-     * 接続先が [previous] から [settings] へ替わっていれば、[previous] のローカルキャッシュのディレクトリを消す。
+     * 接続先が [previous] から [settings] へ替わっていれば、[previous] のローカルキャッシュのディレクトリと、溜めた削除の記録のファイルを消す。
      * 消せなければログに書き、利用者には見せない。
      */
     @OptIn(ExperimentalPathApi::class)
-    private suspend fun deletePreviousCache(previous: ConnectionSettings, settings: ConnectionSettings) {
-        val previousDirectory = connectionCacheDirectory(cacheRoot, previous.bucket, previous.prefix)
-        if (previousDirectory == connectionCacheDirectory(cacheRoot, settings.bucket, settings.prefix)) return
+    private suspend fun discardPreviousTarget(previous: ConnectionSettings, settings: ConnectionSettings) {
+        if (connectionName(previous.bucket, previous.prefix) == connectionName(settings.bucket, settings.prefix)) return
         withContext(ioDispatcher) {
             try {
-                previousDirectory.deleteRecursively()
+                connectionCacheDirectory(cacheRoot, previous.bucket, previous.prefix).deleteRecursively()
             } catch (e: IOException) {
                 log("前の接続先のローカルキャッシュを消せなかった: ${describeIoFailure(e)}")
             }
         }
+        val previousPendingDeletes = pendingDeletesFileOf(previous)
+        pendingDeletesWriting.withLock { withContext(ioDispatcher) { previousPendingDeletes.write(emptySet()) } }
+    }
+
+    /** 接続先 [settings] の、溜めた削除の記録のファイル。 */
+    private fun pendingDeletesFileOf(settings: ConnectionSettings): PendingDeletesFile =
+        PendingDeletesFile(pendingDeletesFile(stateDirectory, settings.bucket, settings.prefix), log)
+
+    /** 接続先 [settings] の溜めた削除の記録を読む。先に始めた記録のファイルへの書き込みが終わってから読む。 */
+    private suspend fun readPendingDeletes(settings: ConnectionSettings): Set<ItemRef> {
+        val file = pendingDeletesFileOf(settings)
+        return pendingDeletesWriting.withLock { withContext(ioDispatcher) { file.read() } }
+    }
+
+    /**
+     * いまの溜めた削除を、接続先 [settings] の溜めた削除の記録のファイルに書く（空ならファイルを消す）。書く中身は呼んだときに決め、
+     * 書き込みは呼んだ順に 1 つずつ行う。書けなければログに書き、利用者には見せない。
+     */
+    private fun storePendingDeletes(settings: ConnectionSettings) {
+        val file = pendingDeletesFileOf(settings)
+        val targets = state.value.browse.pendingDeletes
+        scope.launch { pendingDeletesWriting.withLock { withContext(ioDispatcher) { file.write(targets) } } }
     }
 
     /** いまの端末ごとの設定を、端末ごとの設定のファイルに書く。書き込みは 1 つずつ順に行う。 */
@@ -694,8 +903,24 @@ class CloudMarksController(
     }
 
     /**
+     * 項目 [itemId] を最後に開いた項目として、すぐに状態へ入れ、最後に開いた項目の記録のファイルに書く。いまと同じなら何もしない。
+     * 書けなければログに書き、利用者には見せない。続けて替えても、書き込みは 1 つずつ順に行い、それぞれ書くときの最後に開いた項目を書くので、
+     * 最後に替えた項目がファイルに残る。
+     */
+    private fun rememberOpenedItem(itemId: String) {
+        if (state.value.lastOpenedItemId == itemId) return
+        update { it.copy(lastOpenedItemId = itemId) }
+        scope.launch {
+            withContext(ioDispatcher) {
+                lastOpenedItemWriting.withLock { state.value.lastOpenedItemId?.let(lastOpenedItemFile::write) }
+            }
+        }
+    }
+
+    /**
      * [items] を、その並びで [browser] で開く。項目が無ければ何もしない。2 つ以上で、[browser] がまとめて開けなければ何もしない
      * （メニューでは押せない）。開き始めるときに、前に知らせたことを消す。
+     * 1 つだけを開けたら、その項目を最後に開いた項目として覚える（[rememberOpenedItem]）。2 つ以上を開いたときは替えない。
      * 起動できなかったか、まとめて開くコマンドが拡張機能に届かなかったかもしれなければ知らせる。
      */
     private fun openInBrowser(browser: Browser, items: List<Item>) {
@@ -706,7 +931,7 @@ class CloudMarksController(
         val tabLoading = state.value.tabLoading
         scope.launch {
             when (val result = browserOpener.openInBrowser(browser, tabs, tabLoading)) {
-                BrowserOpenResult.Opened -> Unit
+                BrowserOpenResult.Opened -> items.singleOrNull()?.let { rememberOpenedItem(it.id) }
                 is BrowserOpenResult.LaunchFailed -> updateBrowserNotice(BrowserNotice.LaunchFailed(browser.name, result.detail))
                 BrowserOpenResult.CommandUndelivered -> updateBrowserNotice(BrowserNotice.CommandUndelivered(browser.name))
             }
@@ -714,8 +939,42 @@ class CloudMarksController(
     }
 
     /**
+     * 選んでいる 1 つの項目の ID を [handOver] に渡す。項目をほかのアプリで開く仕組みが無いか、選んでいる項目が 1 つだけでなければ
+     * 何もしない。渡す前に、選ぶのをやめる。
+     */
+    private fun handOverSelectedItem(handOver: (itemId: String) -> Unit) {
+        if (itemSharer == null) return
+        val item = state.value.browse.selectedItems.singleOrNull() ?: return
+        updateBrowse { it.clearSelection() }
+        handOver(item.id)
+    }
+
+    /**
+     * 開いているフォルダの項目 [itemId] を、[handOver] でほかのアプリへ渡す。項目をほかのアプリで開く仕組みが無いか、開いているフォルダの
+     * 読めた項目に無ければ何もしない。選んでいる項目は変えない。渡し始めるときに、前に知らせたことを消す。受け取るアプリの一覧を出せたら、
+     * 渡した項目で [onShown] を呼ぶ。受け取れるアプリが無いか、ほかの理由で渡せなければ知らせる。
+     */
+    private fun handOverItem(
+        itemId: String,
+        onShown: (Item) -> Unit = {},
+        handOver: suspend (ItemSharer, Item) -> ItemShareResult,
+    ) {
+        val sharer = itemSharer ?: return
+        val item = state.value.browse.currentLoadedItems.firstOrNull { it.id == itemId } ?: return
+        updateBrowserNotice(null)
+        scope.launch {
+            when (handOver(sharer, item)) {
+                ItemShareResult.Shown -> onShown(item)
+                ItemShareResult.NoApp -> updateBrowserNotice(BrowserNotice.NoAppForItem)
+                ItemShareResult.Failed -> updateBrowserNotice(BrowserNotice.ShareFailed)
+            }
+        }
+    }
+
+    /**
      * 項目ファイルが `404` を返したあとにマニフェストを読み直した結果 [result] から、フォルダ [folderId] の項目を [browser] で開く。
-     * 読めなかったか、そのフォルダが壊れていれば知らせる。読み直したマニフェストにそのフォルダが無ければ、何もしない。
+     * 溜めた削除の項目は開かない。読めなかったか、そのフォルダが壊れていれば知らせる。読み直したマニフェストにそのフォルダが無ければ、
+     * 何もしない。
      */
     private fun openFolderItemsOf(result: TreeReadResult, folderId: String, browser: Browser) {
         val tree = when (result) {
@@ -730,7 +989,7 @@ class CloudMarksController(
             updateBrowserNotice(BrowserNotice.FolderBroken(problem))
             return
         }
-        tree.state.items[folderId]?.let { items -> openInBrowser(browser, items) }
+        tree.state.items[folderId]?.let { items -> openInBrowser(browser, state.value.browse.shownItems(folderId, items)) }
     }
 
     /** 保存済みの設定 [settings] を開いたときの、設定の画面。 */
@@ -764,19 +1023,23 @@ class CloudMarksController(
 
 /**
  * [CloudMarksController] を組み立てる。Android とデスクトップのエントリポイントが、プラットフォームごとに違うもの（ファイルの場所、
- * 認証情報を暗号化する仕組み、時計、マニフェストの `updatedBy`、ほかのプロセスが S3 へ書いた知らせ、古いファイルの削除を行うか、
- * 項目をブラウザで開く仕組み）を渡して呼ぶ。ログは [AppFiles.logDirectory] のファイルに書く。
+ * 認証情報を暗号化する仕組み、時計、マニフェストの `updatedBy`、S3 から読み直すきっかけの知らせ、古いファイルの削除を行うか、
+ * 項目をブラウザで開く仕組み、項目をほかのアプリで開く仕組みと共有する仕組み）を渡して呼ぶ。ログは [AppFiles.logDirectory] のファイルに書く。
  *
  * 呼んだ側が、作ったコントローラを [CloudMarksController.start] で動かし始め、使い終えたら [CloudMarksController.close] で閉じる。
  *
  * @param appFiles 設定のファイル・ローカルキャッシュ・ログ・次の起動へ持ち越す記録・端末ごとの設定のファイルの場所
  * @param protector 認証情報を暗号化する仕組み
- * @param timeSource 書き込みの手順 3 から手順 4 までの経過を測る、モノトニッククロック
+ * @param timeSource 書き込みの手順 3 から手順 4 までの経過を測る、モノトニッククロック。Android は端末の休止中も進む時計
+ * （`SystemClock.elapsedRealtimeNanos()` を基にしたもの）を渡す。`TimeSource.Monotonic`（`System.nanoTime()`）は休止中に止まりうる
  * @param updatedBy 書き込むマニフェストのヘッダーの `updatedBy`。`"desktop"` か `"android"`
- * @param storageChanges ほかのプロセスが S3 へ書いた知らせの Flow を作る関数。このコントローラのログに書く関数を受け取る。
- * デスクトップのアプリはファイルの変化を見張る Flow を作り、Android は知らせを出さない Flow を作る
+ * @param storageChanges S3 から読み直すきっかけの知らせの Flow を作る関数。このコントローラのログに書く関数を受け取る。
+ * デスクトップのアプリは、ほかのプロセスが S3 へ書いたことを知らせるファイルの変化を見張る Flow を作り、Android は、画面が前面に戻ったこと
+ * （起動して初めて画面を出したときは知らせない）と、既定のネットワークにつながったことを合わせて知らせる Flow を返す
  * @param deletesStaleFiles 古いファイルの削除を行うか。デスクトップのアプリは行い、Android は行わない
  * @param browserOpener 項目をブラウザで開く仕組みを作る関数。このコントローラのログに書く関数を受け取る
+ * @param itemSharer 項目をほかのアプリで開く仕組みと共有する仕組みを作る関数。このコントローラのログに書く関数を受け取る。
+ * Android は渡し、デスクトップのアプリは null を渡す
  * @param scope メインのスレッドで動くスコープ。取り消しは呼んだ側が行う
  */
 fun createCloudMarksController(
@@ -787,6 +1050,7 @@ fun createCloudMarksController(
     storageChanges: (log: (String) -> Unit) -> Flow<Unit>,
     deletesStaleFiles: Boolean,
     browserOpener: (log: (String) -> Unit) -> BrowserOpener,
+    itemSharer: ((log: (String) -> Unit) -> ItemSharer)?,
     scope: CoroutineScope,
 ): CloudMarksController {
     val log = FileLog(appFiles.logDirectory)
@@ -799,5 +1063,6 @@ fun createCloudMarksController(
         storageChanges = storageChanges(log::write),
         deletesStaleFiles = deletesStaleFiles,
         browserOpener = browserOpener(log::write),
+        itemSharer = itemSharer?.invoke(log::write),
     )
 }

@@ -70,6 +70,10 @@ kotlin {
 
         androidMain {
             dependsOn(jvmShared)
+            dependencies {
+                // システムの戻る操作を、Activity の BackHandler で受ける。
+                implementation(libs.androidx.activity.compose)
+            }
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)

@@ -5,18 +5,6 @@ import java.nio.file.Path
 /** アプリのデータを置くディレクトリの名前。 */
 private const val APP_DIRECTORY_NAME = "CloudMarks"
 
-/** ローカルキャッシュを置くディレクトリの名前。 */
-private const val CACHE_DIRECTORY_NAME = "cache"
-
-/** ログのファイルを置くディレクトリの名前。 */
-private const val LOG_DIRECTORY_NAME = "logs"
-
-/** 次の起動へ持ち越す記録を置くディレクトリの名前。 */
-private const val STATE_DIRECTORY_NAME = "state"
-
-/** ブラウザの拡張機能へのコマンドを置くディレクトリの名前。 */
-private const val COMMAND_DIRECTORY_NAME = "commands"
-
 /** Windows で、ユーザーごとの、ほかの PC へ持ち出さないデータを置く場所を指す環境変数。 */
 private const val LOCAL_APP_DATA = "LOCALAPPDATA"
 

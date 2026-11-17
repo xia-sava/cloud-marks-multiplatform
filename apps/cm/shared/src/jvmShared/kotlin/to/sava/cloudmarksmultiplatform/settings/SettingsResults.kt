@@ -15,7 +15,7 @@ sealed interface SettingsReadResult {
     /** 中身が壊れている。JSON として読めない、必須の値が無い、復号した認証情報が読めない。 */
     data class Corrupt(val detail: String) : SettingsReadResult
 
-    /** 認証情報を復号できない。別のユーザーや別の PC で暗号化された、暗号化の仕組みがこの環境で使えない、など。 */
+    /** 認証情報を復号できない。別のユーザーや別の端末で暗号化された、暗号化の仕組みがこの環境で使えない、など。 */
     data class Undecryptable(val detail: String) : SettingsReadResult
 
     /** 読み込みの I/O の失敗。 */

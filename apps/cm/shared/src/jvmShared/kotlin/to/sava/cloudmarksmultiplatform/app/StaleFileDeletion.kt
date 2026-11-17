@@ -3,13 +3,13 @@ package to.sava.cloudmarksmultiplatform.app
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import to.sava.cloudmarksmultiplatform.files.describeIoFailure
+import to.sava.cloudmarksmultiplatform.files.readUtf8File
 import to.sava.cloudmarksmultiplatform.files.replaceFileAtomically
 import to.sava.cloudmarksmultiplatform.settings.ConnectionSettings
 import to.sava.cloudmarksmultiplatform.sync.DeleteStaleFilesResult
 import to.sava.cloudmarksmultiplatform.sync.StorageSync
 import to.sava.cloudmarksmultiplatform.sync.connectionName
 import java.io.IOException
-import java.nio.file.Files
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 import kotlin.time.Clock
@@ -67,7 +67,7 @@ internal class StaleFileDeletion(
     /** 記録した時刻。ファイルが無いか、読めないか、日時として読めなければ null。読めなかったことはログに書く。 */
     private fun readRecord(path: Path): Instant? {
         val text = try {
-            Files.readString(path)
+            readUtf8File(path)
         } catch (e: NoSuchFileException) {
             return null
         } catch (e: IOException) {

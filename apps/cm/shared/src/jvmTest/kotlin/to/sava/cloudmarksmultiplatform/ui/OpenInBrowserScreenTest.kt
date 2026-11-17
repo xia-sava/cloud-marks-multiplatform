@@ -130,9 +130,9 @@ class OpenInBrowserScreenTest {
         assertEquals(emptySet(), fixture.state.browse.selectedItemIds)
     }
 
-    // ブラウザの一覧に既定のブラウザが無ければ、Windows に既定のブラウザで開かせる
+    // ブラウザの一覧に既定のブラウザが無ければ、ブラウザを調べずに既定のブラウザで開く
     @Test
-    fun clickWithoutDefaultInListUsesWindowsDefault() =
+    fun clickWithoutDefaultInListOpensWithoutCheckingBrowsers() =
         runCloudMarksScreenTest(temporaryFolder, browserOpener = FakeBrowserOpener(browsers = listOf(FIREFOX))) { fixture ->
             itemRow(1).performMouseInput { click() }
             waitForIdle()
@@ -254,7 +254,7 @@ class OpenInBrowserScreenTest {
         assertEquals(emptyList(), fixture.browserOpener.defaultOpened)
     }
 
-    // 項目の右クリックのメニューに、PC に入っているブラウザで開く行を並べ、既定のブラウザの行を太字にする。
+    // 項目の右クリックのメニューに、この端末に入っているブラウザで開く行を並べ、既定のブラウザの行を太字にする。
     // 1 つの項目なら、拡張機能の無いブラウザでも開ける
     @Test
     fun itemMenuListsBrowsersWithDefaultInBold() = runCloudMarksScreenTest(temporaryFolder) { fixture ->
@@ -348,9 +348,10 @@ class OpenInBrowserScreenTest {
         }
     }
 
-    // ブラウザの一覧に既定のブラウザが無く、Windows に開かせて開けなければ、詳細の行の無い帯を出し、「閉じる」で消す
+    // ブラウザの一覧に既定のブラウザが無く、ブラウザを調べずに既定のブラウザで開こうとして開けなければ、詳細の行の無い帯を出し、
+    // 「閉じる」で消す
     @Test
-    fun windowsDefaultFailureShowsBannerWithoutDetail() =
+    fun defaultWithoutCheckingBrowsersFailureShowsBannerWithoutDetail() =
         runCloudMarksScreenTest(temporaryFolder, browserOpener = FakeBrowserOpener(browsers = listOf(FIREFOX))) { fixture ->
             fixture.browserOpener.defaultResult = BrowserOpenResult.LaunchFailed(LAUNCH_DETAIL)
 

@@ -62,7 +62,7 @@ class CloudMarksControllerBrowserTest {
         return fixture
     }
 
-    // 起動すると PC に入っているブラウザを読み、メニューを開くたびに読み直す（拡張機能を入れたブラウザが、まとめて開けるようになる）
+    // 起動するとこの端末に入っているブラウザを読み、メニューを開くたびに読み直す（拡張機能を入れたブラウザが、まとめて開けるようになる）
     @Test
     fun browsersAreReadAtStartAndRefreshed() = runTest {
         val fixture = started()
@@ -115,9 +115,9 @@ class CloudMarksControllerBrowserTest {
         assertEquals(BrowserNotice.LaunchFailed(CHROME.name, LAUNCH_DETAIL), fixture.state.browserNotice)
     }
 
-    // ブラウザの一覧に既定のブラウザが無ければ、Windows に既定のブラウザで開かせる
+    // ブラウザの一覧に既定のブラウザが無ければ、ブラウザを調べずに既定のブラウザで開く
     @Test
-    fun openItemFallsBackToWindowsDefault() = runTest {
+    fun openItemFallsBackToDefaultWithoutCheckingBrowsers() = runTest {
         val fixture = started(browserOpener = FakeBrowserOpener(browsers = listOf(FIREFOX)))
 
         fixture.controller.openItem(ROOT_ITEMS[0].id)
@@ -127,9 +127,9 @@ class CloudMarksControllerBrowserTest {
         assertEquals(emptyList(), fixture.browserOpener.opened)
     }
 
-    // Windows に開かせて開けなければ、詳細の無い知らせを出し、閉じると消える。次に開き始めたときも消す
+    // ブラウザを調べずに既定のブラウザで開こうとして開けなければ、詳細の無い知らせを出し、閉じると消える。次に開き始めたときも消す
     @Test
-    fun windowsDefaultFailureIsNoticedWithoutDetail() = runTest {
+    fun defaultWithoutCheckingBrowsersFailureIsNoticedWithoutDetail() = runTest {
         val fixture = started(browserOpener = FakeBrowserOpener(browsers = emptyList()))
         fixture.browserOpener.defaultResult = BrowserOpenResult.LaunchFailed(LAUNCH_DETAIL)
 

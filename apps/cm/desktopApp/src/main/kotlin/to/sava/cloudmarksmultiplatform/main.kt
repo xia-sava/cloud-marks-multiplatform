@@ -26,6 +26,7 @@ fun main() {
         storageChanges = { log -> watchStorageChanges(appFiles, log) },
         deletesStaleFiles = true,
         browserOpener = { log -> desktopBrowserOpener(appFiles, log) },
+        itemSharer = null,
         scope = scope,
     )
     controller.start()

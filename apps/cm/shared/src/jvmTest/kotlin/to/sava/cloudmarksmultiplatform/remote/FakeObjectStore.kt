@@ -2,6 +2,9 @@ package to.sava.cloudmarksmultiplatform.remote
 
 import kotlin.time.Instant
 
+/** S3 につながらないあいだ（[FakeObjectStore.unreachable]）に返す、結果が不明の内容。 */
+const val UNREACHABLE_DETAIL = "つながらない"
+
 /**
  * メモリ上の [ObjectStore]。S3 と同じく、ETag と条件付きの書き込みを扱う。
  *
@@ -10,6 +13,7 @@ import kotlin.time.Instant
  * - `If-None-Match` の GET は、ETag が一致すれば `304`
  *
  * [onNextPut]、[onNextGet]、[onNextList]、[onNextDelete] で、次のリクエストに、失敗やほかの書き手の書き込みなどの事象を差し込める。
+ * [unreachable] を真にすると、偽に戻すまで S3 につながらないものとして振る舞う。
  *
  * 一覧は、S3 と同じく、[listPageSize] 個のキーごとのページに分けて返し、[listAllPages] で最後まで読む。
  * 一覧の応答の時刻は [serverTime]、オブジェクトの `LastModified` は置いた時点の [serverTime]（[overwrite] では指定できる）。
@@ -113,6 +117,12 @@ class FakeObjectStore(override val prefix: String = "cm/data") : ObjectStore {
     /** 一覧の応答の `Date` として返す時刻。置いたオブジェクトの `LastModified` の既定でもある。 */
     var serverTime: Instant = Instant.parse("2026-11-16T12:00:00Z")
 
+    /**
+     * 真のあいだは、S3 につながらないとして、どのリクエストにも、届かなかったものとして結果が不明を返す。リクエストは記録し、
+     * 差し込んだ事象は使わず、遅れている PUT も届けない。
+     */
+    var unreachable: Boolean = false
+
     /** 受けたリクエスト。受けた順。 */
     val requests: List<Request> get() = receivedRequests.toList()
 
@@ -157,6 +167,7 @@ class FakeObjectStore(override val prefix: String = "cm/data") : ObjectStore {
 
     override suspend fun get(key: String, ifNoneMatch: String?): GetObjectResult {
         receivedRequests += Request.Get(key, ifNoneMatch)
+        if (unreachable) return GetObjectResult.Unknown(UNREACHABLE_DETAIL)
         when (val fault = takeFault(getFaults, key)) {
             GetFault.ServerError -> return GetObjectResult.Unknown("HTTP 500")
             GetFault.Forbidden -> return GetObjectResult.Forbidden
@@ -175,6 +186,7 @@ class FakeObjectStore(override val prefix: String = "cm/data") : ObjectStore {
     ): PutObjectResult {
         val request = Request.Put(key, body, contentType, condition)
         receivedRequests += request
+        if (unreachable) return PutObjectResult.Unknown(UNREACHABLE_DETAIL)
         deliverLatePuts()
         when (val fault = takeFault(putFaults, key)) {
             is PutFault.WriteThenUnknown -> {
@@ -206,6 +218,7 @@ class FakeObjectStore(override val prefix: String = "cm/data") : ObjectStore {
     /** 継続トークンは、次のページの先頭のキーの、一覧の中での番号。 */
     private fun readPage(keyPrefix: String, token: String?): ListPageResult {
         receivedRequests += Request.ListPage(keyPrefix, token)
+        if (unreachable) return ListPageResult.Stopped(ListObjectsResult.Unknown(UNREACHABLE_DETAIL))
         when (takeFault(listFaults, keyPrefix)) {
             ListFault.Forbidden -> return ListPageResult.Stopped(ListObjectsResult.Forbidden)
             ListFault.ServerError -> return ListPageResult.Stopped(ListObjectsResult.Unknown("HTTP 500"))
@@ -224,6 +237,7 @@ class FakeObjectStore(override val prefix: String = "cm/data") : ObjectStore {
     /** S3 と同じく、無いキーの削除も成功にする。 */
     override suspend fun delete(key: String): DeleteObjectResult {
         receivedRequests += Request.Delete(key)
+        if (unreachable) return DeleteObjectResult.Unknown(UNREACHABLE_DETAIL)
         return when (takeFault(deleteFaults, key)) {
             DeleteFault.Forbidden -> DeleteObjectResult.Forbidden
             DeleteFault.ServerError -> DeleteObjectResult.Unknown("HTTP 500")

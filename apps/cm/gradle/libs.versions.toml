@@ -15,7 +15,8 @@ kotlinx-serialization = "1.12.0"
 material3 = "1.12.0-alpha03"
 # 画面の幅の区分（WindowSizeClass）を判定する。
 material3-adaptive = "1.3.0"
-# JetBrains が出す Material Icons の最後のバージョン。メニュー・戻る・読み直す・設定・ホーム・開閉・削除を示すアイコンに使う。
+# JetBrains が出す Material Icons の最後のバージョン。メニュー・戻る・読み直す・設定・ホーム・開閉・削除・選択の解除・
+# その他のオプションを示すアイコンに使う。
 material-icons-core = "1.7.3"
 
 [libraries]
@@ -31,6 +32,7 @@ compose-uiTest = { module = "org.jetbrains.compose.ui:ui-test", version.ref = "c
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
 kotlin-testJunit = { module = "org.jetbrains.kotlin:kotlin-test-junit", version.ref = "kotlin" }
 kotlinx-coroutines = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
+kotlinx-coroutinesAndroid = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinx-coroutines" }
 kotlinx-coroutinesSwing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "kotlinx-coroutines" }
 kotlinx-coroutinesTest = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines" }
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinx-datetime" }

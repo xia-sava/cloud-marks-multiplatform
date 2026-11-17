@@ -14,3 +14,7 @@ Cloud Marks のアイコン（雲としおり）の元になる素材。各ア�
 - `apps/extension/icons/icon-{16,32,48,128}.png` — `icon-512.png` を LANCZOS で縮小したもの
 - `apps/cm/desktopApp/src/main/resources/icon.png` — 窓のアイコン（256px）
 - `apps/cm/desktopApp/icons/cloudmarks.ico` — 配布物の exe とインストーラのアイコン（16・24・32・48・64・128・256px）
+- `apps/cm/androidApp/src/main/res/drawable/ic_launcher_foreground.xml`・`res/values/ic_launcher_background.xml` — Android の
+  アダプティブアイコンの前景と背景色。`ic_launcher_foreground.xml` と `ic_launcher_background.xml` の複製。
+  `res/mipmap-anydpi/ic_launcher.xml` と `ic_launcher_round.xml` がこれを組み合わせ、テーマのアイコン（monochrome）にも前景を使う
+  （minSdk 30 なので、ラスター画像は置かない）

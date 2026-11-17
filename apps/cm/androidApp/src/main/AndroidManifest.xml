@@ -3,18 +3,40 @@
 
     <uses-permission android:name="android.permission.INTERNET"/>
 
+    <!-- 既定のネットワークにつながったことを知り、S3 から読み直して溜めた削除を書くため。 -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+
+    <!-- 既定のブラウザを引くためと、項目をほかのアプリで開くときに開けるアプリがあるかを確かめるため、
+         https の URL を開くアプリを見えるようにする（Android 11 以上のパッケージの可視性）。 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+
+            <category android:name="android.intent.category.BROWSABLE"/>
+
+            <data android:scheme="https"/>
+        </intent>
+    </queries>
+
     <!-- 認証情報を端末から出さないため、バックアップも端末間の移行も止める。
          Android 11まではallowBackup="false"だけで両方止まる。Android 12以上（targetSdk 31以上）では
          それだけでは端末間の移行が止まらないため、dataExtractionRulesですべてのドメインを除く。 -->
     <application
+            android:name=".CloudMarksApplication"
             android:allowBackup="false"
             android:dataExtractionRules="@xml/data_extraction_rules"
+            android:icon="@mipmap/ic_launcher"
             android:label="@string/app_name"
+            android:roundIcon="@mipmap/ic_launcher_round"
             android:supportsRtl="true"
-            android:theme="@android:style/Theme.Material.Light.NoActionBar">
+            android:theme="@style/Theme.CloudMarks">
+        <!-- 画面は Compose が構成の変化に合わせて描き直すので、回転などで Activity を作り直さない。
+             キーボードが出たら、画面の側でキーボードに重ならない余白を付ける。 -->
         <activity
+                android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|fontScale|uiMode|locale|layoutDirection"
                 android:exported="true"
-                android:name=".MainActivity">
+                android:name=".MainActivity"
+                android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
 

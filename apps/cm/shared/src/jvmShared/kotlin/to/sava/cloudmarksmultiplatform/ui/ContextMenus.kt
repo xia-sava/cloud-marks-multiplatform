@@ -1,5 +1,7 @@
 package to.sava.cloudmarksmultiplatform.ui
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -36,6 +38,7 @@ import to.sava.cloudmarksmultiplatform.browser.Browser
  * @property secondary 副ボタン（マウスの右ボタン）で押されたか
  * @property ctrlPressed Ctrl を押していたか
  * @property shiftPressed Shift を押していたか
+ * @property pressedAt 押した時刻（ポインターのイベントの uptime のミリ秒）
  */
 internal data class PointerPress(
     val position: Offset,
@@ -43,6 +46,7 @@ internal data class PointerPress(
     val secondary: Boolean,
     val ctrlPressed: Boolean,
     val shiftPressed: Boolean,
+    val pressedAt: Long,
 )
 
 /**
@@ -67,6 +71,7 @@ internal fun Modifier.onPointerPress(onPress: (PointerPress) -> Unit): Modifier 
                         secondary = secondary,
                         ctrlPressed = event.keyboardModifiers.isCtrlPressed,
                         shiftPressed = event.keyboardModifiers.isShiftPressed,
+                        pressedAt = change.uptimeMillis,
                     ),
                 )
             }
@@ -84,14 +89,27 @@ internal class ContextMenuState {
     var expanded: Boolean by mutableStateOf(false)
         private set
 
-    /** 要素の中での、最後に右クリックした位置。 */
+    /** 要素の中での、最後にメニューを出した位置。 */
     var position: Offset by mutableStateOf(Offset.Zero)
         private set
+
+    /** 要素の中での、最後に押された位置（[recordPress]）。描き直しには使わないので、状態にしない。 */
+    private var lastPress: Offset = Offset.Zero
 
     /** 要素の中での [position] の位置に、メニューを出す。 */
     fun open(position: Offset) {
         this.position = position
         expanded = true
+    }
+
+    /** 要素の中での、押された位置 [position] を覚える。長押しでメニューを出すとき（[openAtLastPress]）に使う。 */
+    fun recordPress(position: Offset) {
+        lastPress = position
+    }
+
+    /** 最後に押された位置（[recordPress]）に、メニューを出す。 */
+    fun openAtLastPress() {
+        open(lastPress)
     }
 
     /** メニューを閉じる。位置は残す。 */
@@ -105,7 +123,8 @@ internal class ContextMenuState {
 internal fun rememberContextMenuState(): ContextMenuState = remember { ContextMenuState() }
 
 /**
- * 項目とフォルダの、右クリックのメニュー。メニューを出す要素の中に置く。メニューは要素の下端の、右クリックした位置の横に出す。
+ * 項目とフォルダの、右クリック（タッチの画面では長押しでも）のメニュー。AppBar の、その他のオプションのメニューにも使う。
+ * メニューを出す要素の中に置く。メニューは要素の下端の、[ContextMenuState.open] に渡した位置の横に出す。
  * メニューの外を押すなどして、項目を選ばずに閉じたら、[state] を閉じる。メニューの行は、画面全体と同じ表示の大きさで描く
  * （[ScaledPopupContent]）。
  */
@@ -123,17 +142,89 @@ internal fun ContextMenu(state: ContextMenuState, content: @Composable ColumnSco
 
 /**
  * 項目のメニューの中身。押した項目の操作を呼ぶ。メニューを閉じるのは呼ぶ側。
+ * 右クリックの項目のメニューと、タッチの画面の、項目の行を長押ししたときの項目のメニュー（[ItemLongPressMenuItems]）に使う。
  *
  * @param enabled 押せるか。偽なら、どの項目も押せない
- * @param onRename 押した項目のタイトルを変える
- * @param onMove 選んでいる項目を移す
- * @param onDelete 選んでいる項目を消す
+ * @param onRename 項目のタイトルを変える
+ * @param onMove 項目を移す。右クリックのメニューでは選んでいる項目、長押しのメニューでは長押しした項目
+ * @param onDelete 項目を消す。右クリックのメニューでは選んでいる項目、長押しのメニューでは長押しした項目
  */
 @Composable
 internal fun ItemMenuItems(enabled: Boolean, onRename: () -> Unit, onMove: () -> Unit, onDelete: () -> Unit) {
     MenuItem(RENAME_ITEM_LABEL, enabled, onRename)
     MenuItem(MOVE_LABEL, enabled, onMove)
     MenuItem(DELETE_LABEL, enabled, onDelete)
+}
+
+/**
+ * タッチの画面の、項目を選んでいるあいだの AppBar の、その他のオプションのメニューの中身。押した項目の操作を呼ぶ。メニューを閉じるのは呼ぶ側。
+ * 項目をほかのアプリで開くことと共有することができるプラットフォーム（[sharesItems]）なら、ほかのアプリで開く行と共有の行を先に並べる
+ * （[ShareMenuItems]）。
+ *
+ * @param sharesItems ほかのアプリで開く行と共有の行を出すか
+ * @param canWrite タイトルを変更する行を押せるか。偽なら押せない
+ * @param onOpenInOtherApp 選んでいる項目を、ほかのアプリで開く
+ * @param onShare 選んでいる項目を共有する
+ * @param onRename 選んでいる項目のタイトルを変える
+ */
+@Composable
+internal fun MoreOptionsMenuItems(
+    sharesItems: Boolean,
+    canWrite: Boolean,
+    onOpenInOtherApp: () -> Unit,
+    onShare: () -> Unit,
+    onRename: () -> Unit,
+) {
+    ShareMenuItems(sharesItems, onOpenInOtherApp, onShare)
+    MenuItem(RENAME_ITEM_LABEL, canWrite, onRename)
+}
+
+/**
+ * タッチの画面の、選ぶ状態でないときに項目の行を長押しして出す、項目のメニューの中身。長押しした項目について、押した項目の操作を呼ぶ。
+ * メニューを閉じるのは呼ぶ側。
+ * 先頭に、項目を既定のブラウザで開く行を並べる。項目をほかのアプリで開くことと共有することができるプラットフォーム（[sharesItems]）なら、
+ * 続けてほかのアプリで開く行と共有の行を並べ（[ShareMenuItems]）、続けて右クリックの項目のメニューと同じ行（[ItemMenuItems]）を、
+ * 最後に選ぶ状態に入る行を並べる。
+ *
+ * @param sharesItems ほかのアプリで開く行と共有の行を出すか
+ * @param canWrite タイトルを変更・移動・削除の行を押せるか。偽なら押せない
+ * @param onOpen 項目を、既定のブラウザで開く
+ * @param onOpenInOtherApp 項目を、ほかのアプリで開く
+ * @param onShare 項目を共有する
+ * @param onRename 項目のタイトルを変える
+ * @param onMove 項目を移す
+ * @param onDelete 項目を消す
+ * @param onSelect 項目だけを選び、選ぶ状態に入る
+ */
+@Composable
+internal fun ItemLongPressMenuItems(
+    sharesItems: Boolean,
+    canWrite: Boolean,
+    onOpen: () -> Unit,
+    onOpenInOtherApp: () -> Unit,
+    onShare: () -> Unit,
+    onRename: () -> Unit,
+    onMove: () -> Unit,
+    onDelete: () -> Unit,
+    onSelect: () -> Unit,
+) {
+    MenuItem(OPEN_LABEL, enabled = true, onOpen)
+    ShareMenuItems(sharesItems, onOpenInOtherApp, onShare)
+    ItemMenuItems(canWrite, onRename, onMove, onDelete)
+    MenuItem(SELECT_LABEL, enabled = true, onSelect)
+}
+
+/**
+ * 項目をほかのアプリで開く行と共有の行。いつでも押せる。[sharesItems] が偽なら出さない。押した項目の操作を呼ぶ。メニューを閉じるのは呼ぶ側。
+ *
+ * @param onOpenInOtherApp 項目を、ほかのアプリで開く
+ * @param onShare 項目を共有する
+ */
+@Composable
+private fun ShareMenuItems(sharesItems: Boolean, onOpenInOtherApp: () -> Unit, onShare: () -> Unit) {
+    if (!sharesItems) return
+    MenuItem(OPEN_IN_OTHER_APP_LABEL, enabled = true, onOpenInOtherApp)
+    MenuItem(SHARE_LABEL, enabled = true, onShare)
 }
 
 /**
@@ -160,12 +251,52 @@ internal fun FolderMenuItems(
 }
 
 /**
- * フォルダ [folderId] の右クリックのメニュー。ツリーの行とリストの子のフォルダの行が、行の中に置く。
+ * 押された位置を [menu] に覚え（タッチの画面の長押しでメニューを出すとき [folderMenuOnLongPress] に使う）、副ボタンで押されたら、
+ * [onMenuOpen] を呼んでから、その位置に [menu] を出す。ツリーの行とリストの子のフォルダの行の、フォルダのメニューに使う。
+ */
+@Composable
+internal fun Modifier.folderMenuPress(menu: ContextMenuState, onMenuOpen: () -> Unit): Modifier =
+    onPointerPress { press ->
+        menu.recordPress(press.position)
+        if (!press.secondary) return@onPointerPress
+        onMenuOpen()
+        menu.open(press.position)
+    }
+
+/**
+ * フォルダの行の長押しですること。タッチの画面（[touchScreen]）なら、[onMenuOpen] を呼んでから、最後に押された位置
+ * （[folderMenuPress]）に [menu] を出す。タッチの画面でなければ null で、長押しを扱わない。
+ */
+internal fun folderMenuOnLongPress(touchScreen: Boolean, menu: ContextMenuState, onMenuOpen: () -> Unit): (() -> Unit)? =
+    if (touchScreen) {
+        {
+            onMenuOpen()
+            menu.openAtLastPress()
+        }
+    } else {
+        null
+    }
+
+/**
+ * 押すと [onClick] を呼ぶ。[onLongClick] があれば、長押しで [onLongClick] を呼ぶ。[onLongClick] が null なら長押しを扱わず、
+ * [clickable] と同じにする。
+ *
+ * @param enabled 押せるか
+ */
+internal fun Modifier.clickableWithLongClick(enabled: Boolean = true, onClick: () -> Unit, onLongClick: (() -> Unit)?): Modifier =
+    if (onLongClick == null) {
+        clickable(enabled = enabled, onClick = onClick)
+    } else {
+        combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick)
+    }
+
+/**
+ * フォルダ [folderId] の右クリック（タッチの画面では長押しでも）のメニュー。ツリーの行とリストの子のフォルダの行が、行の中に置く。
  * ブラウザで開く行（[OpenInBrowserMenuItems]。そのフォルダの直下の項目を開く）と、フォルダのメニューの中身（[FolderMenuItems]）を並べる。
  *
  * @param name フォルダの名前
  * @param isRoot ルートフォルダか
- * @param itemCount フォルダの直下の項目の数（マニフェストの `count`）
+ * @param itemCount フォルダの直下の項目の数（溜めた削除の項目は数えない。[to.sava.cloudmarksmultiplatform.browse.BrowseState.itemCountOf]）
  */
 @Composable
 internal fun FolderContextMenu(

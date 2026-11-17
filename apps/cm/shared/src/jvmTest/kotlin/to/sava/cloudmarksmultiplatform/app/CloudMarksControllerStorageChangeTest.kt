@@ -7,6 +7,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
 import to.sava.cloudmarksmultiplatform.browse.SelectionMode
+import to.sava.cloudmarksmultiplatform.remote.FakeObjectStore.PutFault
 import to.sava.cloudmarksmultiplatform.remote.FakeObjectStore.Request
 import to.sava.cloudmarksmultiplatform.storage.manifestKey
 import to.sava.cloudmarksmultiplatform.sync.A_ITEMS
@@ -14,6 +15,7 @@ import to.sava.cloudmarksmultiplatform.sync.FOLDER_A
 import to.sava.cloudmarksmultiplatform.sync.FOLDER_B
 import to.sava.cloudmarksmultiplatform.sync.FolderReadResult
 import to.sava.cloudmarksmultiplatform.sync.ROOT_ID
+import to.sava.cloudmarksmultiplatform.sync.SyncFailure
 import to.sava.cloudmarksmultiplatform.sync.addFolderAsOtherWriter
 import to.sava.cloudmarksmultiplatform.sync.folderId
 import to.sava.cloudmarksmultiplatform.sync.gets
@@ -23,6 +25,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** ほかの書き手が足すフォルダ。 */
@@ -72,6 +75,29 @@ class CloudMarksControllerStorageChangeTest {
         assertEquals(setOf(A_ITEMS.first().id), browse.selectedItemIds)
         assertEquals(FolderReadResult.Loaded(A_ITEMS), browse.currentItems)
         assertFalse(browse.loading)
+    }
+
+    // 知らせで読み直しても、直前の操作の結果（書けなかったことの帯）は消さない。読み直すボタンの読み直しでは消す
+    @Test
+    fun changeNotificationKeepsWriteOutcome() = runTest {
+        val fixture = started()
+        fixture.store.onNextPut(PutFault.Forbidden, key = fixture.isManifest)
+        fixture.controller.createFolder(ROOT_ID, "C")
+        runCurrent()
+        val failed = WriteOutcome.Failed(SyncFailure.Forbidden)
+        assertEquals(failed, fixture.state.write.outcome)
+        fixture.store.addFolderAsOtherWriter(OTHER_FOLDER)
+
+        fixture.storageChanges.emit(Unit)
+        runCurrent()
+
+        assertEquals(fixture.store.storedManifest(), fixture.state.browse.tree?.manifest)
+        assertEquals(failed, fixture.state.write.outcome)
+
+        fixture.controller.reload()
+        runCurrent()
+
+        assertNull(fixture.state.write.outcome)
     }
 
     // マニフェストを読んでいる最中に来た知らせでは、何も起きない（読み直しを重ねない）

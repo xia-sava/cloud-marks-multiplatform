@@ -1,5 +1,6 @@
 package to.sava.cloudmarksmultiplatform.ui
 
+import to.sava.cloudmarksmultiplatform.app.BrowserNotice
 import to.sava.cloudmarksmultiplatform.app.SettingsStatus
 import to.sava.cloudmarksmultiplatform.app.WriteOutcome
 import to.sava.cloudmarksmultiplatform.operations.NotAppliedReason
@@ -197,6 +198,27 @@ class MessagesTest {
     @Test
     fun deletedItemsNoticeHasCount() {
         assertEquals("3 件の項目を削除しました。", deletedItemsNotice(3))
+    }
+
+    // 消した項目を溜めたときのお知らせと、溜めた削除があるあいだの帯は、項目の数を入れる
+    @Test
+    fun pendingDeleteMessagesHaveCount() {
+        assertEquals("3 件の項目を削除しました。ネットワークにつながったら保存先に反映します。", pendingDeletedItemsNotice(3))
+        assertEquals("削除した 3 件の項目は、まだ保存先に反映していません。ネットワークにつながったら反映します。", pendingDeletesNotice(3))
+    }
+
+    // ほかのアプリで開くか共有しようとして、受け取れるアプリが無ければそのことを、ほかの理由で出せなければ既定のブラウザを起動できなかった
+    // ときと同じ文を出す。どちらも詳細は無い
+    @Test
+    fun shareNoticesHaveTextOnly() {
+        assertEquals(UiMessage("この URL を開けるアプリがありません。"), describeBrowserNotice(BrowserNotice.NoAppForItem))
+        assertEquals(UiMessage("ブラウザを起動できませんでした。"), describeBrowserNotice(BrowserNotice.ShareFailed))
+    }
+
+    // タッチの画面の、項目を選んでいるあいだの AppBar の題は、選んでいる数を入れる
+    @Test
+    fun selectionTitleHasCount() {
+        assertEquals("3 件を選択中", selectionTitle(3))
     }
 
     // 2 つ以上の項目をドラッグしているあいだの札は、項目の数を入れる

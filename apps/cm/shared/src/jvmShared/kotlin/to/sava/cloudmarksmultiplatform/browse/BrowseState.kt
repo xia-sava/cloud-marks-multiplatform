@@ -1,6 +1,7 @@
 package to.sava.cloudmarksmultiplatform.browse
 
 import to.sava.cloudmarksmultiplatform.operations.FolderNode
+import to.sava.cloudmarksmultiplatform.operations.ItemRef
 import to.sava.cloudmarksmultiplatform.operations.TreeState
 import to.sava.cloudmarksmultiplatform.storage.Item
 import to.sava.cloudmarksmultiplatform.sync.FolderReadResult
@@ -12,7 +13,8 @@ import to.sava.cloudmarksmultiplatform.sync.TreeReadResult
 enum class SelectionMode {
     /**
      * その項目だけを選ぶ。選んでいない項目の右クリックとドラッグ、タッチで選んでいる項目が無いときの押下、キーボードでの押下。
-     * マウスのふつうのクリックは、選ばずに項目を開く。
+     * マウスのふつうのクリックは、選ばずに項目を開く。タッチの画面の振る舞いで動かすプラットフォームでは、選んでいる項目が無いときの
+     * タッチとキーボードでの押下も、選ばずに項目を開く。
      */
     SINGLE,
 
@@ -59,6 +61,8 @@ fun selectionModeOf(ctrlPressed: Boolean, shiftPressed: Boolean): SelectionMode 
  * @property wideLayout 広い画面か。広ければツリーの枠を出し、狭ければツリーをドロワーにする
  * @property treePaneVisible 広い画面で、ツリーの枠を出すか
  * @property drawerOpen 狭い画面で、ドロワーが開いているか
+ * @property pendingDeletes 溜めた削除の対象（S3 につながらないために端末に溜めた、項目の削除）。リストとフォルダの件数から消して見せる。
+ * [tree] と [folderReads] は読んだままで持ち、見せるとき（[currentItems]・[itemCountOf]・[shownItems]）に除く
  */
 data class BrowseState(
     val tree: LoadedTree? = null,
@@ -75,6 +79,7 @@ data class BrowseState(
     val wideLayout: Boolean = true,
     val treePaneVisible: Boolean = true,
     val drawerOpen: Boolean = false,
+    val pendingDeletes: Set<ItemRef> = emptySet(),
 ) {
     /** 開いているフォルダ。 */
     val currentFolder: FolderNode? get() = currentFolderId?.let { tree?.state?.folders?.get(it) }
@@ -83,14 +88,62 @@ data class BrowseState(
     val currentChildren: List<FolderNode>
         get() = currentFolder?.children.orEmpty().mapNotNull { tree?.state?.folders?.get(it) }
 
-    /** 開いているフォルダの項目を読んだ結果。まだ読んでいなければ（読んでいる最中も）null。 */
-    val currentItems: FolderReadResult? get() = currentFolderId?.let { folderReads[it] }
+    /** 開いているフォルダの項目を読んだ結果。読めた項目からは、溜めた削除の項目を除く。まだ読んでいなければ（読んでいる最中も）null。 */
+    val currentItems: FolderReadResult?
+        get() = currentFolderId?.let { folderId ->
+            folderReads[folderId]?.let { read ->
+                if (read is FolderReadResult.Loaded && hidesItemsOf(folderId)) {
+                    FolderReadResult.Loaded(shownItems(folderId, read.items))
+                } else {
+                    read
+                }
+            }
+        }
 
-    /** 開いているフォルダの、読めた項目。表示の並び順。読めていなければ空。 */
+    /** 開いているフォルダの、読めた項目。溜めた削除の項目は除く。表示の並び順。読めていなければ空。 */
     val currentLoadedItems: List<Item> get() = (currentItems as? FolderReadResult.Loaded)?.items.orEmpty()
 
     /** 開いているフォルダの項目のうち、選んでいるもの。表示の並び順。 */
     val selectedItems: List<Item> get() = currentLoadedItems.filter { it.id in selectedItemIds }
+
+    /** フォルダ [folderId] の項目 [items] から、溜めた削除の項目を除いたもの。並びは変えない。 */
+    fun shownItems(folderId: String, items: List<Item>): List<Item> {
+        if (!hidesItemsOf(folderId)) return items
+        return items.filterNot { ItemRef(folderId, it.id) in pendingDeletes }
+    }
+
+    /**
+     * フォルダ [folderId] の直下の項目の数。溜めた削除の項目は数えない。ツリーに無いフォルダは 0。
+     *
+     * 項目を読んであれば、読めた項目のうち溜めた削除でないものの数。読んでいなければ、マニフェストの `count` から、
+     * そのフォルダを指す溜めた削除の数を引いたもの（0 未満にはしない）。
+     */
+    fun itemCountOf(folderId: String): Int {
+        val node = tree?.state?.folders?.get(folderId) ?: return 0
+        val loaded = (folderReads[folderId] as? FolderReadResult.Loaded)?.items
+            ?: return (node.count - pendingDeletes.count { it.folderId == folderId }).coerceAtLeast(0)
+        return shownItems(folderId, loaded).size
+    }
+
+    /** フォルダ [folderId] と、その子孫のフォルダの項目の数の合計。各フォルダの数は [itemCountOf]。ツリーに無いフォルダは 0。 */
+    fun itemCountWithDescendantsOf(folderId: String): Int =
+        tree?.state?.itemCountWithDescendants(folderId, ::itemCountOf) ?: 0
+
+    /**
+     * 溜めた削除の対象を [targets] にする。開いているフォルダの項目のうち溜めた削除になったものは、選んでいる項目と、
+     * 範囲で選ぶときの起点から外す。
+     */
+    fun withPendingDeletes(targets: Set<ItemRef>): BrowseState {
+        val hidden = currentFolderId?.let { folderId -> targets.filter { it.folderId == folderId }.map { it.itemId }.toSet() }.orEmpty()
+        return copy(
+            pendingDeletes = targets,
+            selectedItemIds = selectedItemIds - hidden,
+            selectionAnchorId = selectionAnchorId?.takeUnless { it in hidden },
+        )
+    }
+
+    /** フォルダ [folderId] の項目に、溜めた削除の対象があるか。 */
+    private fun hidesItemsOf(folderId: String): Boolean = pendingDeletes.any { it.folderId == folderId }
 
     /** 戻る操作でできることがあるか。ドロワーが開いているか、履歴があるとき。 */
     val canGoBack: Boolean get() = drawerOpen || history.isNotEmpty()
@@ -104,7 +157,10 @@ data class BrowseState(
      */
     fun dismissFailure(): BrowseState = if (tree == null) this else copy(failure = null)
 
-    /** マニフェストのツリーと、それに係る状態を捨てる。画面の幅の区分と、ツリーの枠を出すかだけを残す。接続先を替えたときに使う。 */
+    /**
+     * マニフェストのツリーと、それに係る状態（溜めた削除を含む）を捨てる。画面の幅の区分と、ツリーの枠を出すかだけを残す。
+     * 接続先を替えたときに使う。
+     */
     fun cleared(): BrowseState = BrowseState(wideLayout = wideLayout, treePaneVisible = treePaneVisible)
 
     /** 新しく読んだツリー [tree] で開くフォルダ。開いているフォルダが [tree] に残っていればそれ、無ければルートフォルダ。 */

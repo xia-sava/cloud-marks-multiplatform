@@ -5,4 +5,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 
 @Composable
-internal actual fun ListVerticalScrollbar(listState: LazyListState, modifier: Modifier) = Unit
+internal actual fun ListVerticalScrollbar(listState: LazyListState, modifier: Modifier) {
+    TouchListScrollbar(listState, modifier)
+}

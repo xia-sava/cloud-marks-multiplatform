@@ -243,6 +243,39 @@ class CloudMarksControllerWriteTest {
         }
     }
 
+    // 項目を指定して消すと、選んでいる項目ではなく、指定した項目だけを消し、選んでいる項目は変えない。元に戻すと元の位置へ戻す
+    @Test
+    fun deleteItemsDeletesGivenItemsAndKeepsSelection() = runTest {
+        val fixture = started { it.store.replaceItemsAsOtherWriter(ROOT_ID, fileId(30), FIVE_ITEMS) }
+        fixture.controller.selectItem(item(1).id, SelectionMode.SINGLE)
+
+        fixture.controller.deleteItems(setOf(item(2).id, item(4).id))
+        runCurrent()
+
+        assertEquals(listOf(item(1), item(3), item(5)), fixture.storedItems(ROOT_ID))
+        assertEquals(setOf(item(1).id), fixture.state.browse.selectedItemIds)
+        assertEquals(2, fixture.state.write.undoableDelete?.count)
+
+        fixture.controller.undoDelete()
+        runCurrent()
+
+        assertEquals(FIVE_ITEMS, fixture.storedItems(ROOT_ID))
+    }
+
+    // 開いているフォルダの読めた項目に無い ID だけを指定して消そうとしても、何も書かない
+    @Test
+    fun deleteItemsIgnoresUnknownIds() = runTest {
+        val fixture = started()
+        val requestsBefore = fixture.store.requests.size
+
+        fixture.controller.deleteItems(setOf(item(99).id))
+        runCurrent()
+
+        assertEquals(requestsBefore, fixture.store.requests.size)
+        assertEquals(ROOT_ITEMS, fixture.storedItems(ROOT_ID))
+        assertNull(fixture.state.write.undoableDelete)
+    }
+
     // 結果のお知らせを閉じると結果を消し、元に戻せる削除は残す
     @Test
     fun dismissingOutcomeKeepsUndo() = runTest {
@@ -510,7 +543,7 @@ class CloudMarksControllerWriteTest {
         assertEquals(setOf<FolderReadResult?>(FolderReadResult.Loaded(ROOT_ITEMS)), seenItems.toSet())
     }
 
-    // 項目を別のフォルダへ移したあと、移した先の項目は、書いたあとの新しい項目ファイルのものになる（前に読んだ古い項目ではない）。
+    // 項目を別のフォルダへ移したあと、移動先の項目は、書いたあとの新しい項目ファイルのものになる（前に読んだ古い項目ではない）。
     // 開いているフォルダの項目は移した分だけ減り、選択は空になる
     @Test
     fun movingItemsShowsNewItemsOfDestination() = runTest {
