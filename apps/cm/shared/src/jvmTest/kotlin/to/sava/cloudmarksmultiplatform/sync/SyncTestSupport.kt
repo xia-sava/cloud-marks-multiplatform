@@ -172,3 +172,14 @@ internal fun FakeObjectStore.gets(matches: (String) -> Boolean): List<FakeObject
 
 /** 項目ファイルのキーから、ファイルの ID を取り出す。 */
 internal fun fileIdOfKey(key: String): String = key.substringAfterLast('/').removeSuffix(".jsonl.gz")
+
+/** いまのマニフェストのバージョンを、戻せる時点として返す。いまのバージョンが削除マーカーなら失敗にする。 */
+internal fun SyncFixture.currentManifestRevision(): Revision =
+    store.versionsOf(manifestKey).first().let { version ->
+        assertNotNull(version.stored, "いまのマニフェストのバージョンが削除マーカー")
+        Revision(version.versionId, version.lastModified)
+    }
+
+/** 戻せる時点 [revision] を読む。読めなければ失敗にする。 */
+internal suspend fun SyncFixture.loadRevision(revision: Revision): LoadedRevision =
+    assertIs<RevisionReadResult.Loaded>(sync.readRevision(revision)).revision

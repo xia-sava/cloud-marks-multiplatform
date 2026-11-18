@@ -102,6 +102,25 @@ class SystemBackControllerTest {
         assertNull(systemBackOf(fixture.state))
     }
 
+    // 以前の状態に戻す画面から戻る操作をすると、設定の画面へ戻る。もう一度でメインの画面へ戻り、そのあとはすることが無い
+    @Test
+    fun backFromRevisionsReturnsToSettingsThenMain() = runTest {
+        val fixture = started()
+        fixture.controller.openSettings()
+        fixture.controller.openRevisions()
+        runCurrent()
+        assertEquals(Screen.REVISIONS, fixture.state.screen)
+
+        fixture.controller.perform(checkNotNull(systemBackOf(fixture.state)))
+        runCurrent()
+
+        assertEquals(Screen.SETTINGS, fixture.state.screen)
+        fixture.controller.perform(checkNotNull(systemBackOf(fixture.state)))
+        runCurrent()
+        assertEquals(Screen.MAIN, fixture.state.screen)
+        assertNull(systemBackOf(fixture.state))
+    }
+
     // 設定がまだ無く、設定の画面しか出せないあいだは、戻る操作を受けない
     @Test
     fun firstSettingsScreenDoesNotTakeBack() = runTest {

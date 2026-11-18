@@ -1,5 +1,10 @@
 package to.sava.cloudmarksmultiplatform.sync
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import to.sava.cloudmarksmultiplatform.remote.PutObjectResult
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.hours
@@ -44,6 +49,25 @@ internal val MAX_FILES_TO_MANIFEST = 1.hours
  * ファイルを消さないための長さ。
  */
 internal val STALE_FILE_GRACE_PERIOD = 24.hours
+
+/**
+ * 項目ファイルの GET と PUT を、並べて送るときに同時に走らせる数の上限。
+ *
+ * 書き込みの手順 3 の PUT と、以前の状態へ戻すときの中身の GET は、フォルダごとに 1 つずつ送る。子のフォルダの多いフォルダを
+ * 消してから戻すときのように、フォルダの数だけのリクエストが一度に走らないようにする。
+ */
+internal const val MAX_CONCURRENT_REQUESTS = 8
+
+/**
+ * [items] のそれぞれに [transform] を、同時に走るのが [MAX_CONCURRENT_REQUESTS] 個までになるように並べて行い、
+ * 結果を [items] の順で返す。
+ */
+internal suspend fun <T, R> mapConcurrently(items: Iterable<T>, transform: suspend (T) -> R): List<R> {
+    val permits = Semaphore(MAX_CONCURRENT_REQUESTS)
+    return coroutineScope {
+        items.map { item -> async { permits.withPermit { transform(item) } } }.awaitAll()
+    }
+}
 
 /** [count] 回目（1 から数える）の再送・再適用の前に空ける間。 */
 internal fun retryDelay(count: Int): Duration = FIRST_RETRY_DELAY * (1 shl (count - 1))

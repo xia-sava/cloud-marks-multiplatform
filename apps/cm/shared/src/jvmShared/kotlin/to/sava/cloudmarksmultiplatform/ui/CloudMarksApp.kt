@@ -77,8 +77,10 @@ import to.sava.cloudmarksmultiplatform.app.AppState
 import to.sava.cloudmarksmultiplatform.app.CloudMarksController
 import to.sava.cloudmarksmultiplatform.app.Screen
 import to.sava.cloudmarksmultiplatform.app.UndoableDelete
+import to.sava.cloudmarksmultiplatform.app.WriteOutcome
 import to.sava.cloudmarksmultiplatform.app.WriteState
 import to.sava.cloudmarksmultiplatform.browse.BrowseState
+import to.sava.cloudmarksmultiplatform.sync.counts
 
 /** 広い画面での、ツリーの枠の幅の初め。 */
 internal val DEFAULT_TREE_PANE_WIDTH = 280.dp
@@ -114,7 +116,7 @@ private data class MainPaneState(
 /**
  * Cloud Marks の画面。[controller] の状態を描き、利用者の操作を [controller] へ渡す。
  * 画面全体を、表示の大きさ（[AppState.displayScale]）で拡大縮小して描く（[ScaledDensity]。ダイアログ・メニュー・ツールチップの中身は
- * [ScaledPopupContent]）。メインの画面と設定の画面の上で、Ctrl を押しながらホイールを縦に回すと、表示の大きさを 1 段ずつ替える
+ * [ScaledPopupContent]）。メインの画面・設定の画面・以前の状態に戻す画面の上で、Ctrl を押しながらホイールを縦に回すと、表示の大きさを 1 段ずつ替える
  * （[displayScaleWheel]）。画面の中身は、システムバー・画面の切り欠き・キーボードに重ならないように置く。
  *
  * [controller] は呼ぶ側が `createCloudMarksController` で組み立て、[CloudMarksController.start] で動かし始め、
@@ -208,7 +210,8 @@ private fun rememberMainScreenParts(controller: CloudMarksController): MainScree
     }
 
 /**
- * 画面の幅の区分に合わせてメインの画面を組み、データを変える操作のダイアログと、項目を消したあとのお知らせと、ドラッグ中の札を重ねる。
+ * 画面の幅の区分に合わせてメインの画面を組み、データを変える操作のダイアログと、項目を消したあとのお知らせと、以前の状態に戻せたお知らせと、
+ * ドラッグ中の札を重ねる。
  * ダイアログとドラッグの状態は、窓の幅の区分が替わっても保つ。AppBar とリストとツリーは、窓の幅の区分が替わっても作り直さずに移す
  * （[MainScreenParts]）。ドラッグを始めたあとのポインターは、窓いっぱいの枠で追う（[moveDragTracker]）。
  * タッチの画面（[LocalTouchScreen]）では、システムの戻る操作を受け、[systemBackOf] が決めたことを行う。することが無いあいだは受けない。
@@ -258,6 +261,12 @@ private fun CloudMarksScreen(state: AppState, controller: CloudMarksController, 
         onUndo = controller::undoDelete,
         onDismiss = controller::dismissUndo,
     )
+    RestoredNotice(
+        restored = state.write.outcome as? WriteOutcome.Restored,
+        visible = state.screen == Screen.MAIN,
+        hostState = snackbarHostState,
+        onDismiss = controller::dismissWriteOutcome,
+    )
     Box(modifier.fillMaxSize().moveDragTracker(dragState, onDrop = operations.onMove)) {
         if (state.screen == Screen.MAIN && !wide) {
             NarrowMainScreen(content, controller, parts)
@@ -270,11 +279,22 @@ private fun CloudMarksScreen(state: AppState, controller: CloudMarksController, 
                         settings = state.settings,
                         displayScale = state.displayScale,
                         tabLoading = state.tabLoading.takeIf { state.opensMultipleItems },
+                        canRestore = state.canRestore,
                         onEdit = controller::editSettings,
                         onSave = controller::saveSettings,
                         onCreateManifest = controller::createManifest,
                         onDisplayScaleChange = controller::setDisplayScale,
                         onTabLoadingChange = controller::setTabLoading,
+                        onOpenRevisions = controller::openRevisions,
+                    )
+                    Screen.REVISIONS -> RevisionsScreen(
+                        revisions = state.revisions,
+                        currentCounts = state.browse.tree?.manifest?.counts(),
+                        canRestore = state.canRestore,
+                        onSelect = controller::selectRevision,
+                        onRestore = controller::restoreSelectedRevision,
+                        onDismissConfirmation = controller::dismissRevisionSelection,
+                        onDismissNotice = controller::dismissRevisionNotice,
                     )
                     Screen.MAIN -> {
                         MainBanners(state, controller)
@@ -326,6 +346,29 @@ private fun UndoDeleteNotice(
                 }
             }
         }
+    }
+}
+
+/**
+ * [visible] のあいだ（メインの画面を出しているあいだ）、以前の状態に戻せた結果 [restored] があれば、画面の下に、戻した時点の日時を入れた
+ * お知らせ（[restoredNotice]）を出す。ボタンは置かない。閉じたら（時間切れを含む）[onDismiss] を呼ぶ。[restored] が替わるか無くなるか、
+ * [visible] が偽になったら、出しているお知らせを閉じる。
+ */
+@Composable
+private fun RestoredNotice(
+    restored: WriteOutcome.Restored?,
+    visible: Boolean,
+    hostState: SnackbarHostState,
+    onDismiss: () -> Unit,
+) {
+    val currentOnDismiss by rememberUpdatedState(onDismiss)
+    LaunchedEffect(restored, visible) {
+        if (restored == null || !visible) return@LaunchedEffect
+        hostState.showSnackbar(
+            message = restoredNotice(formatRevisionTime(restored.lastModified)),
+            duration = SnackbarDuration.Long,
+        )
+        currentOnDismiss()
     }
 }
 
@@ -472,11 +515,7 @@ private fun MainBanners(state: AppState, controller: CloudMarksController) {
 @Composable
 private fun PendingDeletesBanner(count: Int) {
     if (count == 0) return
-    Banner(
-        message = UiMessage(pendingDeletesNotice(count)),
-        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-    )
+    StatusBanner(UiMessage(pendingDeletesNotice(count)))
 }
 
 /**
@@ -498,23 +537,19 @@ private fun BrowseBanners(browse: BrowseState, onDismissFailure: () -> Unit) {
 @Composable
 private fun WriteBanner(write: WriteState, onDismissOutcome: () -> Unit) {
     if (write.writing) {
-        Banner(
-            message = UiMessage(WRITING_NOTICE),
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-        )
+        StatusBanner(UiMessage(WRITING_NOTICE))
         return
     }
     write.outcome?.let(::describeWriteOutcome)?.let { Banner(it, onDismiss = onDismissOutcome) }
 }
 
 /**
- * メインの画面の帯。色を指定しなければ、誤りの色で出す。
+ * メインの画面と以前の状態に戻す画面の帯。色を指定しなければ、誤りの色で出す。
  *
  * @param onDismiss 帯の右端の [CLOSE_LABEL] を押したとき。null なら、ボタンを置かない
  */
 @Composable
-private fun Banner(
+internal fun Banner(
     message: UiMessage,
     containerColor: Color = MaterialTheme.colorScheme.errorContainer,
     contentColor: Color = MaterialTheme.colorScheme.onErrorContainer,
@@ -534,6 +569,19 @@ private fun Banner(
             }
         }
     }
+}
+
+/**
+ * 誤りではない、いまの様子を伝える帯。[Banner] を、誤りの色の代わりに secondaryContainer の色で出し、閉じるボタンは置かない。
+ * 操作を書いている最中・溜めた削除があること・以前の状態に戻している最中に使う。
+ */
+@Composable
+internal fun StatusBanner(message: UiMessage) {
+    Banner(
+        message = message,
+        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+    )
 }
 
 /**
@@ -665,11 +713,12 @@ private fun MoreOptionsButton(
     }
 }
 
-/** AppBar の題。メインの画面では開いているフォルダの名前、設定の画面では「設定」。 */
+/** AppBar の題。メインの画面では開いているフォルダの名前、設定の画面では「設定」、以前の状態に戻す画面では [REVISIONS_TITLE]。 */
 private fun titleOf(state: AppState): String =
     when (state.screen) {
         Screen.STARTING -> APP_TITLE
         Screen.SETTINGS -> SETTINGS_TITLE
+        Screen.REVISIONS -> REVISIONS_TITLE
         Screen.MAIN -> state.browse.currentFolder?.let { folder ->
             if (folder.parent == null) ROOT_FOLDER_LABEL else folder.name
         } ?: APP_TITLE

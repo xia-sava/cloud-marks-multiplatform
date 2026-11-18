@@ -58,6 +58,12 @@ import to.sava.cloudmarksmultiplatform.storage.Item
 import to.sava.cloudmarksmultiplatform.storage.newId
 import to.sava.cloudmarksmultiplatform.sync.CreateManifestResult
 import to.sava.cloudmarksmultiplatform.sync.FolderReadResult
+import to.sava.cloudmarksmultiplatform.sync.LoadedRevision
+import to.sava.cloudmarksmultiplatform.sync.RestoreResult
+import to.sava.cloudmarksmultiplatform.sync.Revision
+import to.sava.cloudmarksmultiplatform.sync.RevisionFailure
+import to.sava.cloudmarksmultiplatform.sync.RevisionListResult
+import to.sava.cloudmarksmultiplatform.sync.RevisionReadResult
 import to.sava.cloudmarksmultiplatform.sync.SyncFailure
 import to.sava.cloudmarksmultiplatform.sync.TreeReadResult
 import to.sava.cloudmarksmultiplatform.sync.WriteResult
@@ -96,6 +102,12 @@ private typealias TreeRead = suspend (foldersToLoad: (TreeState) -> Set<String>)
  * 読めたあとと、ほかの操作を書く前に、すべてまとめて 1 回の書き込みとして書く。ほかの操作を書く前に書けなければ、その操作は書かない。
  * 書けたら溜めた削除を空にし、記録のファイルを消す。S3 につながらなければ溜めたままにし、失敗としては知らせない。
  * ほかの理由で書けなければ溜めたままにし、操作を書けなかったときと同じく結果に出す。
+ *
+ * 以前の状態に戻すこと（`docs/storage-format.md` の「以前の状態に戻す」）は、設定の画面から開く画面（[Screen.REVISIONS]）で行う。
+ * 戻せる時点の一覧と、選んだ時点のマニフェストは、その画面を開いたときと時点を選んだときに読み、その画面を離れたら読み込みを取り消して、
+ * 結果を入れない。戻すことはデータを変える操作と同じく扱い、一度に 1 つだけ書く。戻しているあいだは、ほかの操作も読み直しも、
+ * その画面を離れることも受け付けない。戻す前には溜めた削除を書き、書けなければ戻さない。戻せたらメインの画面へ移り、
+ * 戻したあとのツリーに替える（マニフェストは GET し直さない）。
  *
  * [deletesStaleFiles] なら、起動して初めてツリーを読めたときに、前に古いファイルの削除を終えてから間隔を過ぎていれば、
  * 裏で古いファイルの削除を走らせる。結果はログにだけ書く。
@@ -152,6 +164,9 @@ class CloudMarksController(
 
     /** 起動してから、古いファイルの削除を走らせるかを確かめたか。初めてツリーを読めたときに確かめる。 */
     private var staleFilesChecked = false
+
+    /** 以前の状態に戻す画面のための、戻せる時点の一覧か選んだ時点のマニフェストの読み込み。まだ走らせていなければ null。 */
+    private var revisionReading: Job? = null
 
     private val mutableState = MutableStateFlow(
         AppState(opensMultipleItems = browserOpener.opensMultipleItems, sharesItems = itemSharer != null),
@@ -216,6 +231,8 @@ class CloudMarksController(
 
     /**
      * 戻る。設定の画面ならメインの画面へ戻り、入力した値を捨てて保存済みの設定から作り直す。
+     * 以前の状態に戻す画面なら設定の画面へ戻り（入力した値は残す）、戻せる時点の一覧か選んだ時点のマニフェストを読んでいれば取り消す。
+     * 戻している最中は何もしない（[AppState.canGoBack]）。
      * メインの画面ならドロワーを閉じるか、開いたフォルダの履歴を戻る。
      */
     fun back() {
@@ -227,6 +244,7 @@ class CloudMarksController(
                 back
             }
         }
+        if (state.value.screen != Screen.REVISIONS) cancelRevisionReading()
         loadCurrentFolder()
     }
 
@@ -400,6 +418,71 @@ class CloudMarksController(
             if (it.screen != Screen.MAIN) return@update it
             it.copy(screen = Screen.SETTINGS, browse = it.browse.closeDrawer(), settings = editingStoredSettings(it.settings))
         }
+    }
+
+    /**
+     * 設定の画面から、以前の状態に戻す画面を開き、戻せる時点の一覧を読む。その画面の状態は初めの値から始める。
+     * 設定の画面でないとき、以前の状態に戻すことを受け付けないとき（[AppState.canRestore]）、接続が無いときは何もしない。
+     */
+    fun openRevisions() {
+        val connection = active ?: return
+        val current = state.value
+        if (current.screen != Screen.SETTINGS || !current.canRestore) return
+        update { it.copy(screen = Screen.REVISIONS, revisions = RevisionsScreenState()) }
+        startRevisionReading(connection) { showRevisionList(connection.connection.sync.listRevisions()) }
+    }
+
+    /**
+     * 以前の状態に戻す画面で、戻せる時点 [revision] を選び、そのマニフェストを読む。読み始めるときに、前に伝えたことを消す。
+     * 読めたら戻すかを確かめる状態にし、読めなければそのことを伝える。
+     * 以前の状態に戻す画面で一覧を読めているときだけ受け付け、時点を選んでいるあいだ（読んでいる・確かめている・戻している）と、
+     * 接続が無いときは何もしない。
+     */
+    fun selectRevision(revision: Revision) {
+        val connection = active ?: return
+        val current = state.value
+        if (current.screen != Screen.REVISIONS || current.revisions.list !is RevisionListState.Listed) return
+        if (current.revisions.selection != null) return
+        updateRevisions { it.copy(selection = RevisionSelection.Loading(revision), notice = null) }
+        startRevisionReading(connection) { showRevisionRead(revision, connection.connection.sync.readRevision(revision)) }
+    }
+
+    /** 戻すかを確かめるのをやめる。確かめているときだけ閉じ、選んだ時点を読んでいる最中と戻している最中は何もしない。 */
+    fun dismissRevisionSelection() {
+        updateRevisions { revisions ->
+            if (revisions.selection is RevisionSelection.Confirming) revisions.copy(selection = null) else revisions
+        }
+    }
+
+    /**
+     * 確かめている時点へ戻す。以前の状態に戻す画面で確かめていて、以前の状態に戻すことを受け付けるとき（[AppState.canRestore]）だけ受け付ける。
+     *
+     * 戻し始めるときに、前の操作の結果と元に戻せる削除を消し、書いている最中の状態にする。溜めた削除があれば先に書き
+     * （[writePendingDeletes]）、書けなければ戻さず、溜めた削除を書いた結果を戻した結果として扱う。
+     * 戻せたら、メインの画面へ移り、戻したあとのツリーに替え（マニフェストは GET し直さない）、開いているフォルダの項目を、
+     * 読んであるものを引き継いだうえで足りなければ読む。戻せたことは結果（[WriteOutcome.Restored]）で伝える。
+     * 戻せなければ、以前の状態に戻す画面に残ってそのことを伝える。戻せたかどうかを確かめられなければ、メインの画面へ移り、
+     * 操作を確かめられなかったときと同じく結果に出す。ツリーは戻す前のまま。
+     * メインの画面へ移るときは、以前の状態に戻す画面の状態を初めの値にし、設定の画面の入力を保存済みの設定から作り直す。
+     */
+    fun restoreSelectedRevision() {
+        val connection = active ?: return
+        val current = state.value
+        val loaded = (current.revisions.selection as? RevisionSelection.Confirming)?.loaded ?: return
+        if (current.screen != Screen.REVISIONS || !current.canRestore) return
+        update {
+            it.copy(revisions = it.revisions.copy(selection = RevisionSelection.Restoring(loaded)), write = WriteState(writing = true))
+        }
+        connection.scope.launch {
+            val result = writePendingDeletes(connection)?.let(::restoreResultOfPendingDeletes)
+                ?: connection.connection.sync.restoreRevision(loaded)
+            showRestoreResult(loaded, result)
+        }
+    }
+
+    /** 以前の状態に戻す画面で伝えたことを閉じる。 */
+    fun dismissRevisionNotice() {
+        updateRevisions { it.copy(notice = null) }
     }
 
     /**
@@ -808,6 +891,87 @@ class CloudMarksController(
     }
 
     /**
+     * 以前の状態に戻す画面のための読み込み [read] を、[connection] で走らせる。その画面を離れたら取り消せるよう、走らせたものを覚える
+     * （[cancelRevisionReading]）。前に走らせたものが残っていれば、先に取り消す。
+     */
+    private fun startRevisionReading(connection: ActiveConnection, read: suspend () -> Unit) {
+        revisionReading?.cancel()
+        revisionReading = connection.scope.launch { read() }
+    }
+
+    /** 以前の状態に戻す画面のための読み込みが走っていれば、取り消す。 */
+    private fun cancelRevisionReading() {
+        revisionReading?.cancel()
+        revisionReading = null
+    }
+
+    /** 戻せる時点の一覧を読んだ結果 [result] を入れる。以前の状態に戻す画面で、一覧を読んでいる最中のときだけ入れる。 */
+    private fun showRevisionList(result: RevisionListResult) {
+        val list = when (result) {
+            is RevisionListResult.Listed -> RevisionListState.Listed(result.revisions)
+            is RevisionListResult.Failed -> RevisionListState.Failed(result.failure)
+        }
+        update { current ->
+            if (current.screen != Screen.REVISIONS || current.revisions.list != RevisionListState.Loading) return@update current
+            current.copy(revisions = current.revisions.copy(list = list))
+        }
+    }
+
+    /**
+     * 戻せる時点 [revision] のマニフェストを読んだ結果 [result] を入れる。読めたら戻すかを確かめる状態にし、読めなければそのことを伝える。
+     * 以前の状態に戻す画面で、[revision] を読んでいる最中のときだけ入れる。
+     */
+    private fun showRevisionRead(revision: Revision, result: RevisionReadResult) {
+        update { current ->
+            if (current.screen != Screen.REVISIONS || current.revisions.selection != RevisionSelection.Loading(revision)) {
+                return@update current
+            }
+            val revisions = when (result) {
+                is RevisionReadResult.Loaded -> current.revisions.copy(selection = RevisionSelection.Confirming(result.revision))
+                is RevisionReadResult.Failed ->
+                    current.revisions.copy(selection = null, notice = RevisionNotice.ReadFailed(result.failure))
+            }
+            current.copy(revisions = revisions)
+        }
+    }
+
+    /** 戻す前に溜めた削除を書いた結果 [result] を、戻した結果として扱うもの。書けたら null（続けて戻す）。 */
+    private fun restoreResultOfPendingDeletes(result: WriteResult): RestoreResult? =
+        when (result) {
+            is WriteResult.Success -> null
+            is WriteResult.Failed -> RestoreResult.Failed(RevisionFailure.Sync(result.failure))
+            is WriteResult.Unconfirmed -> RestoreResult.Unconfirmed(result.failure)
+        }
+
+    /** 時点 [loaded] へ戻した結果 [result] を状態に入れる（[restoreSelectedRevision]）。 */
+    private fun showRestoreResult(loaded: LoadedRevision, result: RestoreResult) {
+        when (result) {
+            is RestoreResult.Success -> {
+                update {
+                    it.leftRevisions().copy(
+                        browse = it.browse.withWrittenTree(result.tree),
+                        write = WriteState(outcome = WriteOutcome.Restored(loaded.revision.lastModified)),
+                    )
+                }
+                loadCurrentFolder()
+            }
+            is RestoreResult.Failed -> update {
+                it.copy(
+                    revisions = it.revisions.copy(selection = null, notice = RevisionNotice.RestoreFailed(result.failure)),
+                    write = WriteState(),
+                )
+            }
+            is RestoreResult.Unconfirmed -> update {
+                it.leftRevisions().copy(write = WriteState(outcome = WriteOutcome.Unconfirmed(result.failure)))
+            }
+        }
+    }
+
+    /** 以前の状態に戻す画面からメインの画面へ移った状態。その画面の状態を初めの値にし、設定の画面の入力を保存済みの設定から作り直す。 */
+    private fun AppState.leftRevisions(): AppState =
+        copy(screen = Screen.MAIN, revisions = RevisionsScreenState(), settings = editingStoredSettings(settings))
+
+    /**
      * マニフェストを読んだ結果 [result] をツリーに入れ、開いているフォルダの項目を読む。読めて、[clearsWriteOutcome] なら、
      * 直前の操作の結果を消す。
      */
@@ -1014,6 +1178,10 @@ class CloudMarksController(
 
     private fun updateWrite(transform: (WriteState) -> WriteState) {
         update { it.copy(write = transform(it.write)) }
+    }
+
+    private fun updateRevisions(transform: (RevisionsScreenState) -> RevisionsScreenState) {
+        update { it.copy(revisions = transform(it.revisions)) }
     }
 
     private fun updateBrowserNotice(notice: BrowserNotice?) {

@@ -24,6 +24,7 @@ import to.sava.cloudmarksmultiplatform.sync.storedManifest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -167,6 +168,25 @@ class CloudMarksControllerStorageChangeTest {
 
         assertEquals(requestsBefore, fixture.store.requests.size)
         assertFalse(fixture.state.browse.loading)
+    }
+
+    // 以前の状態に戻す画面で、一覧を読み終えて出しているだけのあいだに来た知らせでも、何も起きない（メインの画面でないときは読み直さない）
+    @Test
+    fun changeNotificationOnRevisionsScreenIsDropped() = runTest {
+        val fixture = started()
+        fixture.controller.openSettings()
+        fixture.controller.openRevisions()
+        runCurrent()
+        assertEquals(Screen.REVISIONS, fixture.state.screen)
+        assertIs<RevisionListState.Listed>(fixture.state.revisions.list)
+        val requestsBefore = fixture.store.requests.size
+
+        fixture.storageChanges.emit(Unit)
+        runCurrent()
+
+        assertEquals(requestsBefore, fixture.store.requests.size)
+        assertFalse(fixture.state.browse.loading)
+        assertEquals(Screen.REVISIONS, fixture.state.screen)
     }
 
     // 知らせを集めるのは start から close までで、close で取り消す

@@ -229,6 +229,19 @@ class BrowseStateTest {
         assertEquals(notReturnable, notReturnable.back())
     }
 
+    // 以前の状態に戻す画面からの画面全体の戻るは、ドロワーが開いていても閉じずに、設定の画面へ戻る。メインの画面の側は替えない
+    @Test
+    fun appBackLeavesRevisionsWithoutTouchingBrowse() {
+        val browse = browseWithTree().withWideLayout(false).openFolder(A).toggleTreePane()
+        val revisions = AppState(screen = Screen.REVISIONS, browse = browse)
+
+        val back = revisions.back()
+
+        assertTrue(revisions.canGoBack)
+        assertEquals(Screen.SETTINGS, back.screen)
+        assertEquals(browse, back.browse)
+    }
+
     // ハンバーガーは、広い画面ではツリーの枠を、狭い画面ではドロワーを出し入れする
     @Test
     fun treePaneToggleDependsOnLayout() {

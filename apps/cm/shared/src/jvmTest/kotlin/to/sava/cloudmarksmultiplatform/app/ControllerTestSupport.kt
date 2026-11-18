@@ -32,7 +32,7 @@ import kotlin.time.TestTimeSource
 /** 起きたことの記録（ControllerFixture.events）の、接続を閉じたこと。 */
 internal const val CLOSED = "closed"
 
-/** 起きたことの記録（ControllerFixture.events）の、止めた GET が取り消されたこと。 */
+/** 起きたことの記録（ControllerFixture.events）の、止めた GET かバージョンの一覧が取り消されたこと。 */
 internal const val CANCELLED = "cancelled"
 
 /** 差し替えられる端末の時計。[now] が返す時刻を [current] で替える。 */
@@ -108,7 +108,7 @@ internal class ControllerFixture(
     val closed = mutableListOf<ConnectionSettings>()
     val logs = mutableListOf<String>()
 
-    /** 接続を閉じたこと（[CLOSED]）と、[stopNextGet] で止めた GET が取り消されたこと（[CANCELLED]）。起きた順。 */
+    /** 接続を閉じたこと（[CLOSED]）と、止めた GET かバージョンの一覧（[stopNextGet] など）が取り消されたこと（[CANCELLED]）。起きた順。 */
     val events = mutableListOf<String>()
 
     /** 接続を作る直前に走らせる。 */

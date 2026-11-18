@@ -17,6 +17,23 @@ import to.sava.cloudmarksmultiplatform.storage.manifestKey
 
 private const val UNEXPECTED_NOT_MODIFIED = "条件を付けていない GET に 304 が返った"
 
+/**
+ * GET の結果のうち `200` と `404` を除くものを、読めなかった失敗にする。
+ *
+ * `403` は [SyncFailure.Forbidden]、結果が不明なものは [SyncFailure.Unreachable]、そのほかの失敗は [SyncFailure.Other]。
+ * `304` は、条件を付けていない GET に返ったものとして [SyncFailure.Other] にする。
+ *
+ * @throws IllegalArgumentException [response] が [GetObjectResult.Found] か [GetObjectResult.NotFound] のとき
+ */
+internal fun getFailureOf(response: GetObjectResult): SyncFailure =
+    when (response) {
+        GetObjectResult.Forbidden -> SyncFailure.Forbidden
+        is GetObjectResult.Unknown -> SyncFailure.Unreachable(response.detail)
+        GetObjectResult.NotModified -> SyncFailure.Other(UNEXPECTED_NOT_MODIFIED)
+        is GetObjectResult.Failed -> SyncFailure.Other(response.detail)
+        is GetObjectResult.Found, GetObjectResult.NotFound -> throw IllegalArgumentException("読めなかった GET の結果でない: $response")
+    }
+
 /** マニフェストを読んだ結果。 */
 internal sealed interface ManifestRead {
     /** 読めた。[readOnly] は、`version` が知っている版より新しく、読むだけにするとき。 */
@@ -66,9 +83,8 @@ internal class TreeReader(
             GetObjectResult.NotModified -> readCachedManifest(cached, useCache)
             GetObjectResult.NotFound ->
                 ManifestRead.Unusable(if (cached == null) SyncFailure.ManifestNotFound else SyncFailure.ManifestDeleted)
-            GetObjectResult.Forbidden -> ManifestRead.Unusable(SyncFailure.Forbidden)
-            is GetObjectResult.Unknown -> ManifestRead.Unusable(SyncFailure.Unreachable(response.detail))
-            is GetObjectResult.Failed -> ManifestRead.Unusable(SyncFailure.Other(response.detail))
+            GetObjectResult.Forbidden, is GetObjectResult.Unknown, is GetObjectResult.Failed ->
+                ManifestRead.Unusable(getFailureOf(response))
         }
 
     /**
@@ -206,10 +222,8 @@ internal class TreeReader(
                 if (read is ItemsFileRead.Loaded) cache.putItemsFile(key, response.body)
             }
             GetObjectResult.NotFound -> ItemsFileRead.Missing(fileId)
-            GetObjectResult.Forbidden -> ItemsFileRead.Failed(SyncFailure.Forbidden)
-            is GetObjectResult.Unknown -> ItemsFileRead.Failed(SyncFailure.Unreachable(response.detail))
-            GetObjectResult.NotModified -> ItemsFileRead.Failed(SyncFailure.Other(UNEXPECTED_NOT_MODIFIED))
-            is GetObjectResult.Failed -> ItemsFileRead.Failed(SyncFailure.Other(response.detail))
+            GetObjectResult.Forbidden, is GetObjectResult.Unknown, GetObjectResult.NotModified, is GetObjectResult.Failed ->
+                ItemsFileRead.Failed(getFailureOf(response))
         }
     }
 }

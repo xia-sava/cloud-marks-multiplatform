@@ -1,5 +1,6 @@
 package to.sava.cloudmarksmultiplatform.ui
 
+import kotlinx.datetime.TimeZone
 import to.sava.cloudmarksmultiplatform.app.BrowserNotice
 import to.sava.cloudmarksmultiplatform.app.SettingsStatus
 import to.sava.cloudmarksmultiplatform.app.WriteOutcome
@@ -11,11 +12,14 @@ import to.sava.cloudmarksmultiplatform.settings.DisplayScale
 import to.sava.cloudmarksmultiplatform.settings.SettingsField
 import to.sava.cloudmarksmultiplatform.settings.SettingsReadResult
 import to.sava.cloudmarksmultiplatform.storage.StorageProblem
+import to.sava.cloudmarksmultiplatform.sync.ManifestCounts
+import to.sava.cloudmarksmultiplatform.sync.RevisionFailure
 import to.sava.cloudmarksmultiplatform.sync.SyncFailure
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.time.Instant
 
 class MessagesTest {
     private val problem = StorageProblem(3, "version が整数でない")
@@ -168,6 +172,12 @@ class MessagesTest {
         assertNull(describeWriteOutcome(WriteOutcome.Written))
     }
 
+    // 以前の状態に戻せたときも、結果の帯の文は無い（お知らせで伝える）
+    @Test
+    fun restoredHasNoMessage() {
+        assertNull(describeWriteOutcome(WriteOutcome.Restored(Instant.parse("2026-11-17T05:08:00Z"))))
+    }
+
     // 書けなかったときは、保存できなかったことの次の行に S3 の失敗の文を続け、詳細は失敗のものを使う
     @Test
     fun failedWriteContinuesWithFailureText() {
@@ -241,5 +251,133 @@ class MessagesTest {
             "「フォルダ A」と、その中のフォルダと項目をすべて削除します。この操作は元に戻せません。",
             deleteFolderConfirmation("フォルダ A"),
         )
+    }
+
+    // 戻せる時点の日時は、月・日・時・分を 0 埋めの 2 桁にする
+    @Test
+    fun revisionTimeIsZeroPadded() {
+        assertEquals("2026/03/04 05:06", formatRevisionTime(Instant.parse("2026-03-04T05:06:07Z"), TimeZone.UTC))
+        assertEquals("2026/11/17 14:08", formatRevisionTime(Instant.parse("2026-11-17T14:08:59Z"), TimeZone.UTC))
+    }
+
+    // 戻せる時点の日時は、渡したタイムゾーンのローカル時刻で出し、日付が繰り上がる
+    @Test
+    fun revisionTimeFollowsTimeZone() {
+        assertEquals(
+            "2026/11/18 00:05",
+            formatRevisionTime(Instant.parse("2026-11-17T15:05:00Z"), TimeZone.of("Asia/Tokyo")),
+        )
+        assertEquals(
+            "2027/01/01 00:00",
+            formatRevisionTime(Instant.parse("2026-12-31T15:00:00Z"), TimeZone.of("Asia/Tokyo")),
+        )
+    }
+
+    // 以前の状態に戻す画面の、定数の文
+    @Test
+    fun revisionConstants() {
+        assertEquals("以前の状態に戻す", REVISIONS_TITLE)
+        assertEquals("保存先のデータを、過去のある時点の状態に戻します。", REVISIONS_DESCRIPTION)
+        assertEquals("戻せる以前の状態がありません。", NO_REVISIONS_NOTICE)
+        assertEquals("この時点の状態に戻しますか？", RESTORE_CONFIRMATION_TITLE)
+        assertEquals("戻す", RESTORE_LABEL)
+        assertEquals("以前の状態に戻しています…", RESTORING_NOTICE)
+    }
+
+    // 一覧を読めなかったときは、そのことの次の行に S3 の失敗の文を続け、詳細は失敗のものを使う
+    @Test
+    fun revisionListFailureContinuesWithFailureText() {
+        val message = describeRevisionListFailure(SyncFailure.Unreachable("SocketTimeoutException"))
+
+        assertEquals(
+            "以前の状態の一覧を読み込めませんでした。\nS3 に接続できませんでした。ネットワークの状態を確認してください。",
+            message.text,
+        )
+        assertEquals("SocketTimeoutException", message.detail)
+    }
+
+    // 選んだ時点を読めなかったときは、そのことの次の行に S3 の失敗の文を続け、詳細は失敗のものを使う
+    @Test
+    fun revisionReadSyncFailureContinuesWithFailureText() {
+        val message = describeRevisionReadFailure(RevisionFailure.Sync(SyncFailure.Other("IllegalStateException")))
+
+        assertEquals("この時点のデータを読み込めませんでした。\nS3 とのやり取りでエラーが起きました。", message.text)
+        assertEquals("IllegalStateException", message.detail)
+    }
+
+    // 戻せなかったときは、そのことの次の行に S3 の失敗の文を続け、詳細は失敗のものを使う
+    @Test
+    fun restoreSyncFailureContinuesWithFailureText() {
+        val message = describeRestoreFailure(RevisionFailure.Sync(SyncFailure.Unreachable("SocketTimeoutException")))
+
+        assertEquals(
+            "以前の状態に戻せませんでした。\nS3 に接続できませんでした。ネットワークの状態を確認してください。",
+            message.text,
+        )
+        assertEquals("SocketTimeoutException", message.detail)
+    }
+
+    // 詳細の行を持たない S3 の失敗は、読み込みでも戻すときでも詳細が null
+    @Test
+    fun revisionSyncFailureWithoutDetailHasNullDetail() {
+        val failure = RevisionFailure.Sync(SyncFailure.Forbidden)
+
+        assertNull(describeRevisionReadFailure(failure).detail)
+        assertNull(describeRestoreFailure(failure).detail)
+    }
+
+    // 残っていない・形式が新しい失敗は、読み込みでも戻すときでも同じ専用の文を単独で出し、詳細は無い
+    @Test
+    fun incompleteAndUpdateRequiredHaveTextOnly() {
+        val incomplete = UiMessage("この時点のデータの一部が残っていないため、戻せません。")
+        val updateRequired = UiMessage("この時点のデータは形式が新しいため、戻せません。アプリを更新してください。")
+
+        assertEquals(incomplete, describeRevisionReadFailure(RevisionFailure.Incomplete))
+        assertEquals(incomplete, describeRestoreFailure(RevisionFailure.Incomplete))
+        assertEquals(updateRequired, describeRevisionReadFailure(RevisionFailure.UpdateRequired))
+        assertEquals(updateRequired, describeRestoreFailure(RevisionFailure.UpdateRequired))
+    }
+
+    // 壊れている失敗は、読み込みでも戻すときでも専用の文を単独で出し、詳細は壊れている箇所
+    @Test
+    fun corruptRevisionDetailIsProblem() {
+        val expected = UiMessage("この時点のデータが壊れているため、戻せません。", "3 行目: version が整数でない")
+
+        assertEquals(expected, describeRevisionReadFailure(RevisionFailure.Corrupt(problem)))
+        assertEquals(expected, describeRestoreFailure(RevisionFailure.Corrupt(problem)))
+    }
+
+    // 以前の状態に戻す確認の本文は、日時を先頭に入れる
+    @Test
+    fun restoreConfirmationHasTime() {
+        assertEquals(
+            "2026/11/17 14:08 の状態に戻します。それより後の変更は、すべて取り消されます。",
+            restoreConfirmation("2026/11/17 14:08"),
+        )
+    }
+
+    // フォルダと項目の数の行は、その時点と現在で頭が違い、数を入れる
+    @Test
+    fun countsLinesHaveCounts() {
+        val counts = ManifestCounts(folders = 3, items = 42)
+
+        assertEquals("この時点：フォルダ 3 個、項目 42 件", revisionCountsLine(counts))
+        assertEquals("現在：フォルダ 3 個、項目 42 件", currentCountsLine(counts))
+    }
+
+    // 保存したアプリの行は、android・desktop・host の 3 つだけ文を返し、知らない値は null
+    @Test
+    fun savedByLineKnowsThreeApps() {
+        assertEquals("保存したアプリ：Android 版", savedByLine("android"))
+        assertEquals("保存したアプリ：デスクトップ版", savedByLine("desktop"))
+        assertEquals("保存したアプリ：ブラウザの拡張機能", savedByLine("host"))
+        assertNull(savedByLine("ios"))
+        assertNull(savedByLine(""))
+    }
+
+    // 戻せたお知らせは、日時を先頭に入れる
+    @Test
+    fun restoredNoticeHasTime() {
+        assertEquals("2026/11/17 14:08 の状態に戻しました。", restoredNotice("2026/11/17 14:08"))
     }
 }

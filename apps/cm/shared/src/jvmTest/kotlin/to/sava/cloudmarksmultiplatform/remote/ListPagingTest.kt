@@ -64,4 +64,49 @@ class ListPagingTest {
         assertEquals(ListObjectsResult.Forbidden, result)
         assertEquals(listOf(null, "t1"), tokens)
     }
+
+    private fun version(id: String, isLatest: Boolean = false) = ListedVersion(id, time, isLatest, isDeleteMarker = false)
+
+    private fun versionPage(vararg ids: String, next: VersionPageToken?) =
+        VersionPageResult.Page(ids.map { version(it) }, next)
+
+    // バージョンの一覧：続きの位置が無くなるまで読み、各ページを順につなぐ。最初のページは位置なしで読み、位置はそのまま渡す
+    @Test
+    fun followsVersionTokensToTheLastPage() = runTest {
+        val tokens = mutableListOf<VersionPageToken?>()
+        val first = VersionPageToken("k", "v2")
+        val second = VersionPageToken("k", "v4")
+
+        val result = listAllVersionPages { token ->
+            tokens += token
+            when (token) {
+                null -> versionPage("v1", "v2", next = first)
+                first -> versionPage("v3", "v4", next = second)
+                second -> versionPage("v5", next = null)
+                else -> error("知らない位置を読んだ")
+            }
+        }
+
+        assertEquals(listOf(null, first, second), tokens)
+        assertEquals(listOf("v1", "v2", "v3", "v4", "v5"), assertIs<ListVersionsResult.Listed>(result).versions.map { it.versionId })
+    }
+
+    // バージョンの一覧：途中のページが失敗したら、そこまでに読んだものを返さず、その失敗を返し、続きのページを読まない
+    @Test
+    fun versionFailureOnLaterPageDiscardsEarlierPagesAndStops() = runTest {
+        val first = VersionPageToken("k", "v1")
+        var reads = 0
+
+        val result = listAllVersionPages { token ->
+            reads += 1
+            when (token) {
+                null -> versionPage("v1", next = first)
+                first -> VersionPageResult.Stopped(ListVersionsResult.Forbidden)
+                else -> error("失敗のあとのページを読んだ")
+            }
+        }
+
+        assertEquals(ListVersionsResult.Forbidden, result)
+        assertEquals(2, reads)
+    }
 }

@@ -70,25 +70,30 @@ private const val PREFIX_HINT = "空欄にすると、バケットの直下に�
  * 表示の大きさは、選ぶとすぐに [onDisplayScaleChange] へ渡し、保存の操作を要しない。保存の最中でも選べる。
  * タブの読み込み方も同じく、欄に正しい数（同時に読み込むタブの数は 1 以上、先に読み込むタブの数は 0 以上の整数）を入れるたびに
  * [onTabLoadingChange] へ渡す（[TabCountField]）。
+ * 末尾に、以前の状態に戻す画面を開くボタン（[REVISIONS_TITLE]）と、その説明（[REVISIONS_DESCRIPTION]）を置く。
  *
  * @param displayScale いまの表示の大きさ
  * @param tabLoading いまのタブの読み込み方。null なら、その見出しと欄を出さない（まとめて開けないプラットフォーム）
+ * @param canRestore 以前の状態に戻すことを受け付けるか。偽なら、以前の状態に戻す画面を開くボタンを押せない
  * @param onEdit 入力を変えたときに、変えたあとの入力を渡す
  * @param onSave 保存する
  * @param onCreateManifest マニフェストが無いと分かったあとで、マニフェストを作る
  * @param onDisplayScaleChange 表示の大きさを選んだときに、選んだ段を渡す
  * @param onTabLoadingChange タブの読み込み方の欄に正しい値を入れたときに、変えたあとの読み込み方を渡す
+ * @param onOpenRevisions 以前の状態に戻す画面を開く
  */
 @Composable
 internal fun SettingsScreen(
     settings: SettingsScreenState,
     displayScale: DisplayScale,
     tabLoading: TabLoading?,
+    canRestore: Boolean,
     onEdit: (SettingsForm) -> Unit,
     onSave: () -> Unit,
     onCreateManifest: () -> Unit,
     onDisplayScaleChange: (DisplayScale) -> Unit,
     onTabLoadingChange: (TabLoading) -> Unit,
+    onOpenRevisions: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val form = settings.form
@@ -157,6 +162,13 @@ internal fun SettingsScreen(
                     hint = LOAD_AHEAD_HINT,
                 ) { onTabLoadingChange(loading.copy(loadAhead = it)) }
             }
+            HorizontalDivider()
+            Button(onClick = onOpenRevisions, enabled = canRestore) { Text(REVISIONS_TITLE) }
+            Text(
+                text = REVISIONS_DESCRIPTION,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

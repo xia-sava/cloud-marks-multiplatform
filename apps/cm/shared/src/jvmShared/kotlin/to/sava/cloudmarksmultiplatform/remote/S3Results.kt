@@ -72,6 +72,16 @@ internal fun listResultOf(e: SdkBaseException): ListObjectsResult =
     }
 
 /**
+ * バージョンの一覧で SDK が投げた例外を、結果にする。振り分けは [listResultOf] と同じ。
+ */
+internal fun listVersionsResultOf(e: SdkBaseException): ListVersionsResult =
+    when {
+        e.httpStatus() == FORBIDDEN -> ListVersionsResult.Forbidden
+        e.isIndeterminate() -> ListVersionsResult.Unknown(describeFailure(e))
+        else -> ListVersionsResult.Failed(describeFailure(e))
+    }
+
+/**
  * DELETE で SDK が投げた例外を、結果にする。
  *
  * S3 が返した応答は HTTP の状態で振り分け、`403` 以外の応答は消していないとする。ただし `5xx` と、

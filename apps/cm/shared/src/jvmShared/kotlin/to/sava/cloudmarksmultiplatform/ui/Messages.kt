@@ -1,12 +1,19 @@
 package to.sava.cloudmarksmultiplatform.ui
 
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.format.char
+import kotlinx.datetime.toLocalDateTime
 import to.sava.cloudmarksmultiplatform.app.BrowserNotice
 import to.sava.cloudmarksmultiplatform.app.SettingsStatus
 import to.sava.cloudmarksmultiplatform.app.WriteOutcome
 import to.sava.cloudmarksmultiplatform.settings.DisplayScale
 import to.sava.cloudmarksmultiplatform.settings.SettingsReadResult
 import to.sava.cloudmarksmultiplatform.storage.StorageProblem
+import to.sava.cloudmarksmultiplatform.sync.ManifestCounts
+import to.sava.cloudmarksmultiplatform.sync.RevisionFailure
 import to.sava.cloudmarksmultiplatform.sync.SyncFailure
+import kotlin.time.Instant
 
 /** ルートフォルダを、ツリーと AppBar に出すときの名前。ルートフォルダの名前は空なので、代わりにこれを出す。 */
 internal const val ROOT_FOLDER_LABEL = "トップ"
@@ -195,10 +202,13 @@ internal fun draggedItemsLabel(count: Int): String = "$count 件の項目"
 internal fun deleteFolderConfirmation(name: String): String =
     "「$name」と、その中のフォルダと項目をすべて削除します。この操作は元に戻せません。"
 
-/** データを変える操作の結果を、利用者に見せる文にする。書けて、伝えることが無ければ null。 */
+/**
+ * データを変える操作の結果を、利用者に見せる文にする。書けて、伝えることが無ければ null。
+ * 以前の状態に戻せたときも null（お知らせの [restoredNotice] で伝える）。
+ */
 internal fun describeWriteOutcome(outcome: WriteOutcome): UiMessage? =
     when (outcome) {
-        WriteOutcome.Written -> null
+        WriteOutcome.Written, is WriteOutcome.Restored -> null
         is WriteOutcome.NotApplied -> UiMessage("対象が見つからなかったため、一部の変更を反映できませんでした。")
         is WriteOutcome.Unconfirmed ->
             UiMessage("変更を保存できたかどうかを確認できませんでした。再読み込みして確認してください。")
@@ -235,6 +245,97 @@ internal fun describeSyncFailure(failure: SyncFailure): UiMessage =
             UiMessage("S3 が混み合っているため、処理を終えられませんでした。しばらくしてからやり直してください。")
         is SyncFailure.Other -> UiMessage("S3 とのやり取りでエラーが起きました。", failure.detail)
     }
+
+/** 設定の画面の、以前の状態に戻す画面を開くボタンと、その画面の題。 */
+internal const val REVISIONS_TITLE = "以前の状態に戻す"
+
+/** 設定の画面の、以前の状態に戻す画面を開くボタンの下に添える説明。 */
+internal const val REVISIONS_DESCRIPTION = "保存先のデータを、過去のある時点の状態に戻します。"
+
+/** 以前の状態に戻す画面で、戻せる時点が無いことを伝える文。 */
+internal const val NO_REVISIONS_NOTICE = "戻せる以前の状態がありません。"
+
+/** 以前の状態に戻す確認の題。 */
+internal const val RESTORE_CONFIRMATION_TITLE = "この時点の状態に戻しますか？"
+
+/** 以前の状態に戻す確認の、確定のボタン。 */
+internal const val RESTORE_LABEL = "戻す"
+
+/** 以前の状態に戻している最中であることを伝える文。 */
+internal const val RESTORING_NOTICE = "以前の状態に戻しています…"
+
+/** 戻せる時点の一覧を読めなかったことを伝える文。S3 の失敗の文を次の行に続ける。 */
+private const val REVISION_LIST_FAILED_NOTICE = "以前の状態の一覧を読み込めませんでした。"
+
+/** 選んだ時点のデータを読めなかったことを伝える文。S3 の失敗の文を次の行に続ける。 */
+private const val REVISION_READ_FAILED_NOTICE = "この時点のデータを読み込めませんでした。"
+
+/** 以前の状態に戻せなかったことを伝える文。S3 の失敗の文を次の行に続ける。 */
+private const val RESTORE_FAILED_NOTICE = "以前の状態に戻せませんでした。"
+
+private const val REVISION_INCOMPLETE_NOTICE = "この時点のデータの一部が残っていないため、戻せません。"
+private const val REVISION_UPDATE_REQUIRED_NOTICE = "この時点のデータは形式が新しいため、戻せません。アプリを更新してください。"
+private const val REVISION_CORRUPT_NOTICE = "この時点のデータが壊れているため、戻せません。"
+
+private val REVISION_TIME_FORMAT = LocalDateTime.Format {
+    year()
+    char('/')
+    monthNumber()
+    char('/')
+    day()
+    char(' ')
+    hour()
+    char(':')
+    minute()
+}
+
+/** 戻せる時点の日時の表記。[timeZone] のローカル時刻の `YYYY/MM/DD HH:mm`（例：`2026/11/17 14:08`）。月・日・時・分は 2 桁。 */
+internal fun formatRevisionTime(time: Instant, timeZone: TimeZone = TimeZone.currentSystemDefault()): String =
+    REVISION_TIME_FORMAT.format(time.toLocalDateTime(timeZone))
+
+/** 戻せる時点の一覧を読めなかった失敗を、利用者に見せる文にする。 */
+internal fun describeRevisionListFailure(failure: SyncFailure): UiMessage =
+    describeSyncFailure(failure).let { message -> message.copy(text = "$REVISION_LIST_FAILED_NOTICE\n${message.text}") }
+
+/** 選んだ時点のデータを読めなかった失敗を、利用者に見せる文にする。 */
+internal fun describeRevisionReadFailure(failure: RevisionFailure): UiMessage =
+    describeRevisionFailure(failure, REVISION_READ_FAILED_NOTICE)
+
+/** 以前の状態に戻せなかった失敗を、利用者に見せる文にする。 */
+internal fun describeRestoreFailure(failure: RevisionFailure): UiMessage =
+    describeRevisionFailure(failure, RESTORE_FAILED_NOTICE)
+
+private fun describeRevisionFailure(failure: RevisionFailure, syncFailureHeading: String): UiMessage =
+    when (failure) {
+        is RevisionFailure.Sync ->
+            describeSyncFailure(failure.failure).let { message ->
+                message.copy(text = "$syncFailureHeading\n${message.text}")
+            }
+        RevisionFailure.Incomplete -> UiMessage(REVISION_INCOMPLETE_NOTICE)
+        RevisionFailure.UpdateRequired -> UiMessage(REVISION_UPDATE_REQUIRED_NOTICE)
+        is RevisionFailure.Corrupt -> UiMessage(REVISION_CORRUPT_NOTICE, failure.problem.toString())
+    }
+
+/** 以前の状態に戻す確認の本文。[time] は戻す時点の日時（[formatRevisionTime]）。 */
+internal fun restoreConfirmation(time: String): String = "$time の状態に戻します。それより後の変更は、すべて取り消されます。"
+
+/** 以前の状態に戻す確認の、戻す時点のフォルダと項目の数の行。 */
+internal fun revisionCountsLine(counts: ManifestCounts): String = "この時点：フォルダ ${counts.folders} 個、項目 ${counts.items} 件"
+
+/** 以前の状態に戻す確認の、いまのフォルダと項目の数の行。 */
+internal fun currentCountsLine(counts: ManifestCounts): String = "現在：フォルダ ${counts.folders} 個、項目 ${counts.items} 件"
+
+/** 以前の状態に戻す確認の、その時点のデータを保存したアプリの行。[updatedBy] が `android`・`desktop`・`host` のどれでもなければ null。 */
+internal fun savedByLine(updatedBy: String): String? =
+    when (updatedBy) {
+        "android" -> "保存したアプリ：Android 版"
+        "desktop" -> "保存したアプリ：デスクトップ版"
+        "host" -> "保存したアプリ：ブラウザの拡張機能"
+        else -> null
+    }
+
+/** 以前の状態に戻せたことのお知らせ。[time] は戻した時点の日時（[formatRevisionTime]）。 */
+internal fun restoredNotice(time: String): String = "$time の状態に戻しました。"
 
 /** 項目ファイルが壊れているフォルダを、利用者に見せる文にする。 */
 internal fun describeBrokenFolder(problem: StorageProblem): UiMessage =

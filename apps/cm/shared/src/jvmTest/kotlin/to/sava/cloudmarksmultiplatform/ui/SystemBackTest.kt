@@ -1,9 +1,12 @@
 package to.sava.cloudmarksmultiplatform.ui
 
 import to.sava.cloudmarksmultiplatform.app.AppState
+import to.sava.cloudmarksmultiplatform.app.RevisionListState
+import to.sava.cloudmarksmultiplatform.app.RevisionsScreenState
 import to.sava.cloudmarksmultiplatform.app.Screen
 import to.sava.cloudmarksmultiplatform.app.SettingsScreenState
 import to.sava.cloudmarksmultiplatform.app.SettingsStatus
+import to.sava.cloudmarksmultiplatform.app.WriteState
 import to.sava.cloudmarksmultiplatform.browse.BrowseState
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -86,6 +89,28 @@ class SystemBackTest {
             SettingsScreenState(canReturn = true, status = SettingsStatus.CreatingManifest),
         )
         cases.forEach { settings -> assertNull(systemBackOf(settingsWith(settings)), "$settings") }
+    }
+
+    // 以前の状態に戻す画面では、メインの画面の側の選んでいる項目とドロワーによらず、戻している最中でなければ戻り、設定の画面へ戻って
+    // その画面の状態を初めの値にする。戻している最中は、戻る操作を受けない
+    @Test
+    fun revisionsScreenGoesBackToSettingsUnlessRestoring() {
+        val revisions = AppState(
+            screen = Screen.REVISIONS,
+            settings = SettingsScreenState(canReturn = true),
+            browse = BrowseState(selectedItemIds = setOf(SELECTED_ITEM), drawerOpen = true, history = listOf(PREVIOUS_FOLDER)),
+            revisions = RevisionsScreenState(list = RevisionListState.Listed(emptyList())),
+        )
+        assertEquals(SystemBack.BACK, systemBackOf(revisions))
+        val back = revisions.back()
+        assertEquals(Screen.SETTINGS, back.screen)
+        assertEquals(RevisionsScreenState(), back.revisions)
+        assertEquals(revisions.browse, back.browse)
+
+        val restoring = revisions.copy(write = WriteState(writing = true))
+        assertFalse(restoring.canGoBack)
+        assertNull(systemBackOf(restoring))
+        assertEquals(restoring, restoring.back())
     }
 
     // 起動して設定を読んでいるあいだは、戻る操作を受けない

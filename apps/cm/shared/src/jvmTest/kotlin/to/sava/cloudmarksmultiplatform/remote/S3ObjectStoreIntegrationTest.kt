@@ -17,6 +17,9 @@ private const val GZIP_CONTENT_TYPE = "application/gzip"
 /** 一覧のページングのテストで、1 ページに入れるキーの数の上限。これより多いキーを書いて、複数のページを通す。 */
 private const val PAGE_SIZE = 2
 
+/** バージョニングを有効にしていないバケットのオブジェクトの versionId。 */
+private const val NULL_VERSION_ID = "null"
+
 /**
  * 実際の S3 で、[S3ObjectStore] の条件付きの読み書きと、一覧・DELETE の応答が期待どおりの結果に対応づけられることを確かめる。
  *
@@ -25,7 +28,8 @@ private const val PAGE_SIZE = 2
  * - `AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY`
  *
  * テストは、書いたキーを終わりに自分で消す（DELETE の結果は見ない）。権限に `s3:PutObject`、`s3:GetObject`、
- * `s3:ListBucket`、`s3:DeleteObject` が要る。
+ * `s3:ListBucket`、`s3:DeleteObject` が要る。バージョンを確かめるテストは、さらに `s3:ListBucketVersions` と
+ * `s3:GetObjectVersion` が要る。
  * 観察した結果（ETag の形、無いキーの GET の結果など）は標準出力へ出す。認証情報は出さない。
  */
 class S3ObjectStoreIntegrationTest {
@@ -139,6 +143,71 @@ class S3ObjectStoreIntegrationTest {
                 assertEquals(DeleteObjectResult.Success, deletedAgain)
             } finally {
                 keys.forEach { store.delete(it) }
+            }
+        }
+    }
+
+    /**
+     * バージョンの一覧と、バージョンを指定した GET：同じキーを 3 回 PUT し、DELETE して削除マーカーを付け、
+     * 1 ページ 2 エントリまでで読む（バージョン 3 つと削除マーカー 1 つが 2 ページ以上に分かれる）。
+     * プレフィックスだけが一致する別のキーのバージョンは含まれない。
+     * いまのバージョンは削除マーカーだけで、バージョンと削除マーカーが分かれて返り、古いバージョンの中身を取れる。
+     *
+     * バージョニングを有効にしていない（無効、または一時停止の）バケットでは、いまのオブジェクトだけが versionId `"null"` で
+     * 返り、それを読めることを確かめて、あとは飛ばす。権限に `s3:ListBucketVersions` と `s3:GetObjectVersion` も要る。
+     * このテストは古いバージョンを消せない（`s3:DeleteObjectVersion` を使わない）ので、テストごとに別のキーに書き、
+     * 書いたバージョンはバケットのライフサイクルに任せて消す。
+     */
+    @Test
+    fun versionsMapToExpectedResults() = runTest {
+        assumeEnvironment()
+        newStore(maxKeys = PAGE_SIZE).use { store ->
+            val key = "${store.prefix}/it-versions-${newId()}.jsonl.gz"
+            val siblingKey = "$key.sibling"
+            val bodies = (1..3).map { byteArrayOf(it.toByte()) }
+            try {
+                var eTag: String? = null
+                bodies.forEach { body ->
+                    val condition = eTag?.let { PutCondition.IfMatch(it) } ?: PutCondition.IfNoneMatchAny
+                    eTag = assertIs<PutObjectResult.Success>(store.put(key, body, GZIP_CONTENT_TYPE, condition)).eTag
+                }
+                assertIs<PutObjectResult.Success>(store.put(siblingKey, byteArrayOf(9), GZIP_CONTENT_TYPE, PutCondition.IfNoneMatchAny))
+
+                val beforeDelete = assertIs<ListVersionsResult.Listed>(store.listVersions(key)).versions
+                if (beforeDelete.any { it.versionId == NULL_VERSION_ID }) {
+                    val only = beforeDelete.single()
+                    println("LIST VERSIONS (versioning not enabled) -> $only")
+                    assertTrue(only.isLatest && !only.isDeleteMarker, "バージョニングが有効でないバケットでは、いまのオブジェクトだけが返る: $only")
+                    assertContentEquals(bodies.last(), assertIs<GetObjectResult.Found>(store.getVersion(key, NULL_VERSION_ID)).body)
+                }
+                assumeTrue("バージョニングを有効にしたバケットでだけ確かめる", beforeDelete.none { it.versionId == NULL_VERSION_ID })
+                assertEquals(bodies.size, beforeDelete.size)
+                assertTrue(beforeDelete.none { it.isDeleteMarker }, "DELETE の前は削除マーカーが無い")
+                assertEquals(DeleteObjectResult.Success, store.delete(key))
+
+                val listed = store.listVersions(key)
+                println("LIST VERSIONS -> ${(listed as? ListVersionsResult.Listed)?.let { "Listed ${it.versions.size} entries" } ?: listed}")
+                val versions = assertIs<ListVersionsResult.Listed>(listed).versions
+                assertEquals(bodies.size + 1, versions.size)
+                assertEquals(versions.size, versions.map { it.versionId }.distinct().size)
+                assertEquals(listOf(true), versions.filter { it.isDeleteMarker }.map { it.isLatest })
+                assertEquals(1, versions.count { it.isLatest })
+
+                val bodiesNewestFirst = versions.filterNot { it.isDeleteMarker }.map { version ->
+                    assertIs<GetObjectResult.Found>(store.getVersion(key, version.versionId)).body.toList()
+                }
+                assertEquals(bodies.reversed().map { it.toList() }, bodiesNewestFirst)
+
+                val marker = versions.single { it.isDeleteMarker }
+                val markerGet = store.getVersion(key, marker.versionId)
+                println("GET (delete marker version) -> $markerGet")
+                assertIs<GetObjectResult.Failed>(markerGet)
+
+                val siblingGet = store.getVersion(siblingKey, versions.last { !it.isDeleteMarker }.versionId)
+                println("GET (version of another key) -> $siblingGet")
+                assertEquals(GetObjectResult.NotFound, siblingGet)
+            } finally {
+                listOf(key, siblingKey).forEach { store.delete(it) }
             }
         }
     }

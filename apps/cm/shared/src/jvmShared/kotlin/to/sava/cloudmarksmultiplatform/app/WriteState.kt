@@ -6,6 +6,7 @@ import to.sava.cloudmarksmultiplatform.operations.OperationResult
 import to.sava.cloudmarksmultiplatform.storage.Item
 import to.sava.cloudmarksmultiplatform.sync.SyncFailure
 import to.sava.cloudmarksmultiplatform.sync.WriteResult
+import kotlin.time.Instant
 
 /**
  * データを変える操作の、書き込みの進み具合と結果。
@@ -40,6 +41,9 @@ sealed interface WriteOutcome {
 
     /** 書けなかった。ツリーは書く前のまま。 */
     data class Failed(val failure: SyncFailure) : WriteOutcome
+
+    /** 以前の状態に戻せた。[lastModified] は、戻した時点のマニフェストのバージョンの `LastModified`。 */
+    data class Restored(val lastModified: Instant) : WriteOutcome
 }
 
 /**

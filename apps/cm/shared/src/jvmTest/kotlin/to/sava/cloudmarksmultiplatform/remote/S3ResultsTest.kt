@@ -57,6 +57,34 @@ class S3ResultsTest {
         listOf(301, 400, 404).forEach { status -> assertIs<ListObjectsResult.Failed>(listResultOf(s3Exception(status)), "$status") }
     }
 
+    // バージョンの一覧：403 は権限が無い、5xx は結果が不明、そのほか（無いバケットの 404 を含む）は失敗
+    @Test
+    fun mapsListVersionsStatuses() {
+        assertEquals(ListVersionsResult.Forbidden, listVersionsResultOf(s3Exception(403, "AccessDenied")))
+        listOf(500, 503).forEach { status -> assertIs<ListVersionsResult.Unknown>(listVersionsResultOf(s3Exception(status)), "$status") }
+        listOf(301, 400, 404).forEach { status -> assertIs<ListVersionsResult.Failed>(listVersionsResultOf(s3Exception(status)), "$status") }
+    }
+
+    // バージョンの一覧：応答を受けていない失敗と、エラーコードが RequestTimeout の 400 は結果が不明。種類を知らない SDK の失敗は失敗
+    @Test
+    fun listVersionsFailuresWithoutStatus() {
+        listOf(
+            HttpException("connect timeout", HttpErrorCode.CONNECT_TIMEOUT, true),
+            CallTimeoutException("call timeout", RuntimeException("cause")),
+            S3Exception("no response"),
+            s3Exception(400, "RequestTimeout"),
+        ).forEach { e -> assertIs<ListVersionsResult.Unknown>(listVersionsResultOf(e), e.toString()) }
+        listOf(ClientException("client failure"), SdkBaseException("unclassified failure")).forEach { e ->
+            assertIs<ListVersionsResult.Failed>(listVersionsResultOf(e), e.toString())
+        }
+    }
+
+    // バージョンの GET：削除マーカーのバージョンへの GET が返す 405 は失敗（GET と同じ振り分け）
+    @Test
+    fun deleteMarkerVersionGetIsFailed() {
+        assertIs<GetObjectResult.Failed>(getResultOf(s3Exception(405, "MethodNotAllowed")))
+    }
+
     // DELETE：403 は権限が無い、5xx は結果が不明、そのほかは失敗
     @Test
     fun mapsDeleteStatuses() {

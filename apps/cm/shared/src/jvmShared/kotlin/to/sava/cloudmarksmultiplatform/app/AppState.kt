@@ -9,6 +9,9 @@ import to.sava.cloudmarksmultiplatform.settings.SettingsForm
 import to.sava.cloudmarksmultiplatform.settings.SettingsReadResult
 import to.sava.cloudmarksmultiplatform.settings.TabLoading
 import to.sava.cloudmarksmultiplatform.storage.StorageProblem
+import to.sava.cloudmarksmultiplatform.sync.LoadedRevision
+import to.sava.cloudmarksmultiplatform.sync.Revision
+import to.sava.cloudmarksmultiplatform.sync.RevisionFailure
 import to.sava.cloudmarksmultiplatform.sync.SyncFailure
 
 /** 出す画面。 */
@@ -21,7 +24,56 @@ enum class Screen {
 
     /** 設定の画面。メインの画面の場所に出す。 */
     SETTINGS,
+
+    /** 以前の状態に戻す画面。設定の画面から開き、メインの画面の場所に出す。 */
+    REVISIONS,
 }
+
+/** 以前の状態に戻す画面の、戻せる時点の一覧。 */
+sealed interface RevisionListState {
+    /** 一覧を読んでいる。 */
+    data object Loading : RevisionListState
+
+    /** 読めた。[revisions] は `LastModified` の新しい順。 */
+    data class Listed(val revisions: List<Revision>) : RevisionListState
+
+    /** 読めなかった。 */
+    data class Failed(val failure: SyncFailure) : RevisionListState
+}
+
+/** 以前の状態に戻す画面で選んだ時点の、読み込みと戻すことの進み具合。 */
+sealed interface RevisionSelection {
+    /** 選んだ時点 [revision] のマニフェストを読んでいる。 */
+    data class Loading(val revision: Revision) : RevisionSelection
+
+    /** 読んだ時点 [loaded] へ戻すかを確かめている。 */
+    data class Confirming(val loaded: LoadedRevision) : RevisionSelection
+
+    /** 読んだ時点 [loaded] へ戻している。 */
+    data class Restoring(val loaded: LoadedRevision) : RevisionSelection
+}
+
+/** 以前の状態に戻す画面で、利用者に伝えること。 */
+sealed interface RevisionNotice {
+    /** 選んだ時点のマニフェストを読めなかった。 */
+    data class ReadFailed(val failure: RevisionFailure) : RevisionNotice
+
+    /** 選んだ時点へ戻せなかった。 */
+    data class RestoreFailed(val failure: RevisionFailure) : RevisionNotice
+}
+
+/**
+ * 以前の状態に戻す画面の状態。画面を開くたびに、初めの値から始める。
+ *
+ * @property list 戻せる時点の一覧
+ * @property selection 選んだ時点の読み込みと戻すことの進み具合。選んでいなければ null
+ * @property notice 利用者に伝えること。無いか、閉じたか、次の時点を選んだら null
+ */
+data class RevisionsScreenState(
+    val list: RevisionListState = RevisionListState.Loading,
+    val selection: RevisionSelection? = null,
+    val notice: RevisionNotice? = null,
+)
 
 /** 設定の画面の、保存の進み具合と結果。 */
 sealed interface SettingsStatus {
@@ -97,7 +149,8 @@ sealed interface BrowserNotice {
 /**
  * 画面全体の状態。
  *
- * @property write データを変える操作の、書き込みの進み具合と結果
+ * @property write データを変える操作の、書き込みの進み具合と結果。以前の状態に戻すことも、データを変える操作と同じく扱う
+ * @property revisions 以前の状態に戻す画面の状態。その画面を出していないあいだは、初めの値
  * @property displayScale 画面全体の表示の大きさ。端末ごとの設定で、どの画面でも同じ
  * @property tabLoading 2 つ以上の項目をまとめてブラウザで開くときの、タブの読み込み方。端末ごとの設定
  * @property opensMultipleItems 2 つ以上の項目をまとめてブラウザで開けるプラットフォームか。偽なら、[tabLoading] の欄を出さない
@@ -114,6 +167,7 @@ data class AppState(
     val browse: BrowseState = BrowseState(),
     val settings: SettingsScreenState = SettingsScreenState(),
     val write: WriteState = WriteState(),
+    val revisions: RevisionsScreenState = RevisionsScreenState(),
     val displayScale: DisplayScale = DisplayScale.DEFAULT,
     val tabLoading: TabLoading = TabLoading(),
     val opensMultipleItems: Boolean = false,
@@ -127,14 +181,22 @@ data class AppState(
 
     /**
      * 戻る操作でできることがあるか。設定の画面では、メインの画面へ戻れて、保存の最中でないとき。
-     * メインの画面では、[BrowseState.canGoBack]。
+     * 以前の状態に戻す画面では、戻している最中でないとき。メインの画面では、[BrowseState.canGoBack]。
      */
     val canGoBack: Boolean
         get() = when (screen) {
             Screen.STARTING -> false
             Screen.MAIN -> browse.canGoBack
             Screen.SETTINGS -> settings.canReturn && !settings.status.busy
+            Screen.REVISIONS -> !write.writing
         }
+
+    /**
+     * 以前の状態に戻すことを受け付けるか。読み書きできるツリーがあり、マニフェストを読んでいる最中でも、操作を書いている最中
+     * （戻している最中を含む）でも、設定の保存の最中でもないとき。以前の状態に戻す画面を開くときと、戻すと決めたときに確かめる。
+     */
+    val canRestore: Boolean
+        get() = browse.tree != null && !browse.readOnly && !browse.loading && !write.writing && !settings.status.busy
 
     /** S3 から読み直せるか。メインの画面で、マニフェストを読んでいる最中でも、操作を書いている最中でもないとき。 */
     val canReload: Boolean get() = screen == Screen.MAIN && !browse.loading && !write.writing
@@ -149,13 +211,15 @@ data class AppState(
     /**
      * 戻る。Android の戻る操作と画面の戻るボタンが呼ぶ。
      *
-     * 設定の画面ならメインの画面へ戻る。メインの画面なら [BrowseState.back]（ドロワーが開いていれば閉じ、
-     * そうでなければ開いたフォルダの履歴を戻る）。できることが無ければ何もしない。
+     * 設定の画面ならメインの画面へ戻る。以前の状態に戻す画面なら設定の画面へ戻り、その画面の状態を初めの値にする。
+     * メインの画面なら [BrowseState.back]（ドロワーが開いていれば閉じ、そうでなければ開いたフォルダの履歴を戻る）。
+     * できることが無ければ何もしない。
      */
     fun back(): AppState =
         when {
             !canGoBack -> this
             screen == Screen.SETTINGS -> copy(screen = Screen.MAIN)
+            screen == Screen.REVISIONS -> copy(screen = Screen.SETTINGS, revisions = RevisionsScreenState())
             else -> copy(browse = browse.back())
         }
 }

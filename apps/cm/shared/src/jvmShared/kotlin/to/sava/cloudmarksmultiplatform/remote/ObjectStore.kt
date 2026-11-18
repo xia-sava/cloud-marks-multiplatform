@@ -19,6 +19,14 @@ interface ObjectStore {
      */
     suspend fun get(key: String, ifNoneMatch: String? = null): GetObjectResult
 
+    /**
+     * [key] のバージョン [versionId] を GET する。条件は付けない。
+     *
+     * 結果は [get] と同じ型で、[GetObjectResult.NotModified] にはならない。無いバージョンは [GetObjectResult.NotFound]。
+     * 削除マーカーのバージョンは、S3 が `405` を返すので [GetObjectResult.Failed]。
+     */
+    suspend fun getVersion(key: String, versionId: String): GetObjectResult
+
     /** [key] へ [body] を、`Content-Type` を [contentType] にし、[condition] を付けて PUT する。`Content-Encoding` は付けない。 */
     suspend fun put(key: String, body: ByteArray, contentType: String, condition: PutCondition): PutObjectResult
 
@@ -28,6 +36,13 @@ interface ObjectStore {
      * 返す時刻は、一覧の応答の `Date`。端末の時計は使わない。
      */
     suspend fun list(keyPrefix: String): ListObjectsResult
+
+    /**
+     * キーが [key] に厳密に一致するオブジェクトのバージョンと削除マーカーを、ListObjectVersions で最後のページまで読んで返す。
+     *
+     * バージョニングを有効にしていないバケットでは、いまのオブジェクトだけが versionId `"null"` で返る。
+     */
+    suspend fun listVersions(key: String): ListVersionsResult
 
     /**
      * [key] を、条件を付けずに DELETE する。無いキーの削除は成功とする（S3 は `204` を返す）。
@@ -123,6 +138,38 @@ sealed interface ListObjectsResult {
 
     /** そのほかの失敗。 */
     data class Failed(val detail: String) : ListObjectsResult
+}
+
+/**
+ * 一覧に出たオブジェクトのバージョン、または削除マーカー。
+ *
+ * @property versionId バージョニングを有効にしていないバケットのオブジェクトでは `"null"`
+ * @property isLatest いまのバージョン（そのキーの最新のもの）か
+ * @property isDeleteMarker 削除マーカーか。真なら、このバージョンは [ObjectStore.getVersion] で読めない
+ */
+data class ListedVersion(val versionId: String, val lastModified: Instant, val isLatest: Boolean, val isDeleteMarker: Boolean)
+
+/**
+ * バージョンの一覧の結果。
+ *
+ * 失敗の `detail` は後から調べるための短い文で、秘密情報を含まない。
+ */
+sealed interface ListVersionsResult {
+    /**
+     * 最後のページまで読めた。
+     *
+     * @property versions バージョン・削除マーカーそれぞれの中では S3 の返した順（新しい順）。両者のあいだの順は決めない
+     */
+    data class Listed(val versions: List<ListedVersion>) : ListVersionsResult
+
+    /** 権限が無い（`403`）。 */
+    data object Forbidden : ListVersionsResult
+
+    /** 結果が不明。通信の失敗、タイムアウト、`5xx`（`503 SlowDown` を含む）。 */
+    data class Unknown(val detail: String) : ListVersionsResult
+
+    /** そのほかの失敗。 */
+    data class Failed(val detail: String) : ListVersionsResult
 }
 
 /**

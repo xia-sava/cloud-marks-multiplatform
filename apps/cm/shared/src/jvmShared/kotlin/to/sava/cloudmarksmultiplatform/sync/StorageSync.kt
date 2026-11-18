@@ -20,9 +20,9 @@ import kotlin.time.Duration
 import kotlin.time.TimeSource
 
 /**
- * S3 上のデータを読み、操作を書き込み、マニフェストを新しく作る。
+ * S3 上のデータを読み、操作を書き込み、マニフェストを新しく作り、マニフェストの古いバージョンの時点の状態へ戻す。
  *
- * 手順は `docs/storage-format.md` の「書き込みの手順」「キャッシュ」「マニフェストを新しく作る」のとおり。
+ * 手順は `docs/storage-format.md` の「書き込みの手順」「キャッシュ」「マニフェストを新しく作る」「以前の状態に戻す」のとおり。
  *
  * @param updatedBy 書き込むマニフェストのヘッダーの `updatedBy`。`"android"`・`"desktop"`・`"host"` のどれか
  * @param timeSource 書き込みの手順 3 から手順 4 までの経過を測るモノトニッククロック。Android は端末の休止中も進む時計
@@ -39,6 +39,7 @@ class StorageSync(
     private val wait: suspend (Duration) -> Unit = { delay(it) },
 ) {
     private val reader = TreeReader(store, cache)
+    private val revisionReader = RevisionReader(store)
 
     /**
      * マニフェストを読み、[foldersToLoad] が返すフォルダの項目を読む。
@@ -112,6 +113,40 @@ class StorageSync(
      * 1 つの削除が失敗しても、残りは続ける。
      */
     suspend fun deleteStaleFiles(): DeleteStaleFilesResult = StaleFileDeleter(store, reader).delete()
+
+    /**
+     * 戻せる時点（マニフェストの古いバージョン）の一覧を返す。
+     *
+     * マニフェストのキーのバージョンを ListObjectVersions で最後のページまで読み、削除マーカーといまのバージョンを除いて、
+     * `LastModified` の新しい順に並べる。`LastModified` が同じものは S3 の返した順のまま。
+     * バージョニングを有効にしていないバケットでは空になる。ローカルキャッシュは使わない。
+     */
+    suspend fun listRevisions(): RevisionListResult = revisionReader.list()
+
+    /**
+     * 戻せる時点 [revision] のマニフェストを、そのバージョンの GET で読んで検証する。ローカルキャッシュは使わず、替えない。
+     *
+     * 版が知っているものより新しければ（読むだけにするものを含む）[RevisionFailure.UpdateRequired]、壊れていれば
+     * [RevisionFailure.Corrupt]、そのバージョンがもう無ければ [RevisionFailure.Incomplete] で返す。
+     */
+    suspend fun readRevision(revision: Revision): RevisionReadResult = revisionReader.read(revision)
+
+    /**
+     * いまのマニフェストを、読んである時点 [revision] の状態へ戻す。書き込みの手順で 1 回の書き込みとして書く。
+     *
+     * フォルダの並びは [revision] のものにする。いまのマニフェストが同じフォルダに同じ項目ファイルを指しているフォルダは、
+     * そのファイルをそのまま指す。そうでないフォルダは、[revision] が指す項目ファイルの中身を得て検証し、新しいファイルの ID で置く。
+     * 中身は GET で得て、`404` か `403` なら、そのキーの削除マーカーでないバージョンのうち `LastModified` が最も新しいものから得る。
+     * そのバージョンが無ければ、`404` のときは [RevisionFailure.Incomplete]、`403` のときは [SyncFailure.Forbidden] の失敗にする。
+     * 中身が壊れていれば [RevisionFailure.Corrupt] にする。中身をすべて得てから PUT するので、得られなければ何も PUT しない。
+     * ヘッダーの `version` と `readableBy` は [revision] のもの。いまの状態が [revision] と同じなら PUT しない。
+     *
+     * 再適用では、読み直したいまのマニフェストと比べ直す。得た中身は覚えておき、取り直さない。
+     * いまのマニフェストが読み書きできるものでないとき、マニフェストが無いときは書かない。
+     * 削除マーカーは外さず、何も消さない。[RestoreResult.Unconfirmed] でも、[writeConfirming] のように書き直さない。
+     */
+    suspend fun restoreRevision(revision: LoadedRevision): RestoreResult =
+        RevisionRestorer(store, cache, reader, revision, updatedBy, clock, timeSource, wait).restore()
 
     /**
      * マニフェストを新しく作る。利用者が明示したとき（初期設定、既存の cloud-marks からの移行）だけ呼ぶ。

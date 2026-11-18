@@ -665,8 +665,9 @@ private fun ScrollableLine(text: String, style: TextStyle, modifier: Modifier, c
     )
 }
 
+/** リストの、読み込み中のほか（壊れている・空・読めなかったなど）を見せる文。フォルダのリストと、戻せる時点の一覧が使う。 */
 @Composable
-private fun StatusText(message: UiMessage) {
+internal fun StatusText(message: UiMessage) {
     MessageText(
         message = message,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
