@@ -12,8 +12,6 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.doubleClick
-import androidx.compose.ui.test.hasSetTextAction
-import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -90,10 +88,6 @@ private fun ComposeUiTest.openInRowWeight(browser: Browser): FontWeight? {
         ?.invoke(results)
     return results.single().layoutInput.style.fontWeight
 }
-
-/** 設定の画面の、題が [label] の入力欄。 */
-@OptIn(ExperimentalTestApi::class)
-private fun ComposeUiTest.settingsField(label: String): SemanticsNodeInteraction = onNode(hasSetTextAction() and hasText(label))
 
 @OptIn(ExperimentalTestApi::class)
 class OpenInBrowserScreenTest {

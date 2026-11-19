@@ -2,13 +2,10 @@ package to.sava.cloudmarksmultiplatform.ui
 
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
-import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -19,7 +16,6 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
-import androidx.compose.ui.unit.IntSize
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
 import to.sava.cloudmarksmultiplatform.settings.SettingsForm
@@ -39,15 +35,8 @@ private const val SECRET_FIELD_LABEL = "シークレットアクセスキー"
 /** 改行の後ろに続ける文字。罫線のように、貼り付けたときに付いてくるもの。 */
 private const val AFTER_LINE_BREAK = "─────"
 
-/** 設定の画面が収まらない、低い窓の大きさ。幅は、入力欄を並べる幅の上限より広い。 */
-private val SHORT_WINDOW = IntSize(1024, 400)
-
 /** マウスで押す位置の、窓の右端からの距離（画素）。デスクトップのスクロールバー（幅 8 画素）の上。 */
 private const val SCROLLBAR_INSET = 4f
-
-/** 設定の画面の、題が [label] の入力欄。 */
-@OptIn(ExperimentalTestApi::class)
-private fun ComposeUiTest.settingsField(label: String): SemanticsNodeInteraction = onNode(hasSetTextAction() and hasText(label))
 
 /** 欄 [label] に入れる値。欄ごとに違う。 */
 private fun valueFor(label: String): String = "value-${(PLAIN_FIELD_LABELS + SECRET_FIELD_LABEL).indexOf(label)}"

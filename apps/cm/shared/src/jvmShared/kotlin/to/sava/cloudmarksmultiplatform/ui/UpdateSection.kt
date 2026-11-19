@@ -1,19 +1,28 @@
 package to.sava.cloudmarksmultiplatform.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import to.sava.cloudmarksmultiplatform.update.UpdateCheck
 import to.sava.cloudmarksmultiplatform.update.UpdateInstall
 import to.sava.cloudmarksmultiplatform.update.UpdateState
+import kotlin.reflect.KClass
 
 /**
  * 設定の画面の「アプリの更新」の節から、更新の操作（[to.sava.cloudmarksmultiplatform.update.AppUpdater]）へ渡す入口。
@@ -35,8 +44,8 @@ internal class UpdateActions(
 
 /**
  * 設定の画面の「アプリの更新」の節。見出し（[UPDATE_SECTION_TITLE]）、動いているアプリのバージョン、開発版ならダウンロードも
- * インストールもできないこと（[DEV_BUILD_UPDATE_NOTICE]）、更新を確認するボタン、確認の結果、ダウンロードからインストーラへ渡すまでの
- * 段階を、呼んだ側の並びにそのまま足す。
+ * インストールもできないこと（[DEV_BUILD_UPDATE_NOTICE]）、更新を確認するボタン、確認の結果とダウンロードからインストーラへ渡すまでの
+ * 段階（[UpdateCheckResultAndInstallStage]）を、呼んだ側の並びにそのまま足す。
  *
  * 確認するボタンは、確認を受け付けないあいだ（[UpdateState.canCheck]）は押せない。開発版でも押せて、結果も出す。
  * 新しいバージョンがあれば、ダウンロードのボタンを出す。ダウンロードからインストーラへ渡すまでの途中は出さず、開発版では押せない。
@@ -48,9 +57,44 @@ internal fun UpdateSection(update: UpdateState, actions: UpdateActions) {
     Text(currentVersionNotice(update.version.displayName), style = MaterialTheme.typography.bodyMedium)
     if (!update.version.distributed) UpdateNote(DEV_BUILD_UPDATE_NOTICE)
     Button(onClick = actions.onCheck, enabled = update.canCheck) { Text(CHECK_UPDATE_LABEL) }
-    UpdateCheckResult(update, actions)
-    update.install?.let { install -> UpdateInstallStage(install, distributed = update.version.distributed, actions) }
+    UpdateCheckResultAndInstallStage(update, actions)
 }
+
+/**
+ * 確認の結果と、ダウンロードからインストーラへ渡すまでの段階。出すものが無ければ（まだ確認していなければ）何も足さない。
+ *
+ * 出すものの種類（[shownKindsOf]）が替わったら、外側のスクロールする枠（設定の画面）をスクロールして、これを画面の中に入れる。
+ * すでに画面の中にあれば動かさない。設定の画面を開いたときの状態では動かさず、そこから替わったときだけ動かす。節の状態が替わるのは、
+ * 利用者がこの節で押した操作の続きだけで、起動したときに確かめることはない（[to.sava.cloudmarksmultiplatform.update.AppUpdater]）。
+ * ダウンロードの進み具合が進んだだけでは動かさないので、ダウンロードの最中に利用者がスクロールしても、引き戻さない。
+ */
+@Composable
+private fun UpdateCheckResultAndInstallStage(update: UpdateState, actions: UpdateActions) {
+    val requester = remember { BringIntoViewRequester() }
+    val kinds = shownKindsOf(update)
+    var shownKinds by remember { mutableStateOf(kinds) }
+    LaunchedEffect(kinds) {
+        if (kinds != shownKinds) {
+            shownKinds = kinds
+            requester.bringIntoView()
+        }
+    }
+    if (update.check == UpdateCheck.NotChecked && update.install == null) return
+    Column(
+        modifier = Modifier.fillMaxWidth().bringIntoViewRequester(requester),
+        verticalArrangement = Arrangement.spacedBy(SETTINGS_SPACING),
+    ) {
+        UpdateCheckResult(update, actions)
+        update.install?.let { install -> UpdateInstallStage(install, distributed = update.version.distributed, actions) }
+    }
+}
+
+/**
+ * 確認の結果と、ダウンロードからインストーラへ渡すまでの段階の、それぞれの種類。どちらかが替われば、節に出す文やボタンが替わる。
+ * ダウンロードの進み具合や、止まった理由では替わらない。
+ */
+private fun shownKindsOf(update: UpdateState): Pair<KClass<out UpdateCheck>, KClass<out UpdateInstall>?> =
+    update.check::class to update.install?.let { it::class }
 
 /** 更新を確認している最中か、確認の結果。新しいバージョンがあれば、ダウンロードのボタンを添える。 */
 @Composable

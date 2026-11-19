@@ -18,6 +18,8 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -167,6 +169,13 @@ internal fun ComposeUiTest.clickItemRowWithKey(n: Int, key: Key) {
 @OptIn(ExperimentalTestApi::class)
 internal fun ComposeUiTest.itemRowTop(n: Int): Float? =
     onAllNodesWithText(item(n).title).fetchSemanticsNodes().firstOrNull()?.boundsInRoot?.top
+
+/** 設定の画面が収まらない、低いウィンドウの大きさ（[runCloudMarksScreenTest] の containerSize）。幅は、入力欄を並べる幅の上限より広い。 */
+internal val SHORT_WINDOW = IntSize(1024, 400)
+
+/** 設定の画面の、題が [label] の入力欄。 */
+@OptIn(ExperimentalTestApi::class)
+internal fun ComposeUiTest.settingsField(label: String): SemanticsNodeInteraction = onNode(hasSetTextAction() and hasText(label))
 
 /** 長いリストの項目の数。項目の行は 40 画素ほどなので、テストの画面（高さ 768）に収まらない。 */
 private const val LONG_LIST_SIZE = 40

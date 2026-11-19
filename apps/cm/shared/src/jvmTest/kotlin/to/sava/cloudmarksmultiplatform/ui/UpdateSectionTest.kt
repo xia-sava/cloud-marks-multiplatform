@@ -1,5 +1,7 @@
 package to.sava.cloudmarksmultiplatform.ui
 
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
@@ -8,13 +10,17 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertRangeInfoEquals
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.height
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
 import to.sava.cloudmarksmultiplatform.sync.ROOT_ID
@@ -57,6 +63,27 @@ private val INSTALL_FAILURE_TEXTS = mapOf(
 @OptIn(ExperimentalTestApi::class)
 private fun ComposeUiTest.updateNode(text: String) = onNodeWithText(text).performScrollTo()
 
+/** 画面の大きさを比べるときに許す差（画素）。 */
+private const val BOUNDS_TOLERANCE = 0.5f
+
+/** 文が [text] の要素が、スクロールせずに、欠けずに画面に出ている。 */
+@OptIn(ExperimentalTestApi::class)
+private fun ComposeUiTest.assertFullyShown(text: String) {
+    val node = onNodeWithText(text).assertIsDisplayed()
+    // テストの画面の密度は 1 なので、dp と画素は同じ
+    val shownHeight = node.fetchSemanticsNode().boundsInRoot.height
+    val wholeHeight = node.getUnclippedBoundsInRoot().height.value
+    assertEquals(wholeHeight, shownHeight, BOUNDS_TOLERANCE, "「$text」の見えている高さ")
+}
+
+/** 設定の画面を、先頭の欄が見えるところまでスクロールし戻す。低いウィンドウでは「アプリの更新」の節は画面から外れる。 */
+@OptIn(ExperimentalTestApi::class)
+private fun ComposeUiTest.scrollSettingsToTop() {
+    settingsField("リージョン").performScrollTo()
+    waitForIdle()
+    onNodeWithText(UPDATE_SECTION_TITLE).assertIsNotDisplayed()
+}
+
 @OptIn(ExperimentalTestApi::class)
 class UpdateSectionTest {
     @get:Rule
@@ -64,19 +91,101 @@ class UpdateSectionTest {
 
     /**
      * 状態が [initial] の偽のアプリの更新と、更新をインストーラへ渡したあとに呼ぶ関数 [onReadyToExit] を渡して起動し、
-     * 設定の画面を開いてから [block] を走らせる。
+     * 設定の画面を開いてから [block] を走らせる。[containerSize] があれば、ウィンドウをその大きさにする。
      */
     private fun runUpdateSectionTest(
         initial: UpdateState,
         onReadyToExit: () -> Unit = {},
+        containerSize: State<IntSize>? = null,
         block: suspend ComposeUiTest.(FakeAppUpdater) -> Unit,
     ) {
         val updater = FakeAppUpdater(initial)
-        runCloudMarksScreenTest(temporaryFolder, updater = updater, onReadyToExit = onReadyToExit) {
+        runCloudMarksScreenTest(temporaryFolder, containerSize = containerSize, updater = updater, onReadyToExit = onReadyToExit) {
             onNodeWithContentDescription(SETTINGS_DESCRIPTION).performClick()
             waitForIdle()
             block(updater)
         }
+    }
+
+    /** 低いウィンドウ（[SHORT_WINDOW]）で、状態が [initial] の偽のアプリの更新を渡して起動し、設定の画面を開いてから [block] を走らせる。 */
+    private fun runShortWindowTest(initial: UpdateState, block: suspend ComposeUiTest.(FakeAppUpdater) -> Unit) =
+        runUpdateSectionTest(initial, containerSize = mutableStateOf(SHORT_WINDOW), block = block)
+
+    // 低いウィンドウで、確認して新しいバージョンがあると分かったら、そのことの文とダウンロードのボタンが見えるところまでスクロールする
+    @Test
+    fun availableUpdateIsScrolledIntoView() = runShortWindowTest(UpdateState(DISTRIBUTED)) { updater ->
+        onNodeWithText(CHECK_UPDATE_LABEL).assertIsNotDisplayed()
+
+        updater.state.value = UpdateState(DISTRIBUTED, check = AVAILABLE)
+        waitForIdle()
+
+        assertFullyShown("新しいバージョン 2.0.0 があります。")
+        assertFullyShown("ダウンロード")
+    }
+
+    // 確認の結果と、ダウンロードからインストーラへ渡すまでのどの段階でも、新しく出た文とボタンが見えるところまでスクロールする
+    @Test
+    fun eachStageIsScrolledIntoView() = runShortWindowTest(UpdateState(DISTRIBUTED)) { updater ->
+        val stages = listOf(
+            UpdateState(DISTRIBUTED, check = UpdateCheck.Checking) to listOf("確認しています…"),
+            UpdateState(DISTRIBUTED, check = UpdateCheck.UpToDate) to listOf("最新のバージョンです。"),
+            UpdateState(DISTRIBUTED, check = UpdateCheck.Failed(UpdateCheckFailure.UNREACHABLE)) to
+                listOf("更新情報を取得できませんでした。"),
+            UpdateState(DISTRIBUTED, check = AVAILABLE) to listOf("新しいバージョン 2.0.0 があります。", "ダウンロード"),
+            UpdateState(DISTRIBUTED, check = AVAILABLE, install = UpdateInstall.Downloading(37, 74)) to
+                listOf("ダウンロードしています…"),
+            UpdateState(DISTRIBUTED, check = AVAILABLE, install = UpdateInstall.Verifying) to
+                listOf("ダウンロードしたファイルを確認しています…"),
+            UpdateState(DISTRIBUTED, check = AVAILABLE, install = UpdateInstall.ReadyToApply) to
+                listOf(RESTART_TO_APPLY_NOTICE, "今すぐインストール", "キャンセル"),
+            UpdateState(DISTRIBUTED, check = AVAILABLE, install = UpdateInstall.Failed(UpdateInstallFailure.DOWNLOAD_FAILED)) to
+                listOf("更新をダウンロードできませんでした。", "閉じる"),
+            UpdateState(DISTRIBUTED, check = AVAILABLE, install = UpdateInstall.Launching) to listOf("インストールを始めます。"),
+        )
+        stages.forEach { (state, texts) ->
+            scrollSettingsToTop()
+
+            updater.state.value = state
+            waitForIdle()
+
+            texts.forEach { assertFullyShown(it) }
+        }
+    }
+
+    // 設定の画面を開いたときには、前から出ている確認の結果があってもスクロールしない
+    @Test
+    fun openingSettingsDoesNotScroll() = runShortWindowTest(UpdateState(DISTRIBUTED, check = AVAILABLE)) {
+        settingsField("リージョン").assertIsDisplayed()
+        onNodeWithText("新しいバージョン 2.0.0 があります。").assertIsNotDisplayed()
+    }
+
+    // 新しく出た文がすでに見えていれば、スクロールしない
+    @Test
+    fun shownStageDoesNotScroll() = runShortWindowTest(UpdateState(DISTRIBUTED)) { updater ->
+        updater.state.value = UpdateState(DISTRIBUTED, check = UpdateCheck.Checking)
+        waitForIdle()
+        val checkTop = onNodeWithText(CHECK_UPDATE_LABEL).fetchSemanticsNode().boundsInRoot.top
+
+        updater.state.value = UpdateState(DISTRIBUTED, check = UpdateCheck.UpToDate)
+        waitForIdle()
+
+        assertFullyShown("最新のバージョンです。")
+        assertEquals(checkTop, onNodeWithText(CHECK_UPDATE_LABEL).fetchSemanticsNode().boundsInRoot.top, BOUNDS_TOLERANCE)
+    }
+
+    // ダウンロードの進み具合が進んだだけでは、スクロールしない。ダウンロードの最中に利用者がスクロールしても、引き戻さない
+    @Test
+    fun downloadProgressDoesNotScrollBack() = runShortWindowTest(UpdateState(DISTRIBUTED, check = AVAILABLE)) { updater ->
+        updater.state.value = UpdateState(DISTRIBUTED, check = AVAILABLE, install = UpdateInstall.Downloading(10, 100))
+        waitForIdle()
+        assertFullyShown("ダウンロードしています…")
+        scrollSettingsToTop()
+
+        updater.state.value = UpdateState(DISTRIBUTED, check = AVAILABLE, install = UpdateInstall.Downloading(50, 100))
+        waitForIdle()
+
+        settingsField("リージョン").assertIsDisplayed()
+        onNodeWithText("ダウンロードしています…").assertIsNotDisplayed()
     }
 
     // 見出しと動いているバージョンを出し、確認のボタンを押せる。配布版では開発版の注記を出さず、確認するまではダウンロードのボタンも出さない
