@@ -13,6 +13,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
+import to.sava.cloudmarksmultiplatform.desktopAppFilesIn
 import to.sava.cloudmarksmultiplatform.files.replaceFileAtomically
 import java.nio.file.ClosedWatchServiceException
 import java.nio.file.Files
@@ -41,6 +42,9 @@ private val NO_NOTIFICATION_WAIT = 2.seconds
 /** 見張る対象のファイルの名前。 */
 private const val WATCHED_FILE_NAME = "storage-changed"
 
+/** ログに書く、見張る対象のファイルの呼び名。 */
+private const val WATCHED_FILE_DESCRIPTION = "見張りのテストのファイル"
+
 /** 続けて書くときの回数。 */
 private const val CONSECUTIVE_WRITES = 5
 
@@ -60,7 +64,7 @@ class StorageChangeWatcherTest {
         val received = Channel<Unit>(Channel.UNLIMITED)
         val opened = CompletableDeferred<WatchService>()
         val collecting = launch {
-            watchFileChanges(file, log, debounce = TEST_DEBOUNCE, onWatching = { opened.complete(it) })
+            watchFileChanges(file, WATCHED_FILE_DESCRIPTION, log, debounce = TEST_DEBOUNCE, onWatching = { opened.complete(it) })
                 .collect { received.send(Unit) }
         }
         try {
@@ -171,11 +175,38 @@ class StorageChangeWatcherTest {
         val logs = mutableListOf<String>()
 
         val notifications = withContext(Dispatchers.Default) {
-            withTimeout(NOTIFICATION_WAIT_LIMIT) { watchFileChanges(file, { logs += it }).toList() }
+            withTimeout(NOTIFICATION_WAIT_LIMIT) { watchFileChanges(file, WATCHED_FILE_DESCRIPTION, { logs += it }).toList() }
         }
 
         assertEquals(emptyList(), notifications)
         assertEquals(1, logs.size)
         assertFalse(logs.single().contains(notDirectory.toString()), "ログにパスを含めない")
+    }
+
+    // 見張りを始められないときのログは、渡した見張るファイルの呼び名で始まる
+    @Test
+    fun failureLogStartsWithFileDescription() = runTest {
+        val file = temporaryFolder.newFile().toPath().resolve(WATCHED_FILE_NAME)
+        val logs = mutableListOf<String>()
+
+        withContext(Dispatchers.Default) {
+            withTimeout(NOTIFICATION_WAIT_LIMIT) { watchFileChanges(file, WATCHED_FILE_DESCRIPTION, { logs += it }).toList() }
+        }
+
+        assertTrue(logs.single().startsWith("${WATCHED_FILE_DESCRIPTION}を見張れなかった: "), logs.single())
+    }
+
+    // S3 へ書いたことの知らせを見張り始められないときのログは、「S3 へ書いたことを知らせるファイル」と書く
+    @Test
+    fun storageChangesFailureLogNamesStorageChangedFile() = runTest {
+        val directory = temporaryFolder.root.toPath()
+        Files.writeString(directory.resolve("state"), "記録のディレクトリの場所にあるファイル")
+        val logs = mutableListOf<String>()
+
+        withContext(Dispatchers.Default) {
+            withTimeout(NOTIFICATION_WAIT_LIMIT) { watchStorageChanges(desktopAppFilesIn(directory)) { logs += it }.toList() }
+        }
+
+        assertTrue(logs.single().startsWith("S3 へ書いたことを知らせるファイルを見張れなかった: "), logs.single())
     }
 }
