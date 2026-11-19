@@ -32,6 +32,9 @@ internal const val BROWSERS_WITH_EXTENSION_FILE_NAME = "browsers-with-extension.
 /** 最後に開いた項目の記録のファイルの名前。 */
 internal const val LAST_OPENED_ITEM_FILE_NAME = "last-opened-item.json"
 
+/** デスクトップのアプリのウィンドウの位置と大きさの記録のファイルの名前。 */
+internal const val WINDOW_GEOMETRY_FILE_NAME = "window.json"
+
 /**
  * アプリが端末に置くファイルの場所。
  *
@@ -43,7 +46,7 @@ internal const val LAST_OPENED_ITEM_FILE_NAME = "last-opened-item.json"
  * @property logDirectory ログのファイルを置くディレクトリ
  * @property stateDirectory 次の起動へ持ち越す記録と、同じ端末のプロセスどうしの知らせを、小さなファイルにして置くディレクトリ。
  * 接続先ごとに置くもの（古いファイルの削除を最後に終えた時刻、溜めた削除）と、接続先によらないもの（最後に開いた項目、拡張機能が入っていると
- * 分かったブラウザ、S3 へ書いたことの知らせ）がある
+ * 分かったブラウザ、S3 へ書いたことの知らせ、デスクトップのアプリのウィンドウの位置と大きさ）がある
  * @property deviceSettingsFile 端末ごとの設定（表示の大きさと、まとめてブラウザで開くときのタブの読み込み方）のファイル。
  * [settingsFile] とは別に持ち、S3 に載せない
  * @property commandDirectory アプリからブラウザの拡張機能へのコマンド（開くタブの並びなど）を、1 つのコマンドにつき 1 つのファイルにして
@@ -77,4 +80,10 @@ class AppFiles(
      * 端末ごとの記録で、S3 に載せない。
      */
     val lastOpenedItemFile: Path get() = stateDirectory.resolve(LAST_OPENED_ITEM_FILE_NAME)
+
+    /**
+     * デスクトップのアプリのウィンドウの位置と大きさの記録。デスクトップのアプリが、ウィンドウを動かしたり大きさを変えたりしたときと
+     * 終了するときに書き、次の起動で読む。端末ごとの記録で、S3 に載せない。
+     */
+    val windowGeometryFile: Path get() = stateDirectory.resolve(WINDOW_GEOMETRY_FILE_NAME)
 }

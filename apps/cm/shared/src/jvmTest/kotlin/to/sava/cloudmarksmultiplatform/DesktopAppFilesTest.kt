@@ -35,7 +35,7 @@ class DesktopAppFilesTest {
 
     // 設定のファイルはディレクトリの直下の settings.json、端末ごとの設定のファイルは同じく直下の device.json、
     // ローカルキャッシュはその下の cache、ログはその下の logs、次の起動へ持ち越す記録はその下の state、
-    // アプリの更新でダウンロードした配布物はその下の updates
+    // アプリの更新でダウンロードした配布物はその下の updates。ウィンドウの位置と大きさの記録は state の下の window.json
     @Test
     fun filesAreInDirectory() {
         val directory = Path.of(localAppData, "CloudMarks")
@@ -49,6 +49,7 @@ class DesktopAppFilesTest {
         assertEquals(directory.resolve("logs"), files.logDirectory)
         assertEquals(directory.resolve("state"), files.stateDirectory)
         assertEquals(directory.resolve("updates"), files.updateDirectory)
+        assertEquals(directory.resolve("state").resolve("window.json"), files.windowGeometryFile)
     }
 
     // アプリの更新でダウンロードした配布物は、配布版なら CloudMarks の下の updates、開発版なら CloudMarks-dev の下の updates
