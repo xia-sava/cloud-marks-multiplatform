@@ -61,6 +61,7 @@ GitHub のリポジトリ `xia-sava/cloud-marks-multiplatform` のリリース�
   Firefox の拡張とアプリは別に更新されるので、新旧のどちらも同じホストを使う
 - **インストーラの `AppId`、exe の名前（`CloudMarks.exe`）、インストール先（`%LOCALAPPDATA%\Programs\CloudMarks`）。** `AppId` を変えると、
   新しいインストーラが別のアプリとして並べて入る。更新を適用するスクリプトは、動いていたアプリの exe を同じパスで起動し直す。
+  ホストは、拡張からアプリを開くよう求められると、自分と同じ場所の `CloudMarks.exe` を起動する（`docs/native-messaging.md` の「アプリを開く」）。
   Chrome はインストール先のフォルダから拡張を読み込み、レジストリはインストール先のパスでホストを登録する JSON を指す
 - **デスクトップのアプリのデータを置くディレクトリ**（`%LOCALAPPDATA%\CloudMarks`）。更新したアプリとホストが、前の設定と認証情報を読む
 - **Android のアプリケーションの ID（`to.sava.cloudmarksmultiplatform`）と署名の鍵。** 端末は、同じ ID で同じ鍵の APK でなければ
@@ -219,6 +220,8 @@ Apache License 2.0 の NOTICE の中身と、ライセンスの本文を置く�
 - Firefox の拡張は、アプリと別に更新される。新しい拡張と古いホスト、古い拡張と新しいホストが組み合わさる。Native Messaging の
   メッセージの互換は、`docs/native-messaging.md` の決まりに従う。ホストは表に無い欄を無視し、知らない `protocol` には `invalidRequest` を返す。
   拡張は知らない `code` を受けても `message` を出す
+- 古いホストは、知らない種類（`type`）のメッセージも `invalidRequest` で断る。新しい種類を送る拡張は、古いホストから `invalidRequest` を
+  受けたら、アプリの更新を促す（`openApp`）
 
 ## リリースの手順
 
@@ -230,10 +233,15 @@ Apache License 2.0 の NOTICE の中身と、ライセンスの本文を置く�
 | `vX.Y.Z` | `release.yml` | インストーラと APK と更新情報（`vX.Y.Z` と `latest` のリリース） |
 
 1. 拡張を変えたら、`apps/extension/package.json` の `version` を上げ、先に `extension-vX.Y.Z` を打って拡張のリリースを終える
+   （拡張が新しいホストを必要とする変更は、下のとおりアプリを先に出す）
 2. そのあとで、アプリの `vX.Y.Z` を打つ。`release.yml` は `extension-latest` の `.xpi` をインストーラに入れる。タグを打った回は、
    `.xpi` を取れないとき、`.xpi` のバージョンがタグのコミットの `package.json` の `version` と違うときに止まる
 3. 拡張を変えていなければ、`vX.Y.Z` だけを打つ
 
+- 拡張が新しいホストを必要とする変更（古いホストが知らない種類のメッセージを拡張が送るなど）は、アプリを先に出す。そのあいだ
+  `package.json` の `version` を上げない。`extension-latest` の `.xpi` のバージョンと同じままなので、`release.yml` は止まらない。
+  アプリのリリースのあとで `version` を上げ、`extension-vX.Y.Z` を打つ。拡張を先に出すと、Firefox が自分で更新した新しい拡張が
+  アプリの更新を促しても、まだ新しいアプリが無い。Chrome の拡張はインストーラが入れるので、アプリと一緒に新しくなる
 - タグは、前のリリースが終わってから打つ。同じワークフローで待てるのは 1 つだけで、待っているあいだに次が来ると、待っていた方は取り消される
 - 公開するのは、公開（public）のリポジトリで、アプリと拡張が更新を問い合わせるリポジトリと同じときだけ。非公開のリポジトリでは、
   タグを打った回が止まる

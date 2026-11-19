@@ -39,7 +39,28 @@ export interface TakeCommandMessage {
   token: string
 }
 
-/** 追加の結果。失敗のときは画面にそのまま出す文を持つ。 */
+/** デスクトップのアプリを開く。起動していなければ起動し、起動していればそのウィンドウを前に出す。 */
+export interface OpenAppMessage {
+  protocol: 1
+  type: "openApp"
+}
+
+/**
+ * 失敗の応答の `error.code`（`docs/native-messaging.md` の「ホストが返すもの」）。
+ * ホストはここに無い値を返すこともある。
+ */
+export type HostErrorCode =
+  | "notConfigured"
+  | "storageUnavailable"
+  | "updateRequired"
+  | "dataBroken"
+  | "busy"
+  | "unconfirmed"
+  | "invalidRequest"
+  | "launchFailed"
+  | "internal"
+
+/** 追加などの結果。失敗のときは画面にそのまま出す文を持つ。 */
 export type Outcome = { ok: true } | { ok: false; message: string }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {

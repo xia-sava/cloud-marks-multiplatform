@@ -18,6 +18,7 @@
 | `add-bookmarks.json` | ブックマークを追加（1 つのタブ。タイトルは名前の欄の値） |
 | `extension-present.json` | 拡張が入っていることの知らせ |
 | `take-command.json` | コマンドを受け取る |
+| `open-app.json` | アプリを開く |
 | `response-ok.json` | 成功の応答 |
 | `response-command.json` | コマンドを受け取ったときの成功の応答（2 つのタブ。空のタイトルを含む）。`command` の中身は、アプリが書くコマンドのファイルの見本も兼ねる |
 | `response-no-command.json` | コマンドが無いときの成功の応答 |

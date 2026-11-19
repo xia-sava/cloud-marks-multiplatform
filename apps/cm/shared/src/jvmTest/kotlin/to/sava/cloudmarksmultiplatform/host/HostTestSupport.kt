@@ -78,6 +78,8 @@ internal val INVALID_REQUESTS: List<Pair<String, String>> = listOf(
     "takeCommand の token が / を含む" to """{"protocol":1,"type":"takeCommand","token":"a/${TOKEN.drop(2)}"}""",
     "takeCommand の token がバックスラッシュを含む" to """{"protocol":1,"type":"takeCommand","token":"a\\${TOKEN.drop(2)}"}""",
     "takeCommand の token の後ろに改行" to """{"protocol":1,"type":"takeCommand","token":"${TOKEN.dropLast(1)}\n"}""",
+    "openApp の protocol が 2" to """{"protocol":2,"type":"openApp"}""",
+    "openApp の protocol が無い" to """{"type":"openApp"}""",
     "JSON として読めない" to """{"protocol":1,"type":"addBookmarks",""",
     "JSON のオブジェクトでない" to """[{"protocol":1}]""",
 )

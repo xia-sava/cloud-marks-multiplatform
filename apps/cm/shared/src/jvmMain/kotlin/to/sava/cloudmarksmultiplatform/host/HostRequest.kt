@@ -27,6 +27,7 @@ private const val TYPE_ADD_FOLDER = "addFolder"
 private const val TYPE_ADD_BOOKMARKS = "addBookmarks"
 private const val TYPE_EXTENSION_PRESENT = "extensionPresent"
 private const val TYPE_TAKE_COMMAND = "takeCommand"
+private const val TYPE_OPEN_APP = "openApp"
 
 /**
  * 拡張からの要求（`docs/native-messaging.md` の「拡張から送るもの」）。
@@ -49,6 +50,9 @@ internal sealed interface HostRequest {
 
     /** アプリからのコマンドの受け取り。[token] は [COMMAND_TOKEN_FORMAT] に合う。 */
     data class TakeCommand(val token: String) : HostRequest
+
+    /** デスクトップのアプリを開く。起動していなければ起動し、起動していればそのウィンドウを前に出す。 */
+    data object OpenApp : HostRequest
 }
 
 /** 要求を読んだ結果。 */
@@ -97,6 +101,7 @@ private fun requestOf(message: JsonObject): HostRequest {
         TYPE_ADD_BOOKMARKS -> HostRequest.AddBookmarks(tabs = message.tabs())
         TYPE_EXTENSION_PRESENT -> HostRequest.ExtensionPresent
         TYPE_TAKE_COMMAND -> HostRequest.TakeCommand(token = message.token())
+        TYPE_OPEN_APP -> HostRequest.OpenApp
         else -> invalid("`$TYPE` が知らない値")
     }
 }

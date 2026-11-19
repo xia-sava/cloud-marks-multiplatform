@@ -33,6 +33,8 @@ private const val UNCONFIRMED_MESSAGE =
     "追加できたかどうかを確認できませんでした。もう一度追加すると、同じものが二重に入ることがあります。先に Cloud Marks のアプリで確認してください。"
 private const val INVALID_REQUEST_MESSAGE =
     "追加する内容を受け付けられませんでした。拡張機能とアプリのバージョンが合っていない可能性があります。両方を最新にしてください。"
+private const val LAUNCH_FAILED_MESSAGE = "Cloud Marks を開けませんでした。スタートメニューから起動してください。"
+private const val DEV_HOST_LAUNCH_MESSAGE = "開発版の Cloud Marks は、拡張機能から開けません。"
 private const val STORAGE_OTHER_MESSAGE = "S3 とのやり取りでエラーが起きたため、追加できませんでした。"
 private const val INTERNAL_MESSAGE = "エラーが起きたため、追加できませんでした。"
 
@@ -68,6 +70,8 @@ class HostErrorsTest {
             SETTINGS_UNREADABLE_ERROR to ("notConfigured" to SETTINGS_UNREADABLE_MESSAGE),
             UNCONFIRMED_ERROR to ("unconfirmed" to UNCONFIRMED_MESSAGE),
             INVALID_REQUEST_ERROR to ("invalidRequest" to INVALID_REQUEST_MESSAGE),
+            LAUNCH_FAILED_ERROR to ("launchFailed" to LAUNCH_FAILED_MESSAGE),
+            DEV_HOST_LAUNCH_ERROR to ("launchFailed" to DEV_HOST_LAUNCH_MESSAGE),
             INTERNAL_ERROR to ("internal" to INTERNAL_MESSAGE),
         )
 

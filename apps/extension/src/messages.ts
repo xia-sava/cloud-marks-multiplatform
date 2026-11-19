@@ -13,6 +13,10 @@ export const MESSAGES = {
   communicationFailed: "Cloud Marks のアプリとやり取りできませんでした。",
   previousFailure: "前回は追加できませんでした。",
   failureActionTitle: "追加できませんでした。クリックすると理由を表示します。",
+  openApp: "Cloud Marks を開く",
+  openingApp: "Cloud Marks を開いています…",
+  appUpdateRequired:
+    "この機能を使うには、Cloud Marks のアプリを更新してください。アプリの設定の画面の「アプリの更新」から更新できます。",
 } as const
 
 /** 失敗したままポップアップが閉じられたときにツールバーのボタンへ付ける文字。 */

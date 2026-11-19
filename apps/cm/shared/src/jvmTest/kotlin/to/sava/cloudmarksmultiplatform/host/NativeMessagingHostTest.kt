@@ -33,6 +33,7 @@ import to.sava.cloudmarksmultiplatform.sync.seed
 import to.sava.cloudmarksmultiplatform.sync.storedItems
 import to.sava.cloudmarksmultiplatform.sync.storedManifest
 import java.nio.file.Files
+import java.nio.file.Path
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
 import kotlin.test.Test
@@ -68,6 +69,7 @@ class NativeMessagingHostTest {
      *
      * 接続は、ホストが渡したキャッシュ・`updatedBy`・時計をそのまま使い、S3 の代わりに [store] へ読み書きする。
      * 作るたびに [opened] に記録し、閉じるたびに [closed] を数える。時計は [FixedClock]、ID は [hostId] を 1 から順に振る。
+     * デスクトップのアプリは起動せず、起動しようとした実行ファイルを [launched] に記録して [launch] の結果を返す。
      */
     private inner class Fixture(protector: SecretProtector = FakeSecretProtector()) {
         val appFiles = desktopAppFilesIn(temporaryFolder.newFolder().toPath())
@@ -85,6 +87,18 @@ class NativeMessagingHostTest {
         /** ホスト自身の実行ファイルのパス。 */
         var own: String? = null
 
+        /** 配布物のインストール先。空白を含む名前で、ディレクトリもファイルも作らない。 */
+        val installDirectory: Path = temporaryFolder.newFolder().toPath().resolve("Cloud Marks")
+
+        /** ホストの起動口のパス。null なら開発版のホスト。 */
+        var hostExecutable: String? = installDirectory.resolve("cloud-marks-host.exe").toString()
+
+        /** デスクトップのアプリを起動する代わり。 */
+        var launch: (Path) -> ProcessLaunchResult = { ProcessLaunchResult.Launched(brokeAwayFromJob = true) }
+
+        /** ホストが起動しようとした実行ファイル。 */
+        val launched = mutableListOf<Path>()
+
         val host = NativeMessagingHost(
             appFiles = appFiles,
             protector = protector,
@@ -98,6 +112,12 @@ class NativeMessagingHostTest {
             generateId = SequentialIds()::next,
             ancestorExecutables = { ancestors.asSequence() },
             ownExecutable = { own },
+            hostExecutable = { hostExecutable },
+            launchApp = { executable ->
+                // Path は Iterable<Path> でもあるので、+= ではなく add で 1 つ足す
+                launched.add(executable)
+                launch(executable)
+            },
         )
 
         val isManifest: (String) -> Boolean = { key -> key == manifestKey(store.prefix) }
@@ -292,6 +312,7 @@ class NativeMessagingHostTest {
             fixture.assertNothingWritten(name)
         }
         assertEquals(emptyList(), protector.entropies)
+        assertEquals(emptyList(), fixture.launched)
         assertEquals(INVALID_REQUESTS.size, fixture.logs.size)
     }
 
@@ -445,6 +466,98 @@ class NativeMessagingHostTest {
         assertEquals(command, file.readText())
         assertEquals(command, outside.readText())
         assertEquals(tokens.size, fixture.logs.size)
+    }
+
+    // アプリを開く要求は、ホストの起動口と同じディレクトリの CloudMarks.exe を 1 回だけ起動し、見本の成功の応答を返す。
+    // 設定のファイルが無くても成功し、接続を作らず、何も書かず、ログにも書かない
+    @Test
+    fun openAppLaunchesAppBesideHost() = runTest {
+        val fixture = Fixture()
+
+        val response = fixture.respond(contractBytes("open-app.json"))
+
+        assertEquals(jsonOf(contractBytes("response-ok.json")), jsonOf(encodeHostResponse(response)))
+        assertEquals(listOf(fixture.installDirectory.resolve("CloudMarks.exe")), fixture.launched)
+        fixture.assertNothingWritten("openApp")
+        assertEquals(emptyList(), fixture.logs)
+    }
+
+    // アプリを開く要求は、保存済みの設定があっても読まない
+    @Test
+    fun openAppDoesNotReadSettings() = runTest {
+        val protector = FakeSecretProtector()
+        val fixture = Fixture(protector).apply { storeSettings() }
+
+        assertEquals(HostResponse.Ok, fixture.respond(contractBytes("open-app.json")))
+        assertEquals(emptyList(), protector.entropies)
+        assertEquals(emptyList(), fixture.opened.map { it.settings })
+    }
+
+    // 開発版のホストは、アプリを起動せず、開発版では開けないことを launchFailed で返す
+    @Test
+    fun openAppFromDevHostIsLaunchFailed() = runTest {
+        val fixture = Fixture().apply { hostExecutable = null }
+
+        val response = fixture.respond(contractBytes("open-app.json"))
+
+        assertEquals(HostResponse.Failed(DEV_HOST_LAUNCH_ERROR), response)
+        assertEquals(emptyList(), fixture.launched)
+        assertTrue(fixture.logs.single().startsWith(HOST_LOG_PREFIX), fixture.logs.toString())
+    }
+
+    // 起動できなければ、起動できなかったことを launchFailed で返す。ログには失敗した関数と GetLastError の値か呼べなかった理由を書き、
+    // パスは書かない
+    @Test
+    fun openAppLaunchFailureIsLaunchFailed() = runTest {
+        val cases = listOf(
+            ProcessLaunchResult.Failed(CREATE_PROCESS, lastError = 2) to "GetLastError: 0x00000002",
+            ProcessLaunchResult.Failed(CREATE_PROCESS, lastError = null, reason = "UnsupportedOperationException") to
+                "UnsupportedOperationException",
+        )
+
+        cases.forEach { (failure, detail) ->
+            val fixture = Fixture().apply { launch = { failure } }
+
+            val response = fixture.respond(contractBytes("open-app.json"))
+
+            assertEquals(HostResponse.Failed(LAUNCH_FAILED_ERROR), response, detail)
+            val log = fixture.logs.single()
+            assertTrue(log.startsWith(HOST_LOG_PREFIX) && log.contains(CREATE_PROCESS) && log.contains(detail), log)
+            assertFalse(log.contains(fixture.installDirectory.toString()), log)
+        }
+    }
+
+    // 起動の途中の予期しない例外も launchFailed で返す（internal は追加の失敗の文）。ログには例外のクラス名だけを書く
+    @Test
+    fun openAppExceptionIsLaunchFailed() = runTest {
+        val cases: List<Pair<String, (Fixture) -> Unit>> = listOf(
+            "起動の関数が投げる" to { it.launch = { executable -> throw IllegalStateException("$executable を起動できない") } },
+            "起動口のパスを読めない" to { it.hostExecutable = "cloud-marks-host${Char(0)}.exe" },
+        )
+
+        cases.forEach { (name, arrange) ->
+            val fixture = Fixture().also(arrange)
+
+            val response = fixture.respond(contractBytes("open-app.json"))
+
+            assertEquals(HostResponse.Failed(LAUNCH_FAILED_ERROR), response, name)
+            val log = fixture.logs.single()
+            assertTrue(log.startsWith(HOST_LOG_PREFIX) && log.contains("Exception"), "$name: $log")
+            assertFalse(log.contains(fixture.installDirectory.toString()) || log.contains("cloud-marks-host"), "$name: $log")
+        }
+    }
+
+    // ジョブから抜けられずに起動したときも成功を返し、ジョブに残したまま起動したことをログに 1 行書く
+    @Test
+    fun openAppInsideJobIsLogged() = runTest {
+        val fixture = Fixture().apply { launch = { ProcessLaunchResult.Launched(brokeAwayFromJob = false) } }
+
+        val response = fixture.respond(contractBytes("open-app.json"))
+
+        assertEquals(HostResponse.Ok, response)
+        val log = fixture.logs.single()
+        assertTrue(log.startsWith(HOST_LOG_PREFIX) && log.contains("ジョブに残したまま"), log)
+        assertFalse(log.contains(fixture.installDirectory.toString()), log)
     }
 
     // 長さが上限を超えたメッセージと、途中で切れたメッセージは、設定を読まず、接続も作らず、何も書かずに invalidRequest を返す

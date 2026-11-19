@@ -28,6 +28,14 @@ describe("sendRequest", () => {
     await expect(sendRequest(api, request)).resolves.toEqual({ ok: false, message: "混み合っています。" })
   })
 
+  it("interpret を渡すと、応答をそれで結果にする", async () => {
+    const response = { ok: false, error: { code: "busy", message: "混み合っています。" } }
+    const { api } = apiWith(async () => response)
+    const interpret = vi.fn((_response: unknown) => ({ ok: false as const, message: "差し替えた文" }))
+    await expect(sendRequest(api, request, interpret)).resolves.toEqual({ ok: false, message: "差し替えた文" })
+    expect(interpret).toHaveBeenCalledWith(response)
+  })
+
   it("ホストが見つからない誤りは、見つからない旨にする", async () => {
     const { api } = apiWith(async () => {
       throw new Error("Specified native messaging host not found.")

@@ -38,7 +38,7 @@ class HostResponseTest {
         assertEquals(
             listOf(
                 "notConfigured", "storageUnavailable", "updateRequired", "dataBroken",
-                "busy", "unconfirmed", "invalidRequest", "internal",
+                "busy", "unconfirmed", "invalidRequest", "launchFailed", "internal",
             ),
             HostErrorCode.entries.map { it.value },
         )

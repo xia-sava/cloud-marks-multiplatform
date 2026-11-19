@@ -11,6 +11,7 @@ import {
   type AddAction,
 } from "./form"
 import { MESSAGES, tabCountText } from "./messages"
+import { openApp } from "./open-app"
 import { isResultMessage, POPUP_PORT_NAME, type SubmitMessage } from "./port-messages"
 import { selectedTabs } from "./selected-tabs"
 
@@ -30,12 +31,14 @@ const okButton = element<HTMLButtonElement>("ok")
 const cancelButton = element<HTMLButtonElement>("cancel")
 const statusText = element<HTMLElement>("status")
 const errorText = element<HTMLElement>("error")
+const openAppButton = element<HTMLButtonElement>("open-app")
 const radios = Array.from(form.querySelectorAll<HTMLInputElement>('input[name="action"]'))
 
 element("label-add-folder").textContent = MESSAGES.addFolder
 element("label-add-bookmarks").textContent = MESSAGES.addBookmarks
 okButton.textContent = MESSAGES.ok
 cancelButton.textContent = MESSAGES.cancel
+openAppButton.textContent = MESSAGES.openApp
 
 async function showPreviousFailure(): Promise<void> {
   const message = await takeFailure(api)
@@ -73,10 +76,12 @@ async function main(): Promise<void> {
     values = rememberName(values, action, tabCount, nameInput.value)
   }
 
-  function setSending(value: boolean): void {
+  // 送っているあいだは、追加の操作もアプリを開くボタンも無効にし、`status` を状態の文にする。
+  function setSending(value: boolean, status: string = MESSAGES.sending): void {
     sending = value
     controls.disabled = value
-    statusText.textContent = value ? MESSAGES.sending : ""
+    openAppButton.disabled = value
+    statusText.textContent = value ? status : ""
     if (!value) focusEntry()
   }
 
@@ -91,11 +96,15 @@ async function main(): Promise<void> {
     errorText.textContent = message
   }
 
+  function clearFailures(): void {
+    element("previous-failure").hidden = true
+    errorText.textContent = ""
+  }
+
   function submit(): void {
     if (sending || !canSubmit(action, nameInput.value, tabCount)) return
     remember()
-    element("previous-failure").hidden = true
-    errorText.textContent = ""
+    clearFailures()
     setSending(true)
 
     const port = api.runtime.connect({ name: POPUP_PORT_NAME })
@@ -121,6 +130,20 @@ async function main(): Promise<void> {
     port.postMessage(message)
   }
 
+  // ポップアップから直接ホストへ送る。結果の前にポップアップが閉じたら、何も残さない。
+  async function requestOpenApp(): Promise<void> {
+    if (sending) return
+    clearFailures()
+    setSending(true, MESSAGES.openingApp)
+    const outcome = await openApp(api)
+    if (outcome.ok) {
+      window.close()
+      return
+    }
+    fail(outcome.message)
+    openAppButton.focus()
+  }
+
   for (const radio of radios) {
     radio.addEventListener("change", () => {
       if (!radio.checked) return
@@ -135,6 +158,7 @@ async function main(): Promise<void> {
     submit()
   })
   cancelButton.addEventListener("click", () => window.close())
+  openAppButton.addEventListener("click", () => void requestOpenApp())
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !event.isComposing) window.close()
   })

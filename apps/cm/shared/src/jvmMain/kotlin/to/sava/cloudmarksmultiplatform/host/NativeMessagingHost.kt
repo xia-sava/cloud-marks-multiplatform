@@ -1,6 +1,7 @@
 package to.sava.cloudmarksmultiplatform.host
 
 import to.sava.cloudmarksmultiplatform.AppFiles
+import to.sava.cloudmarksmultiplatform.AppPath
 import to.sava.cloudmarksmultiplatform.app.Connection
 import to.sava.cloudmarksmultiplatform.app.openS3Connection
 import to.sava.cloudmarksmultiplatform.files.describeIoFailure
@@ -38,7 +39,8 @@ internal typealias OpenConnection =
  *
  * 拡張が入っていることの知らせ（`extensionPresent`）は、ブラウザの実行ファイルを [AppFiles.browsersWithExtensionFile] に書き足す。
  * コマンドの受け取り（`takeCommand`）は、[AppFiles.commandDirectory] のコマンドのファイルを読んで消し、中身を返す。
- * この 2 つは、アプリの設定を読まず、S3 に接続しない。
+ * アプリを開く要求（`openApp`）は、ホストの起動口と同じディレクトリのデスクトップのアプリ（[appLauncherBesideHost]）を、
+ * このプロセスのジョブから抜けて起動する。この 3 つは、アプリの設定を読まず、S3 に接続しない。
  *
  * 追加は、要求を検証し、アプリの設定を読み、操作を組み立てて 1 回の書き込みとして S3 へ書く。書けたかどうかを確かめられなければ、
  * 同じ操作でもう一度だけ書く。マニフェストのヘッダーの `updatedBy` は [HOST_UPDATED_BY]。
@@ -56,6 +58,8 @@ internal typealias OpenConnection =
  * @param generateId フォルダと項目の ID を振る
  * @param ancestorExecutables ホストを起動したプロセスの祖先の実行ファイルのパス。拡張が入っていることの知らせで、ブラウザを見つけるのに使う
  * @param ownExecutable このプロセス自身の実行ファイルのパス。祖先のうち、同じ名前のものはブラウザではないとして飛ばす
+ * @param hostExecutable ホストの起動口（`cloud-marks-host.exe`）のパス。開発版のホストでは null で、デスクトップのアプリを起動しない
+ * @param launchApp デスクトップのアプリの実行ファイルを、このプロセスのジョブから抜けて起動する
  */
 internal class NativeMessagingHost(
     private val appFiles: AppFiles,
@@ -66,6 +70,8 @@ internal class NativeMessagingHost(
     private val generateId: () -> String = ::newId,
     private val ancestorExecutables: AncestorExecutables = ::processAncestorExecutables,
     private val ownExecutable: () -> String? = ::processOwnExecutable,
+    private val hostExecutable: () -> String? = { AppPath.verified },
+    private val launchApp: LaunchOutsideJob = ::launchOutsideJob,
 ) {
     private val settingsFile = SettingsFile(appFiles.settingsFile, protector)
 
@@ -96,8 +102,38 @@ internal class NativeMessagingHost(
             is HostRequest.Add -> add(request)
             HostRequest.ExtensionPresent -> recordExtensionPresent()
             is HostRequest.TakeCommand -> HostResponse.CommandTaken(takeCommandFile(appFiles.commandDirectory, request.token, log))
+            HostRequest.OpenApp -> openApp()
         }
     }
+
+    /**
+     * デスクトップのアプリを起動する。起動したプロセスの終わりも、ウィンドウが出ることも待たない。設定は読まない。
+     *
+     * 開発版のホストは起動せず、[DEV_HOST_LAUNCH_ERROR] を返す。起動できなければ [LAUNCH_FAILED_ERROR] を返す。
+     * 予期しない例外もここで受けて [LAUNCH_FAILED_ERROR] にする。外側の [respond] が返す [INTERNAL_ERROR] は、追加の失敗の文。
+     */
+    private fun openApp(): HostResponse =
+        try {
+            when (val executable = hostExecutable()) {
+                null -> failed(DEV_HOST_LAUNCH_ERROR, "開発版のホストなので、デスクトップのアプリを起動しなかった")
+                else -> launchResponseOf(launchApp(appLauncherBesideHost(executable)))
+            }
+        } catch (e: Exception) {
+            failed(LAUNCH_FAILED_ERROR, "デスクトップのアプリを起動できなかった: ${describeUnexpectedFailure(e)}")
+        }
+
+    /** デスクトップのアプリを起動した結果 [result] を、応答にする。ジョブに残したまま起動したときは、ログに書く。 */
+    private fun launchResponseOf(result: ProcessLaunchResult): HostResponse =
+        when (result) {
+            is ProcessLaunchResult.Launched -> {
+                if (!result.brokeAwayFromJob) {
+                    log(HOST_LOG_PREFIX + "ジョブから抜けられなかったので、デスクトップのアプリをホストのジョブに残したまま起動した")
+                }
+                HostResponse.Ok
+            }
+            is ProcessLaunchResult.Failed ->
+                failed(LAUNCH_FAILED_ERROR, "デスクトップのアプリを起動できなかった: ${describeLaunchFailure(result)}")
+        }
 
     /** ブラウザの実行ファイルを、拡張が入っているブラウザの記録に書き足す。見つからなければ、ログに書くだけにする。設定は読まない。 */
     private fun recordExtensionPresent(): HostResponse {
@@ -154,6 +190,13 @@ private fun describeWriteFailure(result: WriteResult): String =
         is WriteResult.Success -> "適用できなかった操作がある: ${result.results.map { it.status }}"
         is WriteResult.Failed -> "追加を書けなかった: ${result.failure}"
         is WriteResult.Unconfirmed -> "追加を書けたかどうかを確かめられなかった: ${result.failure}"
+    }
+
+/** 起動の失敗 [failure] を、ログの文にする。失敗の値はどれもパスを含まない。 */
+private fun describeLaunchFailure(failure: ProcessLaunchResult.Failed): String =
+    when (val lastError = failure.lastError) {
+        null -> "${failure.function} を呼べなかった（${failure.reason}）"
+        else -> "${failure.function} が失敗した（GetLastError: 0x%08X）".format(lastError)
     }
 
 /**

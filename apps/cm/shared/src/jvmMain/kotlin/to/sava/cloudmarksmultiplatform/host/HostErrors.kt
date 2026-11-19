@@ -76,6 +76,18 @@ internal val INVALID_REQUEST_ERROR = HostError(
     "追加する内容を受け付けられませんでした。拡張機能とアプリのバージョンが合っていない可能性があります。両方を最新にしてください。",
 )
 
+/** デスクトップのアプリを起動できなかった。 */
+internal val LAUNCH_FAILED_ERROR = HostError(
+    HostErrorCode.LAUNCH_FAILED,
+    "Cloud Marks を開けませんでした。スタートメニューから起動してください。",
+)
+
+/** 開発版のホストなので、デスクトップのアプリを起動しない。開発版のアプリは配布物のランチャーを持たない。 */
+internal val DEV_HOST_LAUNCH_ERROR = HostError(
+    HostErrorCode.LAUNCH_FAILED,
+    "開発版の Cloud Marks は、拡張機能から開けません。",
+)
+
 /** S3 とのやり取りの、そのほかの失敗（[SyncFailure.Other]）。 */
 internal val STORAGE_OTHER_ERROR = HostError(
     HostErrorCode.INTERNAL,

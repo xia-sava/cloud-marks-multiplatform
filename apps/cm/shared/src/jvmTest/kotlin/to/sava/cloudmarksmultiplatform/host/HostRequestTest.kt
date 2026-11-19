@@ -157,6 +157,21 @@ class HostRequestTest {
         )
     }
 
+    // 見本の「アプリを開く」を読むと、アプリを開く要求になる
+    @Test
+    fun openAppContractIsParsed() {
+        assertEquals(HostRequestParseResult.Valid(HostRequest.OpenApp), parseHostRequest(contractBytes("open-app.json")))
+    }
+
+    // アプリを開く要求は、起動するものを指定する欄があっても無視する
+    @Test
+    fun openAppIgnoresUnknownFields() {
+        assertEquals(
+            HostRequest.OpenApp,
+            validRequest("""{"protocol":1,"type":"openApp","path":"C:\\Windows\\System32\\cmd.exe","arguments":["/c","exit"]}"""),
+        )
+    }
+
     // 拡張が入っていることの知らせとコマンドの受け取りも、表に無い欄は無視する
     @Test
     fun unknownFieldsAreIgnoredInNewTypes() {

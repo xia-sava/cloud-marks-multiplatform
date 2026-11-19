@@ -64,6 +64,8 @@ description: Cloud Marks のバージョンを上げて配る。拡張のタグ�
    ```
 
 6. **拡張を変えたかどうか。** 変えていれば、`package.json` の `version` を上げたコミットが要り、拡張のリリースを先に行う。
+   ただし、拡張が新しいホストを必要とする変更（古いホストが知らない種類のメッセージを拡張が送るなど）は、アプリを先に出す。
+   そのあいだ `package.json` の `version` を上げず、アプリのリリースのあとで上げて拡張のタグを打つ（`docs/distribution.md` の「リリースの手順」）。
 
    ```sh
    git log --oneline "$(git describe --tags --abbrev=0 --match 'extension-v*')..HEAD" -- apps/extension
@@ -95,6 +97,9 @@ gh run watch <run の ID> --exit-status
 ```
 
 拡張を変えていなければ、アプリのタグだけを打つ。どちらのワークフローも、前のリリースが終わってから次のタグを打つ。
+
+拡張が新しいホストを必要とする変更は、順番を逆にする。`package.json` の `version` を上げないままアプリのタグを打ち、`release.yml` が
+終わってから、`version` を上げたコミットに拡張のタグを打つ。
 
 ## 走ったあとに確かめる
 

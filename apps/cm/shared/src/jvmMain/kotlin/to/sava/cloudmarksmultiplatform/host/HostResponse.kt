@@ -25,6 +25,7 @@ internal enum class HostErrorCode(val value: String) {
     BUSY("busy"),
     UNCONFIRMED("unconfirmed"),
     INVALID_REQUEST("invalidRequest"),
+    LAUNCH_FAILED("launchFailed"),
     INTERNAL("internal"),
 }
 
@@ -33,7 +34,7 @@ internal data class HostError(val code: HostErrorCode, val message: String)
 
 /** ホストが返す応答。 */
 internal sealed interface HostResponse {
-    /** 追加を S3 に書けた。拡張が入っていることの知らせを受け付けた。 */
+    /** 追加を S3 に書けた。拡張が入っていることの知らせを受け付けた。デスクトップのアプリを起動した。 */
     data object Ok : HostResponse
 
     /** `takeCommand` を受け付けた。[command] が `null` なら、渡せるコマンドが無い。 */

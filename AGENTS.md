@@ -14,7 +14,8 @@ Cloud Marks（CM）の monorepo。URL のリストを端末間でやり取りす
 - `apps/cm` — Kotlin Multiplatform / Compose Multiplatform（Android + Windows Desktop）。IDEA で開く。
   保存形式、S3 へのアクセス、追加・移動・削除などの操作は `shared` に置き、両方のアプリで共有する
 - `apps/extension` — Chrome と Firefox の WebExtension（TypeScript）。WebStorm で開く。
-  選択したタブを Native Messaging でデスクトップ側のホストへ渡すだけで、保存形式のロジックを持たない
+  選択したタブを Native Messaging でデスクトップ側のホストへ渡し、アプリからのコマンドを受け取ってタブを開き、アプリを開く要求を送る。
+  保存形式のロジックを持たない
 - `contracts/storage` — S3 上の形式の見本。`apps/cm` のテストと移行スクリプトが読む
 - `contracts/native-messaging` — 拡張とホストのあいだのメッセージの見本。拡張と `apps/cm` の両方のテストが読む。
   配布版と開発版の名前の一覧（`identities.json`）は、`apps/cm` の Gradle のビルドも読む

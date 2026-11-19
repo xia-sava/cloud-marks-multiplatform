@@ -1,11 +1,13 @@
 :root {
   color-scheme: light dark;
   --error: #b3261e;
+  --primary: #6750a4;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --error: #f2b8b5;
+    --primary: #d0bcff;
   }
 }
 
@@ -58,6 +60,32 @@ fieldset {
   min-width: 88px;
   padding: 4px 12px;
   font: inherit;
+}
+
+/* 枠と背景を持たない、OK より控えめなボタン。 */
+.text-button {
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.text-button:hover:enabled {
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+}
+
+.text-button:disabled {
+  color: inherit;
+  opacity: 0.38;
+  cursor: default;
+}
+
+#open-app {
+  display: block;
+  margin: 12px 0 0 -8px;
 }
 
 .error {
