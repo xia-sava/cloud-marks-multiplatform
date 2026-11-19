@@ -153,7 +153,7 @@ class ApplyFolderOperationsTest {
 
         assertEquals(OperationStatus.Applied, result.singleStatus())
         assertEquals("A/B", result.state.folders.getValue(FOLDER_A).name)
-        assertEquals(SAMPLE_STATE.folders.getValue(FOLDER_A).copy(name = "A/B"),result.state.folders.getValue(FOLDER_A))
+        assertEquals(SAMPLE_STATE.folders.getValue(FOLDER_A).copy(name = "A/B"), result.state.folders.getValue(FOLDER_A))
         assertEquals(SAMPLE_STATE.items, result.state.items)
         assertTrue(result.treeChanged)
         assertTrue(result.changedFolderIds.isEmpty())
