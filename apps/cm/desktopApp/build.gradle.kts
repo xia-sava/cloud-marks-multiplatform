@@ -145,6 +145,9 @@ compose.desktop {
         nativeDistributions {
             // jlinkの自動解決では含まれないが、S3へのHTTPS接続に要る。
             modules("jdk.crypto.ec")
+            // `:desktopApp:suggestRuntimeModules`が挙げるもの。依存するライブラリが使い、無いと使った場面で
+            // NoClassDefFoundErrorになる。依存を変えたら、このタスクの結果と見比べる。
+            modules("java.instrument", "java.management", "jdk.unsupported")
             // Windowsのインストーラはjpackageではビルドしない。`createDistributable`の出力を
             // `packageInnoSetup`がInno Setupへ渡す。
             targetFormats(TargetFormat.Dmg, TargetFormat.Deb)
