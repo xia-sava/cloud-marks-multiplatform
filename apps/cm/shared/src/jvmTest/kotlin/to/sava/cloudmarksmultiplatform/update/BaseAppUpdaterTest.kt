@@ -126,10 +126,12 @@ class BaseAppUpdaterTest {
     // 確認すると確認している最中になり、新しいバージョンがあれば、そのバージョンと SHA-256 を持つ
     @Test
     fun checkFindsAvailableRelease() = runTest {
-        val updater = updater()
+        val gate = CompletableDeferred<Unit>()
+        val updater = updater(engine = updateInfoEngine(matchingUpdateInfo, key.sign(matchingUpdateInfo), gate))
 
         updater.check()
         assertEquals(UpdateCheck.Checking, updater.state.value.check)
+        gate.complete(Unit)
         val checked = updater.state.first { it.check != UpdateCheck.Checking }
 
         assertEquals(UpdateCheck.Available(RELEASED_VERSION_NAME, sha256Of(RELEASE_CONTENT)), checked.check)
@@ -183,9 +185,12 @@ class BaseAppUpdaterTest {
     fun downloadGoesThroughToAcceptedStage() = runTest {
         val updater = updater()
         updater.checkAndWait()
+        val gate = CompletableDeferred<Unit>()
+        updater.downloadGate = gate
 
         updater.download()
         assertEquals(UpdateInstall.Downloading(0, 0), updater.state.value.install)
+        gate.complete(Unit)
         val installed = updater.state.first { it.install == UpdateInstall.ReadyToApply || it.install is UpdateInstall.Failed }
 
         assertEquals(UpdateInstall.ReadyToApply, installed.install)
