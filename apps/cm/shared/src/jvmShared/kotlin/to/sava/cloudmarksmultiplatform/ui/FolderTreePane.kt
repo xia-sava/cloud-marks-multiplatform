@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -115,6 +117,7 @@ internal fun FolderTreePane(
 
 /**
  * フォルダのツリーの行 [rows]（[flattenFolderTree] の並び）を、上から並べる。行の中身は [rowContent] で描く。
+ * 右端に縦のスクロールバー（[ListVerticalScrollbar]）を出す。
  * メインの画面のツリーと、移動先を選ぶダイアログのツリーが使う。
  */
 @Composable
@@ -124,8 +127,11 @@ internal fun FolderTree(
     modifier: Modifier = Modifier,
     rowContent: @Composable (FolderTreeRow) -> Unit,
 ) {
-    LazyColumn(modifier, state = listState) {
-        items(rows, key = { it.folderId }) { row -> rowContent(row) }
+    Box(modifier) {
+        LazyColumn(Modifier.fillMaxSize(), state = listState) {
+            items(rows, key = { it.folderId }) { row -> rowContent(row) }
+        }
+        ListVerticalScrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
     }
 }
 
