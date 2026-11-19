@@ -10,7 +10,7 @@ const DEFAULT_ACTION_TITLE: string = CMM_EXTENSION_NAME
 /** 閉じたあとの失敗の文言を `storage.session` に入れるキー。 */
 export const FAILURE_STORAGE_KEY = "lastFailure"
 
-/** ポップアップが閉じていて失敗したとき、ボタンに印を付け、文言を取っておく。 */
+/** ポップアップが閉じていて失敗したとき、ボタンにバッジ（`!`）を付け、文言を取っておく。 */
 export async function recordFailure(api: ExtensionApi, message: string): Promise<void> {
   await api.storage.session.set({ [FAILURE_STORAGE_KEY]: message })
   await api.action.setBadgeText({ text: FAILURE_BADGE_TEXT })
@@ -18,7 +18,7 @@ export async function recordFailure(api: ExtensionApi, message: string): Promise
 }
 
 /**
- * 取っておいた失敗の文言を返し、ボタンの印と説明を元に戻して、文言を消す。
+ * 取っておいた失敗の文言を返し、ボタンのバッジを外して説明を元に戻し、文言を消す。
  * 無ければ何も変えず undefined を返す。
  */
 export async function takeFailure(api: ExtensionApi): Promise<string | undefined> {

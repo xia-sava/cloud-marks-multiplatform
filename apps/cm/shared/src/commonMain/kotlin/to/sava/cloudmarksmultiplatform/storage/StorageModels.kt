@@ -2,7 +2,7 @@ package to.sava.cloudmarksmultiplatform.storage
 
 import kotlin.time.Instant
 
-/** このクライアントが知っている形式の版。 */
+/** このクライアントが知っている形式のバージョン。 */
 const val SUPPORTED_FORMAT_VERSION = 1
 
 internal const val MANIFEST_FORMAT = "cloud-marks-manifest"
@@ -11,8 +11,8 @@ internal const val ITEMS_FORMAT = "cloud-marks-items"
 /**
  * マニフェストのヘッダー（1 行目）。`format` は定数なので持たない。
  *
- * @property version データを書いた形式の版
- * @property readableBy このデータを読むのに要る最低の版
+ * @property version データを書いた形式のバージョン
+ * @property readableBy このデータを読むのに要る最低のバージョン
  * @property commit 書き込みごとに新しく振る UUID
  * @property updatedBy 書き込んだクライアントの種類。読み手は知らない値も受け入れる
  */

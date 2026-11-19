@@ -36,7 +36,7 @@ internal fun getFailureOf(response: GetObjectResult): SyncFailure =
 
 /** マニフェストを読んだ結果。 */
 internal sealed interface ManifestRead {
-    /** 読めた。[readOnly] は、`version` が知っている版より新しく、読むだけにするとき。 */
+    /** 読めた。[readOnly] は、`version` が知っているバージョンより新しく、読むだけにするとき。 */
     class Usable(val manifest: Manifest, val eTag: String, val readOnly: Boolean) : ManifestRead
 
     /** 読めなかった。 */
@@ -59,7 +59,7 @@ internal class TreeReader(
      * マニフェストを読む（書き込みの手順 1）。
      *
      * ローカルキャッシュにマニフェストがあれば `If-None-Match` を付けて GET し、`304` ならローカルキャッシュのものを使う。
-     * 読んだマニフェストは検証し、版を確かめる。
+     * 読んだマニフェストは検証し、形式のバージョンを確かめる。
      * `304` でもローカルキャッシュのマニフェストがマニフェストとして読めない（壊れている）ときは、
      * ローカルキャッシュを丸ごと消し、条件を付けずに GET し直した結果を使う。
      * `200` で返ったマニフェストは、読み書きできるか読むだけにするものなら、ETag と一緒にローカルキャッシュに持ち、
@@ -247,7 +247,7 @@ private sealed interface FolderLoad {
 private sealed interface ItemsFileRead {
     class Loaded(val items: List<Item>) : ItemsFileRead
 
-    /** 壊れている。マニフェストが読むだけにするものなら、版が新しいために読めなかったものを含む。 */
+    /** 壊れている。マニフェストが読むだけにするものなら、形式のバージョンが新しいために読めなかったものを含む。 */
     class Broken(val problem: StorageProblem) : ItemsFileRead
 
     /** `404` を返した。 */

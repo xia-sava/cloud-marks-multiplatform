@@ -23,10 +23,10 @@ sealed interface SyncFailure {
     /** 権限が無い（`403`）。 */
     data object Forbidden : SyncFailure
 
-    /** マニフェストの `version` が知っている版より新しいので、読むだけにして書かない。アプリの更新が要る。 */
+    /** マニフェストの `version` が知っているバージョンより新しいので、読むだけにして書かない。アプリの更新が要る。 */
     data class ReadOnly(val version: Int, val readableBy: Int) : SyncFailure
 
-    /** マニフェストの `readableBy` が知っている版より新しいか、`version` が新しく検証に失敗したので、読めない。アプリの更新が要る。 */
+    /** マニフェストの `readableBy` が知っているバージョンより新しいか、`version` が新しく検証に失敗したので、読めない。アプリの更新が要る。 */
     data class UpdateRequired(val version: Int, val readableBy: Int) : SyncFailure
 
     /** マニフェストが壊れている。 */
@@ -62,7 +62,7 @@ sealed interface SyncFailure {
  * @property state [manifest] のツリー。項目を読み込んだフォルダと、項目を持たないフォルダの項目を含む
  * @property brokenFolders 項目ファイルが壊れていたフォルダの ID と、その問題。GET が `404` を返したファイルも、
  * マニフェストを読み直してなおそのファイルを指していれば含む。マニフェストが [TreeReadResult.ReadOnly] のときは、
- * 版が新しいために読めなかったものも含む
+ * 形式のバージョンが新しいために読めなかったものも含む
  */
 data class LoadedTree(
     val manifest: Manifest,
@@ -76,13 +76,13 @@ sealed interface TreeReadResult {
     /** 読めた。読み書きできる。 */
     data class Readable(val tree: LoadedTree) : TreeReadResult
 
-    /** 読めたが、マニフェストの `version` が知っている版より新しいので、読むだけにする。アプリの更新が要る。 */
+    /** 読めたが、マニフェストの `version` が知っているバージョンより新しいので、読むだけにする。アプリの更新が要る。 */
     data class ReadOnly(val tree: LoadedTree) : TreeReadResult
 
     /**
      * 読めなかった。
      *
-     * 版の扱いは [SyncFailure.UpdateRequired]、検証の失敗は [SyncFailure.ManifestCorrupt]、マニフェストの `404` は
+     * 形式のバージョンの扱いは [SyncFailure.UpdateRequired]、検証の失敗は [SyncFailure.ManifestCorrupt]、マニフェストの `404` は
      * [SyncFailure.ManifestNotFound]（ローカルキャッシュにマニフェストが無いとき）か [SyncFailure.ManifestDeleted]（あるとき）になる。
      */
     data class Failed(val failure: SyncFailure) : TreeReadResult
@@ -93,7 +93,7 @@ sealed interface FolderReadResult {
     /** 読めた。[items] は、表示の並び順の項目。 */
     data class Loaded(val items: List<Item>) : FolderReadResult
 
-    /** 項目ファイルが壊れている。マニフェストが読むだけにするものなら、版が新しいために読めなかったものを含む。 */
+    /** 項目ファイルが壊れている。マニフェストが読むだけにするものなら、形式のバージョンが新しいために読めなかったものを含む。 */
     data class Broken(val problem: StorageProblem) : FolderReadResult
 
     /**
@@ -156,7 +156,7 @@ sealed interface DeleteStaleFilesResult {
     /**
      * 何も消さずに終わった。マニフェストを読めなかった、マニフェストが読み書きできるものでなかった、一覧を読めなかった。
      *
-     * マニフェストの版の扱いは [SyncFailure.ReadOnly]（`version` が新しい）と [SyncFailure.UpdateRequired]、
+     * マニフェストの形式のバージョンの扱いは [SyncFailure.ReadOnly]（`version` が新しい）と [SyncFailure.UpdateRequired]、
      * 検証の失敗は [SyncFailure.ManifestCorrupt]、
      * マニフェストの `404` は（ローカルキャッシュの有無によらず）[SyncFailure.ManifestNotFound] になる。
      * 一覧の `403` は [SyncFailure.Forbidden]、結果が不明のものは [SyncFailure.Unreachable] になる。

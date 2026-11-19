@@ -27,7 +27,7 @@ internal val FORBIDDEN_ERROR = HostError(
     "S3 へのアクセスが拒否されました。Cloud Marks のアプリで、バケット名、プレフィックス、アクセスキーの権限を確認してください。",
 )
 
-/** データの形式の版がホストより新しい（[SyncFailure.ReadOnly]・[SyncFailure.UpdateRequired]）。 */
+/** データの形式のバージョンがホストより新しい（[SyncFailure.ReadOnly]・[SyncFailure.UpdateRequired]）。 */
 internal val UPDATE_REQUIRED_ERROR = HostError(
     HostErrorCode.UPDATE_REQUIRED,
     "データの形式が新しいため、追加できません。Cloud Marks のアプリを更新してください。",

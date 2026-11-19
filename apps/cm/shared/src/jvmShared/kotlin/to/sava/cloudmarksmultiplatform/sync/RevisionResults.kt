@@ -37,7 +37,7 @@ sealed interface RevisionFailure {
     /** その時点のマニフェストか、それが指す項目ファイルが壊れている。 */
     data class Corrupt(val problem: StorageProblem) : RevisionFailure
 
-    /** その時点のマニフェストの `readableBy` か `version` が、知っている版より新しい。アプリの更新が要る。 */
+    /** その時点のマニフェストの `readableBy` か `version` が、知っているバージョンより新しい。アプリの更新が要る。 */
     data object UpdateRequired : RevisionFailure
 }
 

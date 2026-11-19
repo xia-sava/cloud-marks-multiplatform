@@ -8,7 +8,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/** どの Windows にもある、Windows の版の情報を持つキー。 */
+/** どの Windows にもある、Windows のバージョンの情報を持つキー。 */
 private const val CURRENT_VERSION = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"
 
 /** どの Windows にもあるキー。子に `Microsoft` を持つ。 */

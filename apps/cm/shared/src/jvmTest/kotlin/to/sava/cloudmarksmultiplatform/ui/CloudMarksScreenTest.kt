@@ -39,7 +39,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-/** 知っている版より新しい、読むだけにするマニフェストの `version`。 */
+/** 知っているバージョンより新しい、読むだけにするマニフェストの `version`。 */
 private const val NEWER_VERSION = 2
 
 /** 項目の行を押したあと、行の外（下の行のさらに下）へポインターを動かす距離（画素）。項目の行の高さの 2 倍より長い。 */

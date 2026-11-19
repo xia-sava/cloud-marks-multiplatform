@@ -9,7 +9,7 @@ private const val FIRST_BODY_LINE = 2
  * 残りは確かめず [ManifestDecodeResult.UpdateRequired] を返す。`version` が新しいときにほかの検証で失敗した場合も、
  * [ManifestDecodeResult.Corrupt] ではなく [ManifestDecodeResult.UpdateRequired] を返す。
  *
- * @param knownVersion このクライアントが知っている形式の版
+ * @param knownVersion このクライアントが知っている形式のバージョン
  */
 fun decodeManifest(
     text: String,
@@ -42,9 +42,9 @@ fun decodeManifest(
  *
  * @param keyFolderId キー `folders/<フォルダの ID>/...` のフォルダの ID
  * @param folder このファイルを指している、マニフェストのフォルダの行。`id` と `count` を確かめる
- * @param manifestVersion マニフェストの `version`。知っている版より新しく、検証に失敗したときは
+ * @param manifestVersion マニフェストの `version`。知っているバージョンより新しく、検証に失敗したときは
  *   [ItemsFileDecodeResult.Corrupt] ではなく [ItemsFileDecodeResult.UpdateRequired] を返す
- * @param knownVersion このクライアントが知っている形式の版
+ * @param knownVersion このクライアントが知っている形式のバージョン
  */
 fun decodeItemsFile(
     text: String,

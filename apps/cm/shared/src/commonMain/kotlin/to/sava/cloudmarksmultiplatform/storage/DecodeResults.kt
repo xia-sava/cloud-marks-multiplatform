@@ -15,16 +15,16 @@ data class StorageProblem(
 
 /** マニフェストを読んだ結果。 */
 sealed interface ManifestDecodeResult {
-    /** 読めた。読み書きできる（`version` が知っている版以下）。 */
+    /** 読めた。読み書きできる（`version` が知っているバージョン以下）。 */
     data class Readable(val manifest: Manifest) : ManifestDecodeResult
 
-    /** 読めたが、`version` が知っている版より新しいので読むだけにする。書かず、古いファイルの削除もしない。 */
+    /** 読めたが、`version` が知っているバージョンより新しいので読むだけにする。書かず、古いファイルの削除もしない。 */
     data class ReadOnly(val manifest: Manifest) : ManifestDecodeResult
 
     /**
      * 読めない。アプリの更新が要る。
      *
-     * `readableBy` が知っている版より新しいとき、または `version` が新しく、ほかの検証にも失敗したときに返す。
+     * `readableBy` が知っているバージョンより新しいとき、または `version` が新しく、ほかの検証にも失敗したときに返す。
      *
      * @property cause 後者のとき、失敗した検証の内容。前者では null
      */
@@ -43,14 +43,14 @@ sealed interface ItemsFileDecodeResult {
     /** 読めた。 */
     data class Readable(val file: ItemsFile) : ItemsFileDecodeResult
 
-    /** マニフェストの `version` が知っている版より新しく、検証に失敗した。アプリの更新が要る。 */
+    /** マニフェストの `version` が知っているバージョンより新しく、検証に失敗した。アプリの更新が要る。 */
     data class UpdateRequired(val cause: StorageProblem) : ItemsFileDecodeResult
 
     /** 壊れている。 */
     data class Corrupt(val problem: StorageProblem) : ItemsFileDecodeResult
 }
 
-/** 失敗を、マニフェストの版に応じて「更新が要る」か「壊れている」に振り分ける。 */
+/** 失敗を、マニフェストの形式のバージョンに応じて「更新が要る」か「壊れている」に振り分ける。 */
 internal fun itemsFileFailure(
     problem: StorageProblem,
     manifestVersion: Int,

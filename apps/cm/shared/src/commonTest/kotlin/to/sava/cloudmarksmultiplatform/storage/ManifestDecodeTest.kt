@@ -168,7 +168,7 @@ class ManifestDecodeTest {
         cases.forEach { assertManifestCorrupt(it.text, it.line, it.name, it.mention) }
     }
 
-    // version が新しく readableBy が知っている版以下なら、検証を通れば読むだけになる
+    // version が新しく readableBy が知っているバージョン以下なら、検証を通れば読むだけになる
     @Test
     fun newerVersionWithReadableByKnownIsReadOnly() {
         val result = decodeManifest(jsonl(manifestHeaderLine(version = 2, readableBy = 1), root))
@@ -176,7 +176,7 @@ class ManifestDecodeTest {
         assertEquals(2, assertIs<ManifestDecodeResult.ReadOnly>(result).manifest.header.version)
     }
 
-    // readableBy が知っている版より新しければ、残りが壊れていても読めない（更新が要る）
+    // readableBy が知っているバージョンより新しければ、残りが壊れていても読めない（更新が要る）
     @Test
     fun newerReadableByIsUpdateRequiredWithoutCheckingRest() {
         val result = decodeManifest(jsonl(manifestHeaderLine(version = 2, readableBy = 2), "{\"x\":1}") + "garbage")
@@ -205,7 +205,7 @@ class ManifestDecodeTest {
         }
     }
 
-    // ヘッダーの format・version・readableBy の検証は版によらず先に行い、失敗すれば壊れている
+    // ヘッダーの format・version・readableBy の検証は形式のバージョンによらず先に行い、失敗すれば壊れている
     @Test
     fun headerRulesAreCheckedBeforeVersionDecision() {
         val wrongFormat = manifestHeaderLine(version = 2, readableBy = 1).replace("cloud-marks-manifest", "other")
@@ -215,7 +215,7 @@ class ManifestDecodeTest {
         assertManifestCorrupt(jsonl(inverted, root), 1, mention = "`readableBy`")
     }
 
-    // 知っている版を引数で変えると、その版以下は読み書きできる
+    // 知っているバージョンを引数で変えると、そのバージョン以下は読み書きできる
     @Test
     fun knownVersionParameterControlsDecision() {
         val text = jsonl(manifestHeaderLine(version = 2, readableBy = 2), root)

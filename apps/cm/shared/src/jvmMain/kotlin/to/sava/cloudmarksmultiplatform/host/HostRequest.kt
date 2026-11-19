@@ -15,7 +15,7 @@ import to.sava.cloudmarksmultiplatform.operations.NewItem
 import to.sava.cloudmarksmultiplatform.operations.Operation
 import kotlin.time.Instant
 
-/** 取り決めの版。要求の `protocol` の値。 */
+/** 取り決めのバージョン。要求の `protocol` の値。 */
 internal const val PROTOCOL_VERSION = 1
 
 private const val PROTOCOL = "protocol"

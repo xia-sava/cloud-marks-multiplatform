@@ -42,7 +42,7 @@ import kotlin.test.assertTrue
 /** 選ぶ状態でないときの AppBar のボタンの説明。 */
 private val NORMAL_TOP_BAR_BUTTONS = listOf(TREE_PANE_DESCRIPTION, BACK_DESCRIPTION, RELOAD_DESCRIPTION, SETTINGS_DESCRIPTION)
 
-/** 読むだけのツリーにするための、マニフェストの形式の版（対応している版より新しい）。 */
+/** 読むだけのツリーにするための、マニフェストの形式のバージョン（対応しているバージョンより新しい）。 */
 private const val NEWER_VERSION = 2
 
 /** タイトルを変更するテストで入れる、新しいタイトル。 */

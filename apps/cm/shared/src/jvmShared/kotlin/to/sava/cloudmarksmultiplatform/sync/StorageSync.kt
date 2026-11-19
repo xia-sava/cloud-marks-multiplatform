@@ -106,7 +106,7 @@ class StorageSync(
     /**
      * マニフェストから参照されなくなった項目ファイルを消す（古いファイルの削除）。デスクトップのアプリだけが呼ぶ。1 日に 1 回程度。
      *
-     * マニフェストはローカルキャッシュを使わずに GET する。`200` で検証に通り、`version` が知っている版以下のときだけ続け、
+     * マニフェストはローカルキャッシュを使わずに GET する。`200` で検証に通り、`version` が知っているバージョン以下のときだけ続け、
      * それ以外（[SyncFailure.ReadOnly]・[SyncFailure.UpdateRequired]・[SyncFailure.ManifestCorrupt]・
      * [SyncFailure.ManifestNotFound]・GET の失敗）は何も消さずに [DeleteStaleFilesResult.Failed] で返す。
      * 一覧を読めなかったときも、何も消さずに [DeleteStaleFilesResult.Failed] で返す。
@@ -126,7 +126,7 @@ class StorageSync(
     /**
      * 戻せる時点 [revision] のマニフェストを、そのバージョンの GET で読んで検証する。ローカルキャッシュは使わず、替えない。
      *
-     * 版が知っているものより新しければ（読むだけにするものを含む）[RevisionFailure.UpdateRequired]、壊れていれば
+     * 形式のバージョンが知っているものより新しければ（読むだけにするものを含む）[RevisionFailure.UpdateRequired]、壊れていれば
      * [RevisionFailure.Corrupt]、そのバージョンがもう無ければ [RevisionFailure.Incomplete] で返す。
      */
     suspend fun readRevision(revision: Revision): RevisionReadResult = revisionReader.read(revision)

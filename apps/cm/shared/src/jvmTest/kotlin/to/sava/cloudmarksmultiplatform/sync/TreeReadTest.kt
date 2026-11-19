@@ -100,7 +100,7 @@ class TreeReadTest {
         assertNull(fixture.cache.itemsFile(folderAKey))
     }
 
-    // 読むだけにするマニフェスト（形式の版が新しい）を 200 で読んだときも、そのマニフェストが指す項目ファイルのキーで retain を呼ぶ
+    // 読むだけにするマニフェスト（形式のバージョンが新しい）を 200 で読んだときも、そのマニフェストが指す項目ファイルのキーで retain を呼ぶ
     @Test
     fun retainsItemsFilesWhenManifestIsReadOnly() = runTest {
         val fixture = SyncFixture().apply { store.seed(initialManifest(version = 2, readableBy = 1)) }
@@ -236,7 +236,7 @@ class TreeReadTest {
         assertTrue(fixture.store.requests.none { it is Request.Put })
     }
 
-    // 形式の版の 4 通り：version が知っている版以下なら読み書きできる、readableBy ≤ 知っている版 < version なら読むだけ、
+    // 形式のバージョンの 4 通り：version が知っているバージョン以下なら読み書きできる、readableBy ≤ 知っているバージョン < version なら読むだけ、
     // readableBy が新しければ更新が要る、検証に通らなければ壊れている
     @Test
     fun distinguishesFormatVersionsAndCorruption() = runTest {

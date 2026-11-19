@@ -23,7 +23,7 @@ internal const val ROOT_FOLDER_LABEL = "トップ"
 internal const val APP_TITLE = "Cloud Marks"
 internal const val SETTINGS_TITLE = "設定"
 
-/** マニフェストの `version` が知っている版より新しく、読むだけにしていることを伝える文。 */
+/** マニフェストの `version` が知っているバージョンより新しく、読むだけにしていることを伝える文。 */
 internal const val READ_ONLY_NOTICE = "データの形式が新しいため、表示はできますが変更はできません。アプリを更新してください。"
 
 /** フォルダが空であることを伝える文。 */

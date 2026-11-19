@@ -47,7 +47,7 @@ class OperationWriteTest {
         assertIs<ManifestDecodeResult.Readable>(decodeManifestGzip(body)).manifest
 
     // 普通の成功：中身の変わった項目ファイルを If-None-Match: * で置いてから、マニフェストを If-Match で置く。
-    // マニフェストは読み書きできる形で、commit が新しく、形式の版は読んだまま、updatedAt は時計の現在をミリ秒に切り詰めたもの。
+    // マニフェストは読み書きできる形で、commit が新しく、形式のバージョンは読んだまま、updatedAt は時計の現在をミリ秒に切り詰めたもの。
     // 書いたマニフェストと ETag、置いたファイルをキャッシュに持ち、書いたあとのツリーを返す
     @Test
     fun writesItemsFilesThenManifest() = runTest {

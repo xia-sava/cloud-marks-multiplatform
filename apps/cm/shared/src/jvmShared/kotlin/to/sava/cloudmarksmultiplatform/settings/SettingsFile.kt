@@ -47,7 +47,7 @@ private fun corrupt(detail: String): Nothing = throw SettingsReadFailure(Setting
  *
  * S3 の接続先（リージョン・バケット・プレフィックス）と、[protector] で暗号化した認証情報を 1 つのファイルに入れる。
  * 認証情報は平文で書かない。暗号化できなければ、書かずに [SettingsWriteResult.ProtectionUnavailable] を返す。
- * 形式の版の欄は持たず、読むときは知らない欄を無視する。
+ * 形式のバージョンの欄は持たず、読むときは知らない欄を無視する。
  *
  * 読み書きはブロックする。呼び出し側が I/O 用のスレッドで呼ぶ。
  *

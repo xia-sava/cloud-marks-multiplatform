@@ -35,7 +35,7 @@ GitHub のリポジトリ `xia-sava/cloud-marks-multiplatform` のリリース�
 - 固定のリリースのファイルは、配布物を先に、更新情報（`latest.json`・`latest.json.sig`・`updates.json`）を最後に置き換える。
   更新情報が、まだ置いていない配布物を指すあいだを作らないため
 - タグ `latest` と `extension-latest` は、最初にリリースを作ったときのコミット（その時点の既定のブランチの先頭）を指したまま動かさない。
-  `GITHUB_TOKEN` は、タグの前後のコミットのあいだに `.github/workflows` の変更があると、タグを動かせない（403 になる）ため。
+  `GITHUB_TOKEN` は、動かす前と後のコミットのあいだに `.github/workflows` の変更があると、タグを動かせない（403 になる）ため。
   アプリと Firefox は、タグの指すコミットではなくリリースに置いたファイルを読むので、配る中身はタグの指す先によらず替えられる
 - リポジトリの設定で immutable releases（公開したリリースを変えられなくする設定）を有効にしない。固定のリリースのファイルを
   置き換えられなくなる
@@ -56,7 +56,7 @@ GitHub のリポジトリ `xia-sava/cloud-marks-multiplatform` のリリース�
 - **Chrome の拡張の `key`**（`contracts/native-messaging/identities.json`）。拡張の ID は `key` から決まり、ホストはこの ID の拡張だけを受け付ける
 - **Native Messaging のホストの名前**（`to.sava.cloudmarksmultiplatform`）。Firefox の拡張はアプリと別に更新されるので、
   新しい拡張も古い拡張も、同じ名前でホストを呼ぶ
-- **呼び出しの URL のホスト**（`identities.json` の `callUrlHost`。配布版は `cmm.invalid`）。アプリはこのホストの URL でブラウザを起動し、
+- **呼び出しの URL のホスト**（`identities.json` の `callUrlHost`）。配布版は `cmm.invalid`。アプリはこのホストの URL でブラウザを起動し、
   拡張はこのホストの URL を開いたタブだけを見つける（`docs/native-messaging.md` の「アプリからのコマンド（ブラウザで開く）」）。
   Firefox の拡張とアプリは別に更新されるので、新旧のどちらも同じホストを使う
 - **インストーラの `AppId`、exe の名前（`CloudMarks.exe`）、インストール先（`%LOCALAPPDATA%\Programs\CloudMarks`）。** `AppId` を変えると、
@@ -64,7 +64,7 @@ GitHub のリポジトリ `xia-sava/cloud-marks-multiplatform` のリリース�
   Chrome はインストール先のフォルダから拡張を読み込み、レジストリはインストール先のパスでホストを登録する JSON を指す
 - **デスクトップのアプリのデータを置くディレクトリ**（`%LOCALAPPDATA%\CloudMarks`）。更新したアプリとホストが、前の設定と認証情報を読む
 - **Android のアプリケーションの ID（`to.sava.cloudmarksmultiplatform`）と署名の鍵。** 端末は、同じ ID で同じ鍵の APK でなければ
-  上書きの更新を断る。`release.yml` は、APK の署名の証明書の SHA-256 を期待値と比べる
+  上書きの更新を断る。`release.yml` は、APK に署名した証明書の SHA-256 を期待値と比べる
 
 ## 更新情報と署名
 
@@ -149,8 +149,8 @@ Inno Setup で組む（`apps/cm/desktopApp/installer/cloudmarks.iss`）。入れ
   残さないため
 - インストール先の直下に、リポジトリのライセンス（`LICENSE`）と第三者のライブラリの表記（`THIRD-PARTY-NOTICES.md`）を入れる。
   JetBrains Runtime のライセンスと表記は `runtime\legal` に入る
-- アンインストールが消すのは、インストール先のファイルとホストの登録だけ。アプリのデータ（`%LOCALAPPDATA%\CloudMarks`。設定、認証情報、
-  キャッシュ、ログ）は残る
+- アンインストールが消すのは、インストール先のファイルとホストの登録だけ。アプリのデータを置くディレクトリ（`%LOCALAPPDATA%\CloudMarks`）の
+  設定、認証情報、キャッシュ、ログは残る
 - アンインストールすると、Chrome が拡張を読み込んでいたフォルダ（`<インストール先>\extension\chrome`）も消える。Chrome の拡張は、
   利用者が Chrome の拡張の画面で外す
 - インストーラにはコードの署名をしていない。Windows の SmartScreen が警告を出す
@@ -163,11 +163,11 @@ Apache License 2.0 の NOTICE の中身と、ライセンスの本文を置く�
 - インストーラはインストール先の直下に、APK は assets の直下（`assets/LICENSE`・`assets/THIRD-PARTY-NOTICES.md`）に、拡張は
   4 つの出力（配布版と開発版の Chrome と Firefox）の直下に、`LICENSE` と `THIRD-PARTY-NOTICES.md` を入れる。インストーラの分は
   `:desktopApp:stageInstallerFiles`、APK の分は `:androidApp` の `copyLicenseAssets`、拡張の分は `apps/extension/scripts/build-extension.ts`
-  が写す。どれも、ファイルが無ければビルドが止まる。アプリと拡張の画面には出さない
+  がコピーする。どれも、ファイルが無ければビルドが止まる。アプリと拡張の画面には出さない
 - 拡張のビルドが `apps/extension` の外から読むのは、この 2 つのファイルだけ。`extension-release.yml` が AMO に添えるソースの zip にも入れる
 - 対象は、`apps/cm` の `:desktopApp` の `runtimeClasspath` と、`:androidApp` の `releaseRuntimeClasspath`。依存を足したとき、
   バージョンを上げたときは、表記も直す
-- Skiko の中の Skia とそのライブラリは、Skiko のバージョンが使う Skia の `DEPS` で版を確かめる。Skiko を上げたときは、表と本文も見直す
+- Skiko の中の Skia とそのライブラリは、Skiko のバージョンが使う Skia の `DEPS` でバージョンを確かめる。Skiko を上げたときは、表と本文も見直す
 - 拡張は第三者のパッケージを入れない（esbuild がまとめるのは `apps/extension/src` だけ）。拡張のコードが npm のパッケージを読むようにしたら、
   表記に足す
 - アイコン（`assets/icon/`）は、Windows のアプリ、Android のアプリ、拡張のすべてに入る。CC BY 3.0 は、配るものに作者、出典、ライセンスの URL、
@@ -217,8 +217,8 @@ Apache License 2.0 の NOTICE の中身と、ライセンスの本文を置く�
 - `updates.json` は、gecko の ID ごとに、最新のバージョンの項目を 1 つだけ持つ。項目の `update_link` はバージョンごとのリリースの `.xpi`、
   `update_hash` はその SHA-256（`sha256:` に小文字の 16 進を続けたもの）。書くのは `apps/extension/scripts/firefox-updates.ts`
 - Firefox の拡張は、アプリと別に更新される。新しい拡張と古いホスト、古い拡張と新しいホストが組み合わさる。Native Messaging の
-  メッセージの互換は、`docs/native-messaging.md` の決まりに従う（ホストは表に無い欄を無視し、知らない `protocol` には `invalidRequest` を返す。
-  拡張は知らない `code` を受けても `message` を出す）
+  メッセージの互換は、`docs/native-messaging.md` の決まりに従う。ホストは表に無い欄を無視し、知らない `protocol` には `invalidRequest` を返す。
+  拡張は知らない `code` を受けても `message` を出す
 
 ## リリースの手順
 

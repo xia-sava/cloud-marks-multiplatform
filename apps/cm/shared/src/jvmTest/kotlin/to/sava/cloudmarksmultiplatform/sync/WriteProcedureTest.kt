@@ -38,7 +38,7 @@ private class ScriptedPlanner<R>(vararg plans: (ManifestRead.Usable) -> WritePla
 
 /**
  * [read] のマニフェストをもとに、ルートフォルダの項目を [ROOT_WITH_ADDED] にする書く中身。
- * ヘッダーの版は [version] と [readableBy]、書いたあとのツリーで読み込んであるものとする項目は [loadedItems]。
+ * ヘッダーの形式のバージョンは [version] と [readableBy]、書いたあとのツリーで読み込んであるものとする項目は [loadedItems]。
  */
 private fun addToRoot(
     read: ManifestRead.Usable,

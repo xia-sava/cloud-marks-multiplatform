@@ -6,7 +6,7 @@ import { sendRequest } from "./send"
 /**
  * ポップアップからのポートを受け、要求をホストへ送る。
  * 結果が出たときポートがつながっていれば結果を渡す。切れていて失敗だったら、
- * 次にポップアップを開いたときに出せるよう、ボタンの印と文言を残す。成功なら何もしない。
+ * 次にポップアップを開いたときに出せるよう、ボタンのバッジと文言を残す。成功なら何もしない。
  */
 export function handleConnection(api: ExtensionApi, port: ExtensionPort): void {
   if (port.name !== POPUP_PORT_NAME) return

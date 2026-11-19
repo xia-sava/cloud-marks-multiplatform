@@ -46,7 +46,7 @@ fun selectionModeOf(ctrlPressed: Boolean, shiftPressed: Boolean): SelectionMode 
  * 狭い画面でだけ、ドロワーが開く（[drawerOpen] が true になるのは [wideLayout] が false のときだけ）。
  *
  * @property tree 読んだマニフェストのツリー。まだ読めていなければ null。読み直しに失敗しても、前に読めたものを残す
- * @property readOnly [tree] のマニフェストが、読むだけにするもの（`version` が知っている版より新しい）か
+ * @property readOnly [tree] のマニフェストが、読むだけにするもの（`version` が知っているバージョンより新しい）か
  * @property loading マニフェストを読んでいる最中か
  * @property failure 最後にマニフェストを読んだときの失敗。読めたか、失敗の帯を閉じたら null
  * @property currentFolderId 開いているフォルダ。[tree] が null なら null

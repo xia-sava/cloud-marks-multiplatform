@@ -44,7 +44,7 @@ internal class RevisionReader(private val store: ObjectStore) {
     /**
      * マニフェストのバージョン [revision] を GET して検証する。
      *
-     * 版が知っているものより新しければ（読むだけにするものを含む）[RevisionFailure.UpdateRequired]、壊れていれば
+     * 形式のバージョンが知っているものより新しければ（読むだけにするものを含む）[RevisionFailure.UpdateRequired]、壊れていれば
      * [RevisionFailure.Corrupt]、そのバージョンが無ければ（`404`）[RevisionFailure.Incomplete]、GET のそのほかの失敗は
      * [RevisionFailure.Sync] で返す。
      */
