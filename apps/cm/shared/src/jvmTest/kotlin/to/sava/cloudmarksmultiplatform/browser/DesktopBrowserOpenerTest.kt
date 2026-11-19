@@ -11,6 +11,7 @@ import org.junit.Rule
 import org.junit.rules.TemporaryFolder
 import to.sava.cloudmarksmultiplatform.AppFiles
 import to.sava.cloudmarksmultiplatform.app.TestClock
+import to.sava.cloudmarksmultiplatform.nativeMessagingIdentity
 import to.sava.cloudmarksmultiplatform.settings.TabLoading
 import java.io.IOException
 import java.net.URI
@@ -70,6 +71,7 @@ class DesktopBrowserOpenerTest {
                 stateDirectory = directory.resolve("state"),
                 deviceSettingsFile = directory.resolve("device.json"),
                 commandDirectory = directory.resolve("commands"),
+                updateDirectory = directory.resolve("updates"),
             )
         }
     }
@@ -77,9 +79,11 @@ class DesktopBrowserOpenerTest {
     private fun TestScope.opener(
         registry: RegistryReader = this@DesktopBrowserOpenerTest.registry,
         defaultBrowser: DefaultBrowser = DefaultBrowser { browsed += it },
+        distributed: Boolean = true,
     ): DesktopBrowserOpener =
         DesktopBrowserOpener(
             appFiles = appFiles,
+            distributed = distributed,
             log = { logs += it },
             registry = registry,
             processStarter = starter,
@@ -190,7 +194,7 @@ class DesktopBrowserOpenerTest {
 
         val file = commandFiles().single()
         val token = file.name.removeSuffix(".json")
-        assertEquals(listOf(listOf(CHROME.executable, knockUrl(token))), starter.started)
+        assertEquals(listOf(listOf(CHROME.executable, knockUrl(token, distributed = true))), starter.started)
         assertContentEquals(OpenTabsCommand(TABS, TAB_LOADING).encode(), file.readBytes())
 
         advanceTimeBy(COMMAND_DELIVERY_TIMEOUT - 1.milliseconds)
@@ -201,6 +205,22 @@ class DesktopBrowserOpenerTest {
         runCurrent()
         assertEquals(BrowserOpenResult.CommandUndelivered, opening.await())
         assertTrue(file.exists())
+    }
+
+    // 2 つ以上を開くときの呼び出しの URL は、配布版なら配布版の、開発版なら開発版の、identities.json の callUrlHost をホストに持つ
+    @Test
+    fun knockUrlFollowsVariant() = runTest {
+        listOf(true, false).forEach { distributed ->
+            starter.started.clear()
+
+            val opening = async { opener(distributed = distributed).openInBrowser(CHROME, TABS, TAB_LOADING) }
+            runCurrent()
+
+            val argument = starter.started.single()[1]
+            val host = Regex.escape(nativeMessagingIdentity(distributed, "callUrlHost"))
+            assertTrue(Regex("^https://$host/knock\\?token=[0-9a-f]{32}$").matches(argument), "distributed=$distributed: $argument")
+            opening.cancel()
+        }
     }
 
     // 10 秒たつまでにホストがコマンドのファイルを受け取って消していれば、開いたとする

@@ -1,7 +1,10 @@
 import { MESSAGES } from "./messages"
 
-/** Native Messaging のホストの名前。 */
-export const HOST_NAME = "to.sava.cloudmarksmultiplatform"
+// ビルドが埋め込むホストの名前（`variantDefines`）。
+declare const CMM_HOST_NAME: string
+
+/** Native Messaging のホストの名前。配布版の拡張は配布版の、開発版の拡張は開発版のホストとやり取りする。 */
+export const HOST_NAME: string = CMM_HOST_NAME
 
 export interface RequestTab {
   url: string

@@ -1,0 +1,734 @@
+name: release
+
+# アプリ（apps/cm）のリリース。タグ vMAJOR.MINOR.PATCH の push で、インストーラと APK を組み、更新情報を書いて署名し、
+# バージョンごとのリリースと、固定のタグ latest のリリースへ公開する。拡張のタグ（extension-v*）では動かない。
+# 手動実行はインストーラと APK を組んで成果物に残すだけで、公開しない。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+# 既定では GITHUB_TOKEN に何の権限も与えない。各ジョブが要る分だけ宣言する。
+permissions: {}
+
+# 走っているリリースは取り消さず、終わってから次を走らせる。同じグループで待てるのは 1 つだけで、待っているあいだに
+# 次が来ると、待っていた方は取り消される。タグは前のリリースが終わってから打つ。
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  # デスクトップ（shared の jvm() と desktopApp）をコンパイル・テストする JDK と、配布物に入れる JetBrains Runtime のバージョン。
+  # apps/cm/gradle/libs.versions.toml の desktop-jdk と揃える。
+  JAVA_VERSION: "25"
+  # Windows のインストーラをビルドする Inno Setup。ランナーに無いときに入れるバージョンを固定する。
+  INNO_SETUP_VERSION: "6.7.1"
+
+jobs:
+  # バージョン、更新情報の署名を確かめる公開鍵、リリースノートを決め、インストーラに入れる Firefox の拡張を取る。
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      code: ${{ steps.compute.outputs.code }}
+      name: ${{ steps.compute.outputs.name }}
+      update-info-public-key: ${{ steps.public-key.outputs.key }}
+      firefox-extension: ${{ steps.firefox-extension.outputs.available }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          # versionCode をコミット数で決め、リリースノートを前のタグから書くため、全履歴とタグを取る。
+          # 既定の浅い取得では、コミット数が 1 になり、前のタグも見えない。
+          fetch-depth: 0
+
+      # 公開するのは、公開のリポジトリで、アプリが更新を問い合わせるリポジトリ（UpdateChecker.kt の RELEASE_REPOSITORY）と
+      # 同じときだけにする。非公開のリポジトリの配布物は、アプリからも公開のあとの確かめからも取れない。
+      # 問い合わせ先と違うリポジトリに公開しても、配ったアプリには届かない。
+      - name: Check release repository
+        if: github.event_name == 'push'
+        env:
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -euo pipefail
+          if [ "$REPOSITORY_PRIVATE" != "false" ]; then
+            echo "リポジトリが公開になっていない（private: $REPOSITORY_PRIVATE）。公開にしてからタグを打つ" >&2
+            exit 1
+          fi
+          app_repository=$(bash .github/scripts/kotlin-constant.sh \
+            apps/cm/shared/src/jvmShared/kotlin/to/sava/cloudmarksmultiplatform/update/UpdateChecker.kt RELEASE_REPOSITORY)
+          if [ "$app_repository" != "$GITHUB_REPOSITORY" ]; then
+            echo "アプリが更新を問い合わせるリポジトリ（$app_repository）と、このリポジトリ（$GITHUB_REPOSITORY）が違う" >&2
+            exit 1
+          fi
+
+      # versionCode は apps/cm と apps/extension に触れたコミットの数（単調増加し、タグの打ち方に左右されない）。
+      # 拡張だけを直したバージョンも出せるよう、拡張のコミットも数える。ワークフローや contracts/ だけを直したコミットでは増えない。
+      # versionName はタグ名から v を除いたもの。公開しない手動実行は、見分けられる名前を付ける。
+      - name: Compute version
+        id: compute
+        run: |
+          set -euo pipefail
+          code=$(git rev-list --count HEAD -- apps/cm apps/extension)
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            name="${GITHUB_REF_NAME#v}"
+            # 配布するバージョンは major.minor.patch の形に揃える。接尾辞の付いたタグも断る。
+            if ! [[ "$name" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "タグは vMAJOR.MINOR.PATCH の形で打つ（受け取った値: $GITHUB_REF_NAME）" >&2
+              exit 1
+            fi
+          else
+            name="dev-$(git rev-parse --short HEAD)"
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "versionCode=$code versionName=$name"
+
+      # 更新情報の署名を確かめる公開鍵は、アプリのソースの定数から読む。ワークフローに写しを置くと、
+      # 食い違ったまま公開して、配ったアプリが更新を受け付けなくなりうる。
+      - name: Read update info public key
+        id: public-key
+        run: |
+          set -euo pipefail
+          key=$(bash .github/scripts/update-info-public-key.sh \
+            apps/cm/shared/src/jvmShared/kotlin/to/sava/cloudmarksmultiplatform/update/UpdateInfoSignature.kt)
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+
+      # 配布中の更新情報より versionCode が増えていることを確かめる。履歴の取り漏れやタグの打ち直しに
+      # 気づかないまま公開すると、それ以後どの端末にも更新が届かなくなる。
+      # 更新情報がまだ無ければ（404）最初のリリースとして進める。ほかの理由で取れないとき、読めないときは止める。
+      - name: Verify version code increases
+        if: github.event_name == 'push'
+        env:
+          VERSION_CODE: ${{ steps.compute.outputs.code }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          url="https://github.com/${REPOSITORY}/releases/download/latest/latest.json"
+          published="$RUNNER_TEMP/published-latest.json"
+          status=$(curl -sSL --retry 3 -o "$published" -w '%{http_code}' "$url")
+          if [ "$status" = "404" ]; then
+            echo "配布中の更新情報が無い。最初のリリースとして進める（versionCode: $VERSION_CODE）"
+            exit 0
+          fi
+          if [ "$status" != "200" ]; then
+            echo "配布中の更新情報を取れない（HTTP $status）" >&2
+            exit 1
+          fi
+          published_code=$(jq -r '[.desktop.versionCode, .android.versionCode] | map(select(type == "number")) | max' "$published")
+          if ! [[ "$published_code" =~ ^[0-9]+$ ]]; then
+            echo "配布中の更新情報から versionCode を読めない（読んだ値: $published_code）" >&2
+            exit 1
+          fi
+          if [ "$VERSION_CODE" -le "$published_code" ]; then
+            echo "versionCode が増えていない（配布中 $published_code → 今回 $VERSION_CODE）" >&2
+            exit 1
+          fi
+          echo "versionCode: $published_code → $VERSION_CODE"
+
+      # インストーラに入れる署名済みの Firefox の拡張。拡張のリリース（extension-release.yml）が extension-latest に置いたもの。
+      # 拡張の新しいバージョンも一緒に出すときは、拡張のリリースが終わってからタグを打つ。
+      # テストと配布物のビルドより前に、ここで確かめる。取れないとき、.xpi のバージョンがこのコミットの拡張のバージョン
+      # （apps/extension/package.json の version）と違うときは、タグを打った回は止める。手動実行の回は警告にとどめる
+      # （拡張をまだ一度もリリースしていなくても組めるよう、取れなければ Firefox の拡張なしで組む）。
+      - name: Download Firefox extension
+        id: firefox-extension
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p firefox-extension
+          if ! gh release download extension-latest --repo "$REPOSITORY" --pattern cloudmarks-firefox.xpi --dir firefox-extension; then
+            message="extension-latest のリリースから Firefox の拡張（cloudmarks-firefox.xpi）を取れない"
+            if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+              echo "$message" >&2
+              exit 1
+            fi
+            echo "::warning::${message}。Firefox の拡張を入れずにインストーラを組む"
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          xpi_version=$(unzip -p firefox-extension/cloudmarks-firefox.xpi manifest.json | jq -er '.version')
+          package_version=$(jq -er '.version' apps/extension/package.json)
+          if [ "$xpi_version" != "$package_version" ]; then
+            message="extension-latest の Firefox の拡張のバージョン（$xpi_version）が、apps/extension/package.json の version（$package_version）と違う"
+            if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+              echo "$message" >&2
+              exit 1
+            fi
+            echo "::warning::${message}"
+          fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "Firefox の拡張: $xpi_version"
+
+      - uses: actions/upload-artifact@v7
+        if: steps.firefox-extension.outputs.available == 'true'
+        with:
+          name: firefox-extension
+          path: firefox-extension/cloudmarks-firefox.xpi
+          if-no-files-found: error
+          retention-days: 1
+
+      # リリースノート。前の v* のタグから、apps/cm と apps/extension に触れたコミットの件名を並べる。
+      # 前のタグが無ければ最初のリリースとする。latest のリリースの説明も、ここで書く。
+      - name: Write release notes
+        if: github.event_name == 'push'
+        env:
+          VERSION_NAME: ${{ steps.compute.outputs.name }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          if previous=$(git describe --tags --abbrev=0 --match 'v*' HEAD^ 2>/dev/null); then
+            git log --format='- %s' "$previous..HEAD" -- apps/cm apps/extension > artifacts/release-notes.md
+          else
+            echo "最初のリリースです。" > artifacts/release-notes.md
+          fi
+          printf '最新のバージョン（%s）です。アプリは、このリリースに置いた更新情報で新しいバージョンを確かめます。インストールしたあとの更新は、アプリの設定の画面の「アプリの更新」から行えます。\n' \
+            "$VERSION_NAME" > artifacts/latest-release-notes.md
+          cat artifacts/release-notes.md
+
+      - uses: actions/upload-artifact@v7
+        if: github.event_name == 'push'
+        with:
+          name: release-notes
+          path: |
+            artifacts/release-notes.md
+            artifacts/latest-release-notes.md
+          if-no-files-found: error
+          retention-days: 1
+
+  # 配布物を作る前にテストを通す。ここが落ちればリリースまで進まない。
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      # リポジトリに置いている gradle-wrapper.jar が公式のものであることを確かめる。
+      - uses: gradle/actions/wrapper-validation@v6
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      # check は androidMain のコンパイルを含まないため、対象を明示して補う。
+      - name: Run tests
+        working-directory: apps/cm
+        run: >
+          ./gradlew check :shared:compileAndroidMain :androidApp:compileDebugKotlin
+          --console=plain
+
+      # 拡張のテスト。Node.js のバージョンは extension.yml と揃える。
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: apps/extension/package-lock.json
+
+      - name: Install extension dependencies
+        working-directory: apps/extension
+        run: npm ci
+
+      - name: Typecheck extension
+        working-directory: apps/extension
+        run: npm run typecheck
+
+      - name: Test extension
+        working-directory: apps/extension
+        run: npm test
+
+      # 落ちたときに何が起きたかを残す。ログへ出るのは結果だけで、
+      # ローカルで再現しない失敗はこれが無いと辿れない。
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: test-reports
+          path: |
+            apps/cm/shared/build/reports/tests/
+            apps/cm/shared/build/test-results/
+            apps/cm/androidApp/build/reports/
+          if-no-files-found: ignore
+          retention-days: 1
+
+  # 手動実行でも組む。公開はしないが、実機で試すためのインストーラを成果物として残す。
+  desktop:
+    needs: [version, check]
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # 配布物に入れる JetBrains Runtime。Gradle のツールチェーンが自動でダウンロードする先には
+      # 載っていないバージョンがあるため、ここで入れて場所を Gradle へ渡す。
+      # Gradle を動かす JDK を後から入れ、JAVA_HOME はそちらを指したままにする。
+      - uses: actions/setup-java@v6
+        id: jetbrains-runtime
+        with:
+          distribution: jetbrains
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      # 認証情報の暗号化（DPAPI）とレジストリの読み取りのテストは Windows でだけ走り、check（ubuntu）では飛ばされる。
+      # 配布物を組む前にここで走らせる。
+      - name: Run JVM tests
+        working-directory: apps/cm
+        run: ./gradlew :shared:jvmTest --console=plain
+
+      # Gradle のタスクは、Inno Setup のコンパイラを全ユーザーのインストール先からも探す。
+      # ランナーに入っているバージョンを使い、無いときだけ INNO_SETUP_VERSION のバージョンを入れる。
+      - name: Ensure Inno Setup
+        run: |
+          $compiler = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $compiler)) {
+            choco install innosetup "--version=$env:INNO_SETUP_VERSION" --require-checksums --no-progress -y
+          }
+          if (-not (Test-Path $compiler)) { throw "Inno Setup が見つからない" }
+          Write-Host "Inno Setup: $compiler"
+
+      # インストーラに入れる配布版の Chrome の拡張（apps/extension/dist/chrome）を、タグのコミットから作る。
+      # Node.js のバージョンと npm のキャッシュは check と揃える。
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: apps/extension/package-lock.json
+
+      - name: Install extension dependencies
+        working-directory: apps/extension
+        run: npm ci
+
+      - name: Build extension
+        working-directory: apps/extension
+        run: npm run build
+
+      # インストーラに入れる署名済みの Firefox の拡張。version が extension-latest から取って確かめたもの。
+      - uses: actions/download-artifact@v8
+        if: needs.version.outputs.firefox-extension == 'true'
+        with:
+          name: firefox-extension
+          path: firefox-extension
+
+      # requireJetBrainsRuntime を立てて組む。素のランタイムで固めると、
+      # マウスを載せただけのアクティブ化（X-mouse）が働かないものが成功として出てくる。
+      # Firefox の拡張は、version が取れたときだけ渡す。
+      - name: Build installer
+        working-directory: apps/cm
+        env:
+          VERSION_CODE: ${{ needs.version.outputs.code }}
+          VERSION_NAME: ${{ needs.version.outputs.name }}
+          JETBRAINS_RUNTIME: ${{ steps.jetbrains-runtime.outputs.path }}
+          FIREFOX_EXTENSION_AVAILABLE: ${{ needs.version.outputs.firefox-extension }}
+        run: |
+          $arguments = @(
+            ":desktopApp:packageInnoSetup",
+            "-Pcloudmarks.versionCode=$env:VERSION_CODE",
+            "-Pcloudmarks.versionName=$env:VERSION_NAME",
+            "-Pcloudmarks.requireJetBrainsRuntime",
+            "-Porg.gradle.java.installations.paths=$env:JETBRAINS_RUNTIME",
+            "--console=plain"
+          )
+          if ($env:FIREFOX_EXTENSION_AVAILABLE -eq "true") {
+            $xpi = Join-Path $env:GITHUB_WORKSPACE "firefox-extension/cloudmarks-firefox.xpi"
+            $arguments += "-Pcloudmarks.firefoxExtension=$xpi"
+          }
+          ./gradlew @arguments
+
+      - name: Collect installer
+        run: |
+          $installer = "apps/cm/desktopApp/build/compose/binaries/main/inno/cloudmarks-setup.exe"
+          if (-not (Test-Path $installer)) { throw "インストーラが生成されていない" }
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          Copy-Item $installer artifacts/cloudmarks-setup.exe
+
+      # タグを打った回は release へ渡すまでの置き場で、リリースへ載れば用済み。手動実行の回は成果物としてしか残らないため、
+      # 実機へ入れるまでの猶予を置く。Actions のストレージの枠はアカウント全体で共有するので、既定の 90 日は抱えない。
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop
+          path: artifacts/cloudmarks-setup.exe
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'push' && 1 || 3 }}
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: windows-test-reports
+          path: |
+            apps/cm/shared/build/reports/tests/
+            apps/cm/shared/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 1
+
+  # 手動実行でも組む。公開はしないが、実機で試すための署名済みの APK を成果物として残す。
+  android:
+    needs: [version, check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      # 署名鍵とそのパスワードを渡すジョブなので、動くタグではなくコミットで固定する。
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      # 署名鍵は secrets から戻す。同じ鍵で署名し続ける限り、端末の上で上書きして更新できる。
+      - name: Restore keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "$KEYSTORE_BASE64" ] || missing+=(ANDROID_KEYSTORE_BASE64)
+          [ -n "$KEYSTORE_PASSWORD" ] || missing+=(ANDROID_KEYSTORE_PASSWORD)
+          [ -n "$KEY_PASSWORD" ] || missing+=(ANDROID_KEY_PASSWORD)
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "secrets が設定されていない: ${missing[*]}" >&2
+            exit 1
+          fi
+          (umask 077 && printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks")
+
+      # パスワードを環境変数で受け取った Gradle を、ビルドのあとに残さない。
+      - name: Build APK
+        working-directory: apps/cm
+        env:
+          VERSION_CODE: ${{ needs.version.outputs.code }}
+          VERSION_NAME: ${{ needs.version.outputs.name }}
+          CLOUDMARKS_RELEASE_KEYSTORE: ${{ runner.temp }}/release.jks
+          CLOUDMARKS_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          # キーストアの中の鍵の名前。秘密ではないので secrets に置かない（置くと、ログの cloudmarks を含む語が伏せ字になる）。
+          CLOUDMARKS_RELEASE_KEY_ALIAS: cloudmarks
+          CLOUDMARKS_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: >
+          ./gradlew :androidApp:assembleRelease
+          "-Pcloudmarks.versionCode=$VERSION_CODE"
+          "-Pcloudmarks.versionName=$VERSION_NAME"
+          --no-daemon
+          --console=plain
+
+      # 戻したキーストアは、ビルドが成功しても失敗しても消す。
+      - name: Remove keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
+
+      # 署名鍵が効かないと APK は -unsigned の名前で出る。未署名のまま配ると端末の上で
+      # 上書きして更新できないので、署名済みのものだけを拾い、1 つに決まらなければ落とす。
+      - name: Collect APK
+        run: |
+          set -euo pipefail
+          mapfile -t apks < <(find apps/cm/androidApp/build/outputs/apk/release -name '*.apk' ! -name '*-unsigned.apk')
+          if [ "${#apks[@]}" -ne 1 ]; then
+            echo "署名済みの APK が 1 つに決まらない（${#apks[@]} 個）" >&2
+            exit 1
+          fi
+          mkdir -p artifacts
+          cp "${apks[0]}" artifacts/cloudmarks.apk
+
+      # 配布用の鍵で署名したことを、署名の証明書の SHA-256 で確かめる。別の鍵で署名した APK を配ると、
+      # 入れてある端末は上書きの更新を断る。
+      - name: Verify APK signer
+        env:
+          # 配布用の署名鍵の証明書の SHA-256（keytool -list -v の形）。鍵を替えない限り変わらない。
+          EXPECTED_CERTIFICATE_SHA256: "39:AD:9C:58:F6:97:AB:9C:07:4C:3A:AA:53:22:C7:29:04:29:5A:0A:C0:73:E3:B6:F2:66:36:E9:23:36:E0:9F"
+        run: |
+          set -euo pipefail
+          build_tools=$(find "${ANDROID_HOME:?}/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          if [ -z "$build_tools" ]; then
+            echo "Android SDK の build-tools が見つからない: $ANDROID_HOME/build-tools" >&2
+            exit 1
+          fi
+          certificates=$("$build_tools/apksigner" verify --print-certs artifacts/cloudmarks.apk)
+          # apksigner のバージョンによって「Signer #1 certificate SHA-256 digest: …」か「V2 Signer: certificate SHA-256 digest: …」の形で出る。
+          # 署名の方式ごとに同じ証明書が並ぶので、重複は除く。ソースのスタンプの証明書は、署名鍵のものではないので除く。
+          mapfile -t digests < <(tr -d '\r' <<<"$certificates" |
+            sed -n -e '/^Source Stamp/d' -e 's/^.*Signer.* certificate SHA-256 digest: \([0-9A-Fa-f]\{64\}\)$/\1/p' |
+            sort -u)
+          if [ "${#digests[@]}" -ne 1 ]; then
+            echo "APK の署名の証明書が 1 つに決まらない（${#digests[@]} 個）" >&2
+            exit 1
+          fi
+          # 比べるときは、区切りの : を除いて小文字に揃える。
+          expected=$(tr -d ':' <<<"$EXPECTED_CERTIFICATE_SHA256" | tr 'A-F' 'a-f')
+          actual=$(tr -d ':' <<<"${digests[0]}" | tr 'A-F' 'a-f')
+          if [ "$actual" != "$expected" ]; then
+            echo "APK が配布用の鍵で署名されていない（証明書の SHA-256: ${digests[0]}）" >&2
+            exit 1
+          fi
+          echo "署名の証明書の SHA-256: ${digests[0]}"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: android
+          path: artifacts/cloudmarks.apk
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'push' && 1 || 3 }}
+
+  # 配布物の SHA-256 から更新情報を書き、署名する。公開の権限は持たず、成果物として release へ渡す。
+  # 署名鍵を持つのはこのジョブだけで、リリースを書き換える権限とは同じジョブに置かない。
+  # 鍵を渡すのは署名のステップだけにし、checkout と成果物の受け渡しのほかに外部のアクションを走らせない。
+  update-info:
+    if: github.event_name == 'push'
+    needs: [version, desktop, android]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # 配布物だけを、成果物の名前で受け取る。
+      - uses: actions/download-artifact@v8
+        with:
+          name: desktop
+          path: artifacts
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: android
+          path: artifacts
+
+      # アプリが読む更新情報（latest.json）。形は .github/scripts/write-update-info.sh に書いてある。
+      - name: Write update info
+        env:
+          VERSION_CODE: ${{ needs.version.outputs.code }}
+          VERSION_NAME: ${{ needs.version.outputs.name }}
+        run: |
+          set -euo pipefail
+          bash .github/scripts/write-update-info.sh "$VERSION_CODE" "$VERSION_NAME" \
+            artifacts/cloudmarks-setup.exe artifacts/cloudmarks.apk > artifacts/latest.json
+          cat artifacts/latest.json
+
+      # 更新情報のバイト列そのものに署名する。アプリは署名を確かめてからでないと更新情報を読まない。
+      # 鍵は環境変数で受け取り、自分だけが読める一時ファイルに書いて使い、ステップを抜けるときに消す。
+      # 引数に載せるとプロセスの一覧から読める。署名は改行を入れない 1 行の base64 にする。
+      - name: Sign update info
+        env:
+          SIGNING_KEY: ${{ secrets.UPDATE_INFO_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "secrets が設定されていない: UPDATE_INFO_SIGNING_KEY" >&2
+            exit 1
+          fi
+          key_file="$RUNNER_TEMP/update-info-signing-key.pem"
+          trap 'rm -f "$key_file"' EXIT
+          (umask 077 && printf '%s\n' "$SIGNING_KEY" > "$key_file")
+          openssl dgst -sha256 -sign "$key_file" artifacts/latest.json | base64 -w0 > artifacts/latest.json.sig
+
+      # アプリに埋め込んだ公開鍵で確かめてから渡す。鍵が食い違ったまま公開すると、
+      # 配ったアプリがどれも更新を受け付けなくなる。
+      - name: Verify update info signature
+        env:
+          PUBLIC_KEY: ${{ needs.version.outputs.update-info-public-key }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$PUBLIC_KEY" | base64 -d > "$RUNNER_TEMP/update-info-public-key.der"
+          openssl pkey -pubin -inform DER -in "$RUNNER_TEMP/update-info-public-key.der" \
+            -out "$RUNNER_TEMP/update-info-public-key.pem"
+          base64 -d artifacts/latest.json.sig > "$RUNNER_TEMP/latest.json.sig.der"
+          openssl dgst -sha256 -verify "$RUNNER_TEMP/update-info-public-key.pem" \
+            -signature "$RUNNER_TEMP/latest.json.sig.der" artifacts/latest.json
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: update-info
+          path: |
+            artifacts/latest.json
+            artifacts/latest.json.sig
+          if-no-files-found: error
+          retention-days: 1
+
+  # 成果物を公開するだけのジョブ。contents: write を持つのはここだけで、checkout も npm も Gradle も走らせない。
+  release:
+    if: github.event_name == 'push'
+    needs: [version, desktop, android, update-info]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      # 公開するものだけを、成果物の名前で受け取る。
+      - uses: actions/download-artifact@v8
+        with:
+          name: desktop
+          path: artifacts
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: android
+          path: artifacts
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: update-info
+          path: artifacts
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-notes
+          path: artifacts
+
+      # バージョンごとのリリース。配布物の実物が残るので、後からどのバージョンで何を配ったかを辿れる。
+      # GitHub の「Latest」はこのリリースに付ける（拡張のリリースと latest のリリースには付けない）。
+      # 配布物を書き込む外部のコードなので、動くタグではなくコミットで固定する。
+      - name: Publish versioned release
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ needs.version.outputs.name }}
+          body_path: artifacts/release-notes.md
+          make_latest: "true"
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/cloudmarks-setup.exe
+            artifacts/cloudmarks.apk
+
+      # 配ったアプリは、タグ latest のリリースから更新情報と配布物を取る。リリースのたびに中身だけを替える。
+      # タグ latest は最初に作ったときのコミットを指したまま動かさない（初回は、リリースを作るときに既定のブランチの先頭に作る）。
+      # 配布物を先に、更新情報と署名を最後に替える。更新情報が、まだ置いていない配布物を指す間を作らない。
+      - name: Update latest release with installers
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
+        with:
+          tag_name: latest
+          name: Latest build
+          body_path: artifacts/latest-release-notes.md
+          prerelease: true
+          make_latest: "false"
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/cloudmarks-setup.exe
+            artifacts/cloudmarks.apk
+
+      - name: Update latest release with update info
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
+        with:
+          tag_name: latest
+          name: Latest build
+          body_path: artifacts/latest-release-notes.md
+          prerelease: true
+          make_latest: "false"
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/latest.json
+            artifacts/latest.json.sig
+
+      # アプリと同じ URL から更新情報と署名と配布物を取り直す。更新情報と署名は update-info が渡したものと同じバイト列で、
+      # 署名がアプリに埋め込んだ公開鍵で通り、配布物の SHA-256 が更新情報のものと合うことを確かめる。
+      - name: Verify published files
+        env:
+          REPOSITORY: ${{ github.repository }}
+          PUBLIC_KEY: ${{ needs.version.outputs.update-info-public-key }}
+        run: |
+          set -euo pipefail
+          base="https://github.com/${REPOSITORY}/releases/download/latest"
+          published="$RUNNER_TEMP/published"
+          mkdir -p "$published"
+          for name in latest.json latest.json.sig cloudmarks-setup.exe cloudmarks.apk; do
+            curl -fsSL --retry 3 -o "$published/$name" "$base/$name"
+          done
+          cmp artifacts/latest.json "$published/latest.json"
+          cmp artifacts/latest.json.sig "$published/latest.json.sig"
+          printf '%s' "$PUBLIC_KEY" | base64 -d > "$RUNNER_TEMP/update-info-public-key.der"
+          openssl pkey -pubin -inform DER -in "$RUNNER_TEMP/update-info-public-key.der" \
+            -out "$RUNNER_TEMP/update-info-public-key.pem"
+          base64 -d "$published/latest.json.sig" > "$published/latest.json.sig.der"
+          openssl dgst -sha256 -verify "$RUNNER_TEMP/update-info-public-key.pem" \
+            -signature "$published/latest.json.sig.der" "$published/latest.json"
+          for release in desktop:cloudmarks-setup.exe android:cloudmarks.apk; do
+            platform=${release%%:*}
+            asset=${release#*:}
+            expected=$(jq -er --arg platform "$platform" '.[$platform].sha256' "$published/latest.json")
+            actual=$(sha256sum "$published/$asset" | cut -d' ' -f1)
+            if [ "$actual" != "$expected" ]; then
+              echo "公開した ${asset} の SHA-256（${actual}）が、更新情報の ${platform} のもの（${expected}）と合わない" >&2
+              exit 1
+            fi
+            echo "${asset}: ${actual}"
+          done
+
+  # 公開した更新情報を、アプリの読み手（UpdateChecker）で、アプリと同じ URL から読めることを確かめる。
+  # release の openssl の確かめは署名だけを見て、更新情報の形（整数の versionCode、小文字の sha256 など）を見ない。
+  verify-published:
+    needs: [release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      # 実際の GitHub に問い合わせるテストは、CMM_UPDATE_IT があるときだけ走る。
+      # 前の結果を使い回さないよう走らせ直す。
+      - name: Read published update info
+        working-directory: apps/cm
+        env:
+          CMM_UPDATE_IT: "1"
+        run: >
+          ./gradlew :shared:jvmTest --tests '*UpdateCheckerGitHubTest*' --rerun
+          --console=plain
+
+      # 環境変数が届かないとテストは飛ばされ、タスクは成功する。飛ばされずに走ったことを結果のファイルで確かめる。
+      - name: Confirm the test ran
+        run: |
+          set -euo pipefail
+          result=apps/cm/shared/build/test-results/jvmTest/TEST-to.sava.cloudmarksmultiplatform.update.UpdateCheckerGitHubTest.xml
+          if [ ! -f "$result" ]; then
+            echo "テストの結果が無い: $result" >&2
+            exit 1
+          fi
+          suite=$(grep -m1 -o '<testsuite [^>]*>' "$result")
+          if [[ "$suite" != *' skipped="0"'* ]] || [[ "$suite" == *' tests="0"'* ]]; then
+            echo "UpdateCheckerGitHubTest が走っていない: $suite" >&2
+            exit 1
+          fi
+          echo "$suite"
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: verify-published-reports
+          path: |
+            apps/cm/shared/build/reports/tests/
+            apps/cm/shared/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 1

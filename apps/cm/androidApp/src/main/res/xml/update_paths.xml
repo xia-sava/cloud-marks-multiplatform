@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- アプリの更新でダウンロードした APK を置くディレクトリ（AppFiles.updateDirectory。キャッシュのディレクトリの下の updates）。
+     ここに置いたものだけを、端末のインストーラへ渡せる。 -->
+<paths>
+    <cache-path name="updates" path="updates/"/>
+</paths>

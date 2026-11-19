@@ -1,6 +1,12 @@
 import type { ExtensionApi } from "./api"
 import { FAILURE_BADGE_TEXT, MESSAGES } from "./messages"
 
+// ビルドが埋め込む拡張の名前（`variantDefines`）。
+declare const CMM_EXTENSION_NAME: string
+
+/** ツールバーのボタンの、ふだんの説明。拡張の名前で、manifest の action.default_title と同じ。 */
+const DEFAULT_ACTION_TITLE: string = CMM_EXTENSION_NAME
+
 /** 閉じたあとの失敗の文言を `storage.session` に入れるキー。 */
 export const FAILURE_STORAGE_KEY = "lastFailure"
 
@@ -20,7 +26,7 @@ export async function takeFailure(api: ExtensionApi): Promise<string | undefined
   const message = stored[FAILURE_STORAGE_KEY]
   if (typeof message !== "string") return undefined
   await api.action.setBadgeText({ text: "" })
-  await api.action.setTitle({ title: MESSAGES.defaultActionTitle })
+  await api.action.setTitle({ title: DEFAULT_ACTION_TITLE })
   await api.storage.session.remove(FAILURE_STORAGE_KEY)
   return message
 }

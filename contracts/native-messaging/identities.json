@@ -1,0 +1,16 @@
+{
+  "distributed": {
+    "hostName": "to.sava.cloudmarksmultiplatform",
+    "chromeExtensionId": "laeogpkfjeccgfkedalbkcbenakkefpl",
+    "chromeKey": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3ExUFJw8hZbKkln26D2v7f0GjWjKIkPWpfYTognWITCUlTpqYkgo8dqIy2x8wkMSRxSKs9HxdhZgAoxwXCGnTBljYFRfiyH3NcQLbXA1NsnsM1t4RpJN02wyvyURcLBqNHE6im6XGHn0gTcXU+dXe6kZOSQeUcuxRBK+C0ffERhkTRO63+MPaR/iPwgdRcY7Mg2GqdRNQgyAD8ZnoXsDIWjLwc15oZVjNa6NcnbVKyaLJHkdKerY2to7X9MLDGSUHZ4ucOjUzV+OGb4LxAR3mcczus5JXDhenU8zvw618nCizXd7UUpSSEmfI0ZOpUqnnHJHR/G7gi/FMlNThi7JawIDAQAB",
+    "geckoId": "cloud-marks-multiplatform@sava.to",
+    "callUrlHost": "cmm.invalid"
+  },
+  "dev": {
+    "hostName": "to.sava.cloudmarksmultiplatform.dev",
+    "chromeExtensionId": "bnnjmdaaeahhkjopgaeacdpajlfbodca",
+    "chromeKey": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAiIcf2Qd6BnAKTJy6mxIh0kOlDJJQ20qTcVHyAZrkXj5LNhydEX5fRtl4kstxNeK0+MeVHNQXCijVH4kHCzT0+hA0EhsX8VFf0SjI3xDW/kRHjAEZADtj6+DmTxfm9xhcTRwbqlGkSxDeM/0GxOuw6SXIXHp+mq5gJ7G1ZGwumZVKAP99wJxvOYWbi+F6qN8q4OvhgPtGdS1BR4udtRLFGlOxLcxaQeWdgibmopD5Ide9sXvxJq+5IpHN6ZcNaoJ+T6OVUY7zIWfLcMhrwbNOrrPxxfInLz1XTNIbHx9ZUHSDdMlyp53OkeQWpSjJE9nzsANmdX58XxPnjsCzGBLVnQIDAQAB",
+    "geckoId": "cloud-marks-multiplatform-dev@sava.to",
+    "callUrlHost": "cmm-dev.invalid"
+  }
+}

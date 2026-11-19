@@ -1,5 +1,6 @@
 package to.sava.cloudmarksmultiplatform.browser
 
+import to.sava.cloudmarksmultiplatform.files.describeThrowable
 import java.lang.foreign.Arena
 import java.lang.foreign.FunctionDescriptor
 import java.lang.foreign.Linker
@@ -106,17 +107,15 @@ internal object WindowsRegistry : RegistryReader {
             block(advapi32)
         } catch (e: IllegalArgumentException) {
             // DLL を読み込めない、または関数を探せない
-            throw RegistryException(describeLinkFailure(e))
+            throw RegistryException(describeThrowable(e))
         } catch (e: UnsupportedOperationException) {
             // この JVM がネイティブの関数の呼び出しに対応していない
-            throw RegistryException(describeLinkFailure(e))
+            throw RegistryException(describeThrowable(e))
         } catch (e: IllegalCallerException) {
             // ネイティブの関数の呼び出しが許されていない
-            throw RegistryException(describeLinkFailure(e))
+            throw RegistryException(describeThrowable(e))
         }
 }
-
-private fun describeLinkFailure(e: RuntimeException): String = listOfNotNull(e::class.simpleName, e.message).joinToString(": ")
 
 /** `advapi32` のレジストリの関数を呼ぶ。作るときに DLL を読み込み、関数を探して呼び出せるようにする。 */
 private class Advapi32 {

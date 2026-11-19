@@ -139,6 +139,7 @@ class CloudMarksControllerTest {
             stateDirectory = directory.resolve("state"),
             deviceSettingsFile = directory.resolve("device.json"),
             commandDirectory = directory.resolve("commands"),
+            updateDirectory = directory.resolve("updates"),
         )
         SettingsFile(appFiles.settingsFile, FakeSecretProtector(owner = 2)).write(SETTINGS)
         val controller = createCloudMarksController(

@@ -22,3 +22,21 @@
 | `response-command.json` | コマンドを受け取ったときの成功の応答（2 つのタブ。空のタイトルを含む）。`command` の中身は、アプリが書くコマンドのファイルの見本も兼ねる |
 | `response-no-command.json` | コマンドが無いときの成功の応答 |
 | `response-error.json` | 失敗の応答 |
+
+## 配布版と開発版の名前
+
+`identities.json` は、配布版（`distributed`）と開発版（`dev`）のそれぞれについて、ホストの名前、拡張の ID と `key`、
+呼び出しの URL のホストを持つ（`docs/native-messaging.md` の「配布版と開発版」）。メッセージの見本ではない。
+
+| 欄 | 内容 |
+|---|---|
+| `hostName` | Native Messaging のホストの名前 |
+| `chromeExtensionId` | Chrome の拡張の ID。`chromeKey` から決まる |
+| `chromeKey` | Chrome の拡張の `manifest.json` の `key`（公開鍵の DER を base64 にしたもの） |
+| `geckoId` | Firefox の拡張の ID（`browser_specific_settings.gecko.id`） |
+| `callUrlHost` | 呼び出しの URL のホスト |
+
+- 拡張のテストは、配布版と開発版の名前と manifest がこのファイルと一致すること、配布版の拡張には配布版の、開発版の拡張には
+  開発版の名前だけをビルドが埋め込むことを確かめる
+- `apps/cm` のテストは、アプリが使う呼び出しの URL がこのファイルと一致することを確かめる。ホストを登録する JSON は、
+  Gradle がこのファイルを読んで書く

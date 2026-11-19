@@ -1,6 +1,7 @@
 package to.sava.cloudmarksmultiplatform.storage
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -18,6 +19,15 @@ private val JSON_INTEGER_PATTERN = Regex("-?(0|[1-9][0-9]*)")
 private val EXCESS_FRACTION_PATTERN = Regex("(\\.[0-9]{9})[0-9]+")
 
 internal fun isUuidShape(value: String): Boolean = UUID_PATTERN.matches(value)
+
+/**
+ * [element] が、JSON の整数の字句（[JSON_INTEGER_PATTERN]）で書いた `Int` に収まる数なら、その値。
+ * そうでなければ（文字列にした数・小数・指数・大きすぎる数・null・数でないもの・無いもの）null。
+ */
+internal fun jsonIntegerOrNull(element: JsonElement?): Int? =
+    (element as? JsonPrimitive)
+        ?.takeIf { !it.isString && JSON_INTEGER_PATTERN.matches(it.content) }
+        ?.content?.toIntOrNull()
 
 /** 検証の失敗を、`decodeManifest` と `decodeItemsFile` まで運ぶための内部の例外。この 2 つで必ず捕まえて結果の値にする。 */
 internal class StorageProblemException(val problem: StorageProblem) : Exception(problem.toString())
@@ -45,11 +55,7 @@ internal class JsonlLine(val number: Int, private val obj: JsonObject) {
     fun nullableUuid(name: String): String? =
         if (element(name) is JsonNull) null else uuid(name)
 
-    fun integer(name: String): Int =
-        (element(name) as? JsonPrimitive)
-            ?.takeIf { !it.isString && JSON_INTEGER_PATTERN.matches(it.content) }
-            ?.content?.toIntOrNull()
-            ?: fail("欄 `$name` が整数でない")
+    fun integer(name: String): Int = jsonIntegerOrNull(element(name)) ?: fail("欄 `$name` が整数でない")
 
     fun instant(name: String): Instant =
         string(name).let { text ->

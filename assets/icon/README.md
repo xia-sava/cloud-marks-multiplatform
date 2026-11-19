@@ -18,3 +18,15 @@ Cloud Marks のアイコン（雲としおり）の元になる素材。各ア�
   アダプティブアイコンの前景と背景色。`ic_launcher_foreground.xml` と `ic_launcher_background.xml` の複製。
   `res/mipmap-anydpi/ic_launcher.xml` と `ic_launcher_round.xml` がこれを組み合わせ、テーマのアイコン（monochrome）にも前景を使う
   （minSdk 30 なので、ラスター画像は置かない）
+
+## 出典
+
+このアイコンは、Flaticon（https://www.flaticon.com/）のアイコンを組み合わせて変えたもの。元のアイコンの形を 1 つの絵に組み合わせ、
+背景色を足し、アプリごとの形式と大きさに変えている。元のアイコンのライセンスは
+クリエイティブ・コモンズ 表示 3.0 非移植（CC BY 3.0、https://creativecommons.org/licenses/by/3.0/）。
+
+- [Smashicons](https://www.flaticon.com/authors/smashicons) のアイコン（www.flaticon.com）
+- [Freepik](http://www.freepik.com) のアイコン（www.flaticon.com）
+
+配布物に入れる表記は、リポジトリ直下の `THIRD-PARTY-NOTICES.md` の「Icon」にある。ここから作った画像を足したり、
+作り直したりしたときも、表記はそのまま要る。

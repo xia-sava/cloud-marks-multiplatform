@@ -7,9 +7,9 @@ import java.nio.file.Path
  * Android のアプリが端末に置くファイルの場所。
  *
  * バックアップの対象にしないディレクトリ（`noBackupFilesDir`）の直下に設定のファイルと端末ごとの設定のファイルを、
- * キャッシュのディレクトリ（`cacheDir`）の下の `cache` にローカルキャッシュを、アプリのファイルのディレクトリ（`filesDir`）の下の
- * `logs` にログを、`state` に次の起動へ持ち越す記録を置く。ブラウザの拡張機能へのコマンドは使わないが、場所は `filesDir` の下の
- * `commands` とする。
+ * キャッシュのディレクトリ（`cacheDir`）の下の `cache` にローカルキャッシュを、`updates` にアプリの更新でダウンロードした配布物を、
+ * アプリのファイルのディレクトリ（`filesDir`）の下の `logs` にログを、`state` に次の起動へ持ち越す記録を置く。
+ * ブラウザの拡張機能へのコマンドは使わないが、場所は `filesDir` の下の `commands` とする。
  */
 fun androidAppFiles(context: Context): AppFiles =
     androidAppFilesIn(
@@ -30,4 +30,5 @@ internal fun androidAppFilesIn(noBackupDirectory: Path, cacheDirectory: Path, fi
         stateDirectory = filesDirectory.resolve(STATE_DIRECTORY_NAME),
         deviceSettingsFile = noBackupDirectory.resolve(DEVICE_SETTINGS_FILE_NAME),
         commandDirectory = filesDirectory.resolve(COMMAND_DIRECTORY_NAME),
+        updateDirectory = cacheDirectory.resolve(UPDATE_DIRECTORY_NAME),
     )

@@ -85,6 +85,7 @@ internal fun interface DefaultBrowser {
  * 選んだブラウザで開くときは、その実行ファイルを起動する。1 つなら URL を引数にし、2 つ以上ならコマンドを
  * [AppFiles.commandDirectory] に書いてから呼び出しの URL を引数にする（`docs/native-messaging.md`）。
  *
+ * @param distributed 配布版か。呼び出しの URL を、配布版なら配布版の、開発版なら開発版の拡張機能のものにする（[knockUrl]）
  * @param log ブラウザを読めなかったこと、記録を読めなかったこと、開けなかった理由のうち画面に出さないもの、
  * 古いコマンドのファイルを消せなかったことを書く。URL とタイトルは書かない
  * @param registry ブラウザを読むレジストリ
@@ -96,6 +97,7 @@ internal fun interface DefaultBrowser {
  */
 internal class DesktopBrowserOpener(
     private val appFiles: AppFiles,
+    private val distributed: Boolean,
     private val log: (String) -> Unit,
     private val registry: RegistryReader = WindowsRegistry,
     private val processStarter: ProcessStarter = ProcessStarter(::startDetached),
@@ -200,7 +202,7 @@ internal class DesktopBrowserOpener(
         } catch (e: IOException) {
             return BrowserOpenResult.LaunchFailed(describeIoFailure(e))
         }
-        return launch(browser, knockUrl(token)).also { result ->
+        return launch(browser, knockUrl(token, distributed)).also { result ->
             if (result is BrowserOpenResult.LaunchFailed) discardCommandFile(token)
         }
     }
@@ -224,8 +226,12 @@ internal class DesktopBrowserOpener(
     }
 }
 
-/** デスクトップのアプリの [BrowserOpener] を作る。[log] には、利用者には見せない失敗を書く。 */
-fun desktopBrowserOpener(appFiles: AppFiles, log: (String) -> Unit): BrowserOpener = DesktopBrowserOpener(appFiles, log)
+/**
+ * デスクトップのアプリの [BrowserOpener] を作る。配布版（[distributed] が真）なら配布版の、開発版なら開発版の拡張機能に
+ * コマンドを渡す。[log] には、利用者には見せない失敗を書く。
+ */
+fun desktopBrowserOpener(appFiles: AppFiles, distributed: Boolean, log: (String) -> Unit): BrowserOpener =
+    DesktopBrowserOpener(appFiles, distributed, log)
 
 /**
  * 1 つの URL [url] を、ブラウザの起動の引数と、既定のブラウザで開く URI にできる形にする。

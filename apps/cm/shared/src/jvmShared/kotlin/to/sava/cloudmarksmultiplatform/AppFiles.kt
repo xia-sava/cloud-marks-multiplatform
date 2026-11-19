@@ -20,6 +20,9 @@ internal const val STATE_DIRECTORY_NAME = "state"
 /** ブラウザの拡張機能へのコマンドを置くディレクトリの名前。 */
 internal const val COMMAND_DIRECTORY_NAME = "commands"
 
+/** アプリの更新でダウンロードした配布物を置くディレクトリの名前。 */
+internal const val UPDATE_DIRECTORY_NAME = "updates"
+
 /** S3 へ書いたことを同じ端末のほかのプロセスへ知らせるファイルの名前。 */
 internal const val STORAGE_CHANGED_FILE_NAME = "storage-changed"
 
@@ -45,6 +48,8 @@ internal const val LAST_OPENED_ITEM_FILE_NAME = "last-opened-item.json"
  * [settingsFile] とは別に持ち、S3 に載せない
  * @property commandDirectory アプリからブラウザの拡張機能へのコマンド（開くタブの並びなど）を、1 つのコマンドにつき 1 つのファイルにして
  * 置くディレクトリ。ファイルの名前はコマンドのトークン。Native Messaging のホストが読んで消す
+ * @property updateDirectory アプリの更新でダウンロードした配布物を置くディレクトリ。デスクトップは、ダウンロードごとのディレクトリをこの下に作り、
+ * 配布物を適用するスクリプトも同じディレクトリに置く
  */
 class AppFiles(
     val settingsFile: Path,
@@ -53,6 +58,7 @@ class AppFiles(
     val stateDirectory: Path,
     val deviceSettingsFile: Path,
     val commandDirectory: Path,
+    val updateDirectory: Path,
 ) {
     /**
      * S3 へ書いたことを、同じ端末のほかのプロセスへ知らせるファイル。拡張から追加したホストが書き換え、デスクトップのアプリが

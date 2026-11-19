@@ -1,7 +1,12 @@
 import { interpretResponse, isRecord, type TakeCommandMessage } from "./protocol"
 
-// 呼び出しの URL のオリジンとパス。呼び出しの URL は `https://cmm.invalid/knock?token=<token>` の形。
-const CALL_URL_ORIGIN = "https://cmm.invalid"
+// ビルドが埋め込む呼び出しの URL のホスト（`variantDefines`）。
+declare const CMM_CALL_URL_HOST: string
+
+/** 呼び出しの URL のホスト。配布版の拡張は配布版の、開発版の拡張は開発版のホストを持つ。 */
+export const CALL_URL_HOST: string = CMM_CALL_URL_HOST
+
+// 呼び出しの URL のパス。呼び出しの URL は `https://<呼び出しの URL のホスト>/knock?token=<token>` の形。
 const CALL_URL_PATH = "/knock"
 
 const TOKEN_PATTERN = /^[0-9a-f]{32}$/
@@ -27,17 +32,18 @@ export type TakeCommandResult =
   | { kind: "failed"; message: string }
 
 /**
- * URL が呼び出しの URL なら、その `token` を返す。`token` が無ければ空文字を返す。
- * 呼び出しの URL でなければ undefined を返す。トークンの形はここでは確かめない。
+ * URL が、ホストが `callUrlHost` の呼び出しの URL なら、その `token` を返す。`token` が無ければ空文字を返す。
+ * 呼び出しの URL でなければ undefined を返す。配布版の拡張は開発版の、開発版の拡張は配布版の呼び出しの URL を読まない。
+ * トークンの形はここでは確かめない。
  */
-export function readCallToken(url: string): string | undefined {
+export function readCallToken(url: string, callUrlHost: string = CALL_URL_HOST): string | undefined {
   let parsed: URL
   try {
     parsed = new URL(url)
   } catch {
     return undefined
   }
-  if (parsed.origin !== CALL_URL_ORIGIN || parsed.pathname !== CALL_URL_PATH) return undefined
+  if (parsed.origin !== `https://${callUrlHost}` || parsed.pathname !== CALL_URL_PATH) return undefined
   return parsed.searchParams.get("token") ?? ""
 }
 

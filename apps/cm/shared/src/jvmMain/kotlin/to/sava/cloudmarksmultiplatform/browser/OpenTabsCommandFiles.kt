@@ -14,14 +14,21 @@ import kotlin.time.Instant
 /** [COMMAND_FILE_SUFFIX] で終わるファイルに合う、ディレクトリの中を探すときの形。 */
 private const val COMMAND_FILE_GLOB = "*$COMMAND_FILE_SUFFIX"
 
-/** 呼び出しの URL の、トークンの前まで。 */
-private const val KNOCK_URL_PREFIX = "https://cmm.invalid/knock?token="
+/** 配布版の、呼び出しの URL のホスト。`contracts/native-messaging/identities.json` の `distributed.callUrlHost`。 */
+private const val DISTRIBUTED_KNOCK_HOST = "cmm.invalid"
+
+/** 開発版の、呼び出しの URL のホスト。`contracts/native-messaging/identities.json` の `dev.callUrlHost`。 */
+private const val DEV_KNOCK_HOST = "cmm-dev.invalid"
 
 /** 新しいコマンドを書くときに消す、古いコマンドのファイルの、最後に書き換えてからの時間。 */
 internal val STALE_COMMAND_AGE: Duration = 1.hours
 
-/** トークンが [token] のコマンドを、拡張機能に受け取らせる呼び出しの URL。 */
-internal fun knockUrl(token: String): String = KNOCK_URL_PREFIX + token
+/**
+ * トークンが [token] のコマンドを、拡張機能に受け取らせる呼び出しの URL。配布版（[distributed] が真）は配布版の拡張機能の、
+ * 開発版は開発版の拡張機能のもの。配布版の拡張機能は配布版の、開発版の拡張機能は開発版の呼び出しの URL を開いたタブだけを見つける。
+ */
+internal fun knockUrl(token: String, distributed: Boolean): String =
+    "https://${if (distributed) DISTRIBUTED_KNOCK_HOST else DEV_KNOCK_HOST}/knock?token=$token"
 
 /**
  * [directory] に、トークンが [token] のコマンド [command] のファイルを書く（中身は [OpenTabsCommand.encode]）。

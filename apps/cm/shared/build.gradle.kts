@@ -58,13 +58,16 @@ kotlin {
 
     sourceSets {
         // jvmMainとandroidMainの双方から使うJVMの実装を置く場所。S3へのアクセス、gzipの読み書き、設定のファイルの読み書き、
-        // 画面とその状態を置く。
+        // アプリの更新、画面とその状態を置く。
         val jvmShared = create("jvmShared") {
             dependsOn(commonMain.get())
             dependencies {
                 implementation(libs.aws.sdk.s3)
                 implementation(libs.compose.material3Adaptive)
                 implementation(libs.compose.materialIconsCore)
+                // アプリの更新で、GitHub Releases から更新情報と配布物を取る。エンジンはデスクトップも Android も CIO。
+                implementation(libs.ktor.client.core)
+                implementation(libs.ktor.client.cio)
             }
         }
 
@@ -73,7 +76,20 @@ kotlin {
             dependencies {
                 // システムの戻る操作を、Activity の BackHandler で受ける。
                 implementation(libs.androidx.activity.compose)
+                // アプリの更新で、ダウンロードした APK を FileProvider の URI にして端末のインストーラへ渡す。
+                implementation(libs.androidx.core)
             }
+        }
+        // jvmTestとandroidHostTestで共有するテストの部品を置く場所。
+        val jvmSharedTest = create("jvmSharedTest") {
+            dependsOn(commonTest.get())
+            dependencies {
+                // アプリの更新のテストは、GitHub に問い合わせずに、偽の応答を返すエンジンで HTTP を動かす。
+                implementation(libs.ktor.client.mock)
+            }
+        }
+        getByName("androidHostTest") {
+            dependsOn(jvmSharedTest)
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)
@@ -88,12 +104,15 @@ kotlin {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutinesTest)
         }
-        jvmTest.dependencies {
-            implementation(libs.kotlin.testJunit)
-            // 画面のテストは、窓を出さずに runComposeUiTest で画面を動かす。描くための Skia のネイティブのライブラリを、
-            // 走らせる OS のものから取る。
-            implementation(libs.compose.uiTest)
-            implementation(compose.desktop.currentOs)
+        jvmTest {
+            dependsOn(jvmSharedTest)
+            dependencies {
+                implementation(libs.kotlin.testJunit)
+                // 画面のテストは、窓を出さずに runComposeUiTest で画面を動かす。描くための Skia のネイティブのライブラリを、
+                // 走らせる OS のものから取る。
+                implementation(libs.compose.uiTest)
+                implementation(compose.desktop.currentOs)
+            }
         }
         jvmMain {
             dependsOn(jvmShared)

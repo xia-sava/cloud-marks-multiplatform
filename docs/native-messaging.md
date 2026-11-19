@@ -6,7 +6,8 @@ S3 に追加させる。また、デスクトップのアプリから頼まれ�
 
 ## 経路
 
-- ホストの名前は `to.sava.cloudmarksmultiplatform`
+- ホストの名前は、配布版が `to.sava.cloudmarksmultiplatform`、開発版が `to.sava.cloudmarksmultiplatform.dev`
+  （下の「配布版と開発版」）
 - 拡張は 1 回の追加などごとに `runtime.sendNativeMessage` でメッセージを 1 つ送る。ブラウザがホストを起動する。
   ホストはメッセージを 1 つ読み、応答を 1 つ返して終わる。デスクトップのアプリが起動していなくても追加できる
 - メッセージは、4 バイトの長さと、それに続く UTF-8 の JSON。長さはネイティブのバイト順で、Windows ではリトルエンディアン
@@ -21,16 +22,47 @@ S3 に追加させる。また、デスクトップのアプリから頼まれ�
 
 ## ホストの登録
 
-インストーラが、ホストを登録する JSON を置き、そのパスをレジストリに登録する。
+インストーラが、ホストを登録する JSON を置き、そのパスをレジストリに登録する。登録するのは配布版のホストで、
+管理者権限は要らない（`HKCU` に書く）。
 
 | ブラウザ | レジストリのキー | 受け付ける拡張 |
 |---|---|---|
-| Chrome | `HKCU\Software\Google\Chrome\NativeMessagingHosts\to.sava.cloudmarksmultiplatform` | `allowed_origins` に `chrome-extension://<拡張の ID>/` |
-| Firefox | `HKCU\Software\Mozilla\NativeMessagingHosts\to.sava.cloudmarksmultiplatform` | `allowed_extensions` に `cloud-marks-multiplatform@sava.to` |
+| Chrome | `HKCU\Software\Google\Chrome\NativeMessagingHosts\<ホストの名前>` | `allowed_origins` に `chrome-extension://<Chrome の拡張の ID>/` |
+| Firefox | `HKCU\Software\Mozilla\NativeMessagingHosts\<ホストの名前>` | `allowed_extensions` に `<Firefox の拡張の ID>` |
 
-- Chrome の拡張の ID には、拡張の `manifest.json` の `key` から決まるものと、ストアが振るものがあり、配り方で変わる。
-  `allowed_origins` には複数の ID を並べて書けるようにしておく
-- 拡張の `manifest.json` の `key` から決まる ID は `laeogpkfjeccgfkedalbkcbenakkefpl`
+- 各キーの既定の値（名前の無い値）が、ホストを登録する JSON のパス。インストール先を `<インストール先>`
+  （`%LOCALAPPDATA%\Programs\CloudMarks`。インストーラは利用者に選ばせない）とすると、Chrome は `<インストール先>\cloud-marks-host.chrome.json`、
+  Firefox は `<インストール先>\cloud-marks-host.firefox.json`
+- JSON の `path`（ホストを起動するファイル）は、JSON と同じ場所の `cloud-marks-host.exe` を指す相対パス
+  （`cloud-marks-host.exe`）。Chrome と Firefox の両方で、JSON のある場所からの相対として解決される
+- `cloud-marks-host.exe` はデスクトップのアプリのランチャー（`CloudMarks.exe`）の複製で、`app\cloud-marks-host.cfg` が
+  起動するクラスをホストのものにする
+- 更新のインストールは、キーの値を同じ内容で書き直す。アンインストールは 2 つのキーを（キーごと）消す。
+  開発版のホストのキーには触れない
+- アンインストールしても、アプリのデータ（`%LOCALAPPDATA%\CloudMarks`。設定、認証情報、キャッシュ、ログ）は消えない。
+  アンインストールが消すのはインストール先のファイルだけ
+
+### 配布版と開発版
+
+配布版と開発版は、同じ PC とブラウザに並べて入れられるよう、ホストの名前、拡張の ID、呼び出しの URL のホスト、
+アプリのデータを置くディレクトリを分ける。名前の一覧は `contracts/native-messaging/identities.json` にある。
+
+| | 配布版 | 開発版 |
+|---|---|---|
+| ホストの名前 | `to.sava.cloudmarksmultiplatform` | `to.sava.cloudmarksmultiplatform.dev` |
+| Chrome の拡張の ID | `laeogpkfjeccgfkedalbkcbenakkefpl` | `bnnjmdaaeahhkjopgaeacdpajlfbodca` |
+| Firefox の拡張の ID | `cloud-marks-multiplatform@sava.to` | `cloud-marks-multiplatform-dev@sava.to` |
+| 呼び出しの URL のホスト | `cmm.invalid` | `cmm-dev.invalid` |
+| 拡張の名前 | `Cloud Marks` | `Cloud Marks (dev)` |
+| アプリのデータを置くディレクトリ | `%LOCALAPPDATA%\CloudMarks` | `%LOCALAPPDATA%\CloudMarks-dev` |
+
+- 配布版のホストは配布版の拡張だけを、開発版のホストは開発版の拡張だけを受け付ける。`allowed_origins` と
+  `allowed_extensions` には、配布版のホストなら配布版の、開発版のホストなら開発版の ID を 1 つだけ書く
+- Chrome の拡張の ID は、拡張の `manifest.json` の `key`（公開鍵）から決まる。配布版と開発版の `key` も `identities.json` にある
+- デスクトップのアプリは、配布物のランチャー（`CloudMarks.exe`）から起動したときに配布版になり、`:desktopApp:run` などで
+  ビルドしたクラスから直に起動したときは開発版になる。ホストも、配布物から起動したときに配布版になり、
+  `writeDevNativeMessagingHost` が書き出したホストは開発版として動く
+- インストーラが登録するのは配布版のホスト。開発版のホストを登録する手順は `apps/cm/README.md` の「開発版のホスト」にある
 
 ## 拡張から送るもの
 
@@ -172,11 +204,14 @@ Native Messaging は拡張からしか話しかけられない。デスクトッ
 
 1. アプリが、コマンドをアプリのデータを置くディレクトリの `commands\<token>.json` に書く。`token` は使い捨ての乱数
    （小文字の 16 進で 32 文字）
-2. アプリが、選んだブラウザを呼び出しの URL `https://cmm.invalid/knock?token=<token>` で起動する
+2. アプリが、選んだブラウザを呼び出しの URL `https://<呼び出しの URL のホスト>/knock?token=<token>` で起動する。
+   配布版は `https://cmm.invalid/knock?token=<token>`、開発版は `https://cmm-dev.invalid/knock?token=<token>`
 3. 拡張がその URL を開いたタブを見つけて、`takeCommand` でコマンドを受け取り、そのタブを閉じる
 4. 拡張がコマンドのとおりにタブを開く
 
 - `.invalid` は名前が決して引けない予約のドメインなので、拡張が入っていないブラウザでも外へは出ていかない
+- 配布版の拡張は配布版の、開発版の拡張は開発版の呼び出しの URL を開いたタブだけを見つける。配布版と開発版の拡張を
+  同じブラウザに入れても、配布版のアプリのコマンドは配布版の拡張が、開発版のアプリのコマンドは開発版の拡張が受け取る
 - アプリはブラウザを起動してから 10 秒たってもファイルが残っていれば、拡張に届かなかったかもしれないことを利用者に知らせる。
   ファイルは消さない（ブラウザの起動が遅いだけなら、あとで届く）
 - アプリは新しいコマンドを書くとき、1 時間より古いコマンドのファイルを消す

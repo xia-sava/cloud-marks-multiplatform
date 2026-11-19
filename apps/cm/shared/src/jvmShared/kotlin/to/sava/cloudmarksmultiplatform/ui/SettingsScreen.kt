@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -45,13 +46,18 @@ import to.sava.cloudmarksmultiplatform.settings.TabLoading
 import to.sava.cloudmarksmultiplatform.settings.firstLineOf
 import to.sava.cloudmarksmultiplatform.settings.parseLoadAhead
 import to.sava.cloudmarksmultiplatform.settings.parseTabCount
+import to.sava.cloudmarksmultiplatform.update.UpdateState
 
 /** 入力欄を並べる幅の上限。広い画面で横に伸びすぎないようにする。 */
 private val SETTINGS_MAX_WIDTH = 560.dp
 
 private val SETTINGS_PADDING = 16.dp
-private val SETTINGS_SPACING = 12.dp
-private val SETTINGS_PROGRESS_SIZE = 20.dp
+
+/** 設定の画面の、欄と欄のあいだと、行の中の部品のあいだ。 */
+internal val SETTINGS_SPACING = 12.dp
+
+/** 設定の画面の、最中であることを伝える行（[SettingsStatusLine]）のインジケーターの大きさ。 */
+internal val SETTINGS_PROGRESS_SIZE = 20.dp
 
 private const val MISSING_FIELD = "入力してください。"
 
@@ -70,17 +76,20 @@ private const val PREFIX_HINT = "空欄にすると、バケットの直下に�
  * 表示の大きさは、選ぶとすぐに [onDisplayScaleChange] へ渡し、保存の操作を要しない。保存の最中でも選べる。
  * タブの読み込み方も同じく、欄に正しい数（同時に読み込むタブの数は 1 以上、先に読み込むタブの数は 0 以上の整数）を入れるたびに
  * [onTabLoadingChange] へ渡す（[TabCountField]）。
- * 末尾に、以前の状態に戻す画面を開くボタン（[REVISIONS_TITLE]）と、その説明（[REVISIONS_DESCRIPTION]）を置く。
+ * その下に、以前の状態に戻す画面を開くボタン（[REVISIONS_TITLE]）と、その説明（[REVISIONS_DESCRIPTION]）を置く。
+ * [update] があれば、末尾に「アプリの更新」の節（[UpdateSection]）を置く。
  *
  * @param displayScale いまの表示の大きさ
  * @param tabLoading いまのタブの読み込み方。null なら、その見出しと欄を出さない（まとめて開けないプラットフォーム）
  * @param canRestore 以前の状態に戻すことを受け付けるか。偽なら、以前の状態に戻す画面を開くボタンを押せない
+ * @param update アプリの更新の状態。null なら、「アプリの更新」の節を出さない（更新の仕組みを持たない起動のしかた）
  * @param onEdit 入力を変えたときに、変えたあとの入力を渡す
  * @param onSave 保存する
  * @param onCreateManifest マニフェストが無いと分かったあとで、マニフェストを作る
  * @param onDisplayScaleChange 表示の大きさを選んだときに、選んだ段を渡す
  * @param onTabLoadingChange タブの読み込み方の欄に正しい値を入れたときに、変えたあとの読み込み方を渡す
  * @param onOpenRevisions 以前の状態に戻す画面を開く
+ * @param updateActions 「アプリの更新」の節の操作。[update] が null なら呼ばれない
  */
 @Composable
 internal fun SettingsScreen(
@@ -88,12 +97,14 @@ internal fun SettingsScreen(
     displayScale: DisplayScale,
     tabLoading: TabLoading?,
     canRestore: Boolean,
+    update: UpdateState?,
     onEdit: (SettingsForm) -> Unit,
     onSave: () -> Unit,
     onCreateManifest: () -> Unit,
     onDisplayScaleChange: (DisplayScale) -> Unit,
     onTabLoadingChange: (TabLoading) -> Unit,
     onOpenRevisions: () -> Unit,
+    updateActions: UpdateActions,
     modifier: Modifier = Modifier,
 ) {
     val form = settings.form
@@ -169,6 +180,10 @@ internal fun SettingsScreen(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            update?.let {
+                HorizontalDivider()
+                UpdateSection(it, updateActions)
+            }
         }
     }
 }
@@ -290,14 +305,24 @@ private fun SettingsStatusView(status: SettingsStatus, onCreateManifest: () -> U
         status == SettingsStatus.ProtectionUnavailable ||
         status is SettingsStatus.WriteFailed ||
         status is SettingsStatus.ConnectionFailed
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(SETTINGS_SPACING)) {
-        if (status.busy) CircularProgressIndicator(Modifier.size(SETTINGS_PROGRESS_SIZE))
-        MessageText(
-            message = message,
-            color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-        )
-    }
+    SettingsStatusLine(
+        message = message,
+        busy = status.busy,
+        color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+    )
     if (status == SettingsStatus.ManifestNotFound) {
         Button(onClick = onCreateManifest) { Text("作成") }
+    }
+}
+
+/**
+ * 設定の画面の、様子を伝える行。[message] を [color] で出し（[MessageText]）、[busy] なら左にインジケーターを添える。
+ * 設定の保存の様子と、「アプリの更新」の節の様子に使う。
+ */
+@Composable
+internal fun SettingsStatusLine(message: UiMessage, busy: Boolean, color: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(SETTINGS_SPACING)) {
+        if (busy) CircularProgressIndicator(Modifier.size(SETTINGS_PROGRESS_SIZE))
+        MessageText(message = message, color = color)
     }
 }

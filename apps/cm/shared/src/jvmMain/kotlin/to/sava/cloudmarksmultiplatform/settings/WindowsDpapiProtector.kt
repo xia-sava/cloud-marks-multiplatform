@@ -1,5 +1,6 @@
 package to.sava.cloudmarksmultiplatform.settings
 
+import to.sava.cloudmarksmultiplatform.files.describeThrowable
 import java.lang.foreign.Arena
 import java.lang.foreign.FunctionDescriptor
 import java.lang.foreign.Linker
@@ -87,17 +88,15 @@ private fun probe(): Availability {
         Availability.Unavailable(e.message)
     } catch (e: IllegalArgumentException) {
         // DLL を読み込めない、または関数や構造体のレイアウトを組めない
-        Availability.Unavailable(describeLinkFailure(e))
+        Availability.Unavailable(describeThrowable(e))
     } catch (e: UnsupportedOperationException) {
         // この JVM がネイティブの関数の呼び出しに対応していない
-        Availability.Unavailable(describeLinkFailure(e))
+        Availability.Unavailable(describeThrowable(e))
     } catch (e: IllegalCallerException) {
         // ネイティブの関数の呼び出しが許されていない
-        Availability.Unavailable(describeLinkFailure(e))
+        Availability.Unavailable(describeThrowable(e))
     }
 }
-
-private fun describeLinkFailure(e: RuntimeException): String = listOfNotNull(e::class.simpleName, e.message).joinToString(": ")
 
 /** DPAPI の関数を呼ぶ。作るときに DLL を読み込み、関数を探して呼び出せるようにする。 */
 private class Dpapi {

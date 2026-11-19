@@ -11,3 +11,10 @@ import java.nio.file.FileSystemException
 internal fun describeIoFailure(e: IOException): String =
     listOfNotNull(e::class.simpleName, if (e is FileSystemException) e.reason else e.message)
         .joinToString(": ")
+
+/**
+ * 失敗を、後から調べるための短い文にする。例外の種類とメッセージを使う。
+ * I/O の失敗は [describeIoFailure] にする（ファイルシステムの失敗のメッセージはパスを含むため使わない）。
+ */
+internal fun describeThrowable(e: Throwable): String =
+    if (e is IOException) describeIoFailure(e) else listOfNotNull(e::class.simpleName, e.message).joinToString(": ")

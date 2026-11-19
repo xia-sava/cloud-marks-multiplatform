@@ -15,7 +15,7 @@ const request: AddRequest = {
 function fakeApi(response: () => Promise<unknown>) {
   const store: Record<string, unknown> = {}
   const badge = { text: "" }
-  const title = { value: MESSAGES.defaultActionTitle as string }
+  const title = { value: "Cloud Marks" }
   const api = {
     runtime: { sendNativeMessage: vi.fn(response) },
     storage: {

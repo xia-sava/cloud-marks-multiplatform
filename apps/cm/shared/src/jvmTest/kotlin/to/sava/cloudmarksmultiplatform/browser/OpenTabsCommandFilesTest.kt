@@ -8,6 +8,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
 import to.sava.cloudmarksmultiplatform.findContracts
+import to.sava.cloudmarksmultiplatform.nativeMessagingIdentity
 import to.sava.cloudmarksmultiplatform.settings.TabLoading
 import java.nio.file.Files
 import java.nio.file.Path
@@ -77,7 +78,7 @@ class OpenTabsCommandFilesTest {
         assertEquals(OpenTabsCommandParseResult.Valid(command), parseOpenTabsCommand(commandFileOf(directory, token).readBytes()))
     }
 
-    // トークンは、乱数を小文字の 16 進にした 32 文字で（ホストが受け付ける形に合い）、作るたびに違う。呼び出しの URL はそのトークンを持つ
+    // トークンは、乱数を小文字の 16 進にした 32 文字で（ホストが受け付ける形に合い）、作るたびに違う
     @Test
     fun tokenIsLowercaseHex() {
         val random = SecureRandom()
@@ -88,7 +89,18 @@ class OpenTabsCommandFilesTest {
             assertTrue(COMMAND_TOKEN_FORMAT.matches(it), it)
         }
         assertNotEquals(tokens[0], tokens[1])
-        assertEquals("https://cmm.invalid/knock?token=${tokens[0]}", knockUrl(tokens[0]))
+    }
+
+    // 呼び出しの URL は、配布版なら配布版の、開発版なら開発版の、identities.json の callUrlHost をホストに持ち、トークンを持つ
+    @Test
+    fun knockUrlMatchesIdentities() {
+        val token = newCommandToken(SecureRandom())
+
+        listOf(true, false).forEach { distributed ->
+            val host = nativeMessagingIdentity(distributed, "callUrlHost")
+
+            assertEquals("https://$host/knock?token=$token", knockUrl(token, distributed), "distributed=$distributed")
+        }
     }
 
     // コマンドのファイルは、コマンドのディレクトリの <トークン>.json。ディレクトリが無ければ作り、一時ファイルを残さない

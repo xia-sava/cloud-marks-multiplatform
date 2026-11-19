@@ -13,6 +13,8 @@ import to.sava.cloudmarksmultiplatform.storage.StorageProblem
 import to.sava.cloudmarksmultiplatform.sync.ManifestCounts
 import to.sava.cloudmarksmultiplatform.sync.RevisionFailure
 import to.sava.cloudmarksmultiplatform.sync.SyncFailure
+import to.sava.cloudmarksmultiplatform.update.UpdateCheckFailure
+import to.sava.cloudmarksmultiplatform.update.UpdateInstallFailure
 import kotlin.time.Instant
 
 /** ルートフォルダを、ツリーと AppBar に出すときの名前。ルートフォルダの名前は空なので、代わりにこれを出す。 */
@@ -54,7 +56,7 @@ internal const val CHANGE_LABEL = "変更"
 /** フォルダを作るダイアログの、確定のボタン。 */
 internal const val CREATE_LABEL = "作成"
 
-/** ダイアログを閉じるボタン。 */
+/** ダイアログを閉じるボタンと、更新をインストールしてよいかの返事を待つのをやめるボタン。 */
 internal const val CANCEL_LABEL = "キャンセル"
 
 /** フォルダの名前を入れるダイアログで、名前が空のときに欄の下に添える文。 */
@@ -69,7 +71,7 @@ internal const val MOVE_DESTINATION_TITLE = "移動先のフォルダを選ん�
 /** 項目の削除を戻す、お知らせのボタン。 */
 internal const val UNDO_LABEL = "元に戻す"
 
-/** 書き込みの結果の帯と、マニフェストの読み込みの失敗の帯を閉じるボタン。 */
+/** 書き込みの結果の帯と、マニフェストの読み込みの失敗の帯と、更新を止めた理由を閉じるボタン。 */
 internal const val CLOSE_LABEL = "閉じる"
 
 /** データを変える操作を書いている最中であることを伝える文。 */
@@ -336,6 +338,65 @@ internal fun savedByLine(updatedBy: String): String? =
 
 /** 以前の状態に戻せたことのお知らせ。[time] は戻した時点の日時（[formatRevisionTime]）。 */
 internal fun restoredNotice(time: String): String = "$time の状態に戻しました。"
+
+/** 設定の画面の、「アプリの更新」の節の見出し。 */
+internal const val UPDATE_SECTION_TITLE = "アプリの更新"
+
+/** 設定の画面の「アプリの更新」の節の、動いているアプリのバージョンの行。[displayName] は画面に出すバージョン。 */
+internal fun currentVersionNotice(displayName: String): String = "現在のバージョンは $displayName です。"
+
+/** 更新を確認するボタン。 */
+internal const val CHECK_UPDATE_LABEL = "更新を確認"
+
+/** 更新を確認している最中であることを伝える文。 */
+internal const val CHECKING_UPDATE_NOTICE = "確認しています…"
+
+/** 動いているバージョンが最新であることを伝える文。 */
+internal const val UP_TO_DATE_NOTICE = "最新のバージョンです。"
+
+/** 新しいバージョン [versionName] があることを伝える文。 */
+internal fun updateAvailableNotice(versionName: String): String = "新しいバージョン $versionName があります。"
+
+/** 新しいバージョンをダウンロードするボタン。 */
+internal const val DOWNLOAD_UPDATE_LABEL = "ダウンロード"
+
+/** 新しいバージョンをダウンロードしている最中であることを伝える文。進み具合のバーと一緒に出し、数字は出さない。 */
+internal const val DOWNLOADING_UPDATE_NOTICE = "ダウンロードしています…"
+
+/** ダウンロードしたファイルを確かめている最中であることを伝える文。 */
+internal const val VERIFYING_UPDATE_NOTICE = "ダウンロードしたファイルを確認しています…"
+
+/** インストールしてよいかの返事を待つあいだに添える文。インストールするとアプリをいったん終了するプラットフォーム（デスクトップ）だけで出す。 */
+internal const val RESTART_TO_APPLY_NOTICE = "インストールすると Cloud Marks をいったん終了し、更新が終わったら起動し直します。"
+
+/** ダウンロードして確かめた新しいバージョンを、インストールするボタン。 */
+internal const val APPLY_UPDATE_LABEL = "今すぐインストール"
+
+/** 新しいバージョンをインストーラへ渡したことを伝える文。 */
+internal const val LAUNCHING_INSTALLER_NOTICE = "インストールを始めます。"
+
+/** 開発版では、更新をダウンロードもインストールもできないことを伝える文。 */
+internal const val DEV_BUILD_UPDATE_NOTICE = "開発版では、更新をインストールできません。"
+
+/** 更新を確認できなかった理由を、利用者に見せる文にする。細かい理由はログにだけ書き、詳細の行は付けない。 */
+internal fun describeUpdateCheckFailure(failure: UpdateCheckFailure): UiMessage =
+    when (failure) {
+        UpdateCheckFailure.UNREACHABLE -> UiMessage("更新情報を取得できませんでした。")
+        UpdateCheckFailure.SIGNATURE_UNVERIFIED -> UiMessage("更新情報の署名を確認できませんでした。")
+        UpdateCheckFailure.UNREADABLE -> UiMessage("更新情報を読み取れませんでした。")
+    }
+
+/** 新しいバージョンをインストーラへ渡せなかった理由を、利用者に見せる文にする。細かい理由はログにだけ書き、詳細の行は付けない。 */
+internal fun describeUpdateInstallFailure(failure: UpdateInstallFailure): UiMessage =
+    when (failure) {
+        UpdateInstallFailure.DOWNLOAD_FAILED -> UiMessage("更新をダウンロードできませんでした。")
+        UpdateInstallFailure.VERIFICATION_FAILED -> UiMessage("ダウンロードしたファイルの確認に失敗しました。")
+        UpdateInstallFailure.HAND_OVER_FAILED -> UiMessage("更新をインストールできませんでした。")
+    }
+
+/** 前の起動で、バージョン [versionName] への更新を適用できなかったことを伝える文。次の起動のメインの画面に出す。 */
+internal fun updateApplyFailedNotice(versionName: String): String =
+    "バージョン $versionName への更新を適用できませんでした。設定の画面の「アプリの更新」からやり直せます。"
 
 /** 項目ファイルが壊れているフォルダを、利用者に見せる文にする。 */
 internal fun describeBrokenFolder(problem: StorageProblem): UiMessage =

@@ -1,7 +1,8 @@
 ﻿; WindowsのインストーラをInno Setupでビルドする。Gradleの`:desktopApp:packageInnoSetup`が呼ぶ。
 ;
 ;   ISCC /DAppName=<配布物の名前> /DAppVersion=<versionName> /DFileVersion=<major.minor.patch>
-;        /DSourceDir=<createDistributableの出力> /DOutputDir=<出力先> cloudmarks.iss
+;        /DSourceDir=<stageInstallerFilesの出力> /DHostName=<配布版のNative Messagingのホストの名前>
+;        /DOutputDir=<出力先> cloudmarks.iss
 ;
 ; このファイルはBOM付きのUTF-8で保存する。BOMが無いと、ISCCは日本語をシステムのコードページとして読む。
 
@@ -16,6 +17,9 @@
 #endif
 #ifndef SourceDir
   #error SourceDir is required
+#endif
+#ifndef HostName
+  #error HostName is required
 #endif
 #ifndef OutputDir
   #error OutputDir is required
@@ -60,13 +64,24 @@ WizardStyle=modern
 Name: "ja"; MessagesFile: "compiler:Languages\Japanese.isl"
 
 ; 前のバージョンにあって新しいバージョンに無いファイルを残さない。jarの名前にはバージョンが入るため、
-; 残すと新旧のjarが両方クラスパスに載る。
+; 残すと新旧のjarが両方クラスパスに載る。拡張のフォルダも同じ理由で入れ直す。
+; ユーザーのデータは`%LOCALAPPDATA%\CloudMarks`にあり、ここには無い。
 [InstallDelete]
 Type: filesandordirs; Name: "{app}\app"
 Type: filesandordirs; Name: "{app}\runtime"
+Type: filesandordirs; Name: "{app}\extension"
 
+; `SourceDir`は`stageInstallerFiles`の出力で、アプリの配布物にNative Messagingのホストの起動口と、
+; ホストを登録するJSONと、拡張（`extension\chrome`と、ビルドに渡したときは`extension\firefox`）と、
+; リポジトリのライセンス（`LICENSE`）と第三者のライブラリの表記（`THIRD-PARTY-NOTICES.md`）を足したもの。
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+; ChromeとFirefoxにNative Messagingのホストを登録する。既定の値が、ホストを登録するJSONのパス。
+; アンインストールでキーを消す。開発版のホスト（名前が`.dev`で終わる）のキーには触れない。
+[Registry]
+Root: HKCU; Subkey: "Software\Google\Chrome\NativeMessagingHosts\{#HostName}"; ValueType: string; ValueName: ""; ValueData: "{app}\cloud-marks-host.chrome.json"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Mozilla\NativeMessagingHosts\{#HostName}"; ValueType: string; ValueName: ""; ValueData: "{app}\cloud-marks-host.firefox.json"; Flags: uninsdeletekey
 
 [Icons]
 Name: "{userprograms}\{#AppDisplayName}"; Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"

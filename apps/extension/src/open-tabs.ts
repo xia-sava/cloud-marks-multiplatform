@@ -8,7 +8,7 @@ import {
   type OpenTabsCommand,
 } from "./command"
 import { LoadQueue } from "./load-queue"
-import { PLACEHOLDER_FILE } from "./manifest"
+import { PLACEHOLDER_FILE } from "./extension-files"
 import { movedFromPlaceholder, placeholderUrl } from "./placeholder-page"
 import { HOST_NAME } from "./protocol"
 

@@ -6,6 +6,9 @@
     <!-- 既定のネットワークにつながったことを知り、S3 から読み直して溜めた削除を書くため。 -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
 
+    <!-- アプリの更新でダウンロードした APK を、端末のインストーラへ渡すため。インストールするかどうかは、端末が利用者に尋ねる。 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+
     <!-- 既定のブラウザを引くためと、項目をほかのアプリで開くときに開けるアプリがあるかを確かめるため、
          https の URL を開くアプリを見えるようにする（Android 11 以上のパッケージの可視性）。 -->
     <queries>
@@ -43,6 +46,18 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <!-- アプリの更新でダウンロードした APK を、端末のインストーラが読めるようにする FileProvider。
+             authority は shared の UPDATE_PROVIDER_SUFFIX と合わせる（verifyFileProviders が確かめる）。 -->
+        <provider
+                android:authorities="${applicationId}.updates"
+                android:exported="false"
+                android:grantUriPermissions="true"
+                android:name=".UpdateFileProvider">
+            <meta-data
+                    android:name="android.support.FILE_PROVIDER_PATHS"
+                    android:resource="@xml/update_paths"/>
+        </provider>
     </application>
 
 </manifest>

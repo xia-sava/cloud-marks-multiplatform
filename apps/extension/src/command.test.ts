@@ -8,6 +8,7 @@ import {
 } from "./command"
 import { MESSAGES } from "./messages"
 import { contract } from "./test-support"
+import { VARIANTS } from "./variants"
 
 const TOKEN = "0123456789abcdef0123456789abcdef"
 
@@ -45,6 +46,17 @@ describe("readCallToken", () => {
     ]) {
       expect(readCallToken(url), url).toBeUndefined()
     }
+  })
+
+  it("配布版の拡張は開発版の、開発版の拡張は配布版の呼び出しの URL を読まず、自分の呼び出しの URL だけを読む", () => {
+    const { distributed, dev } = VARIANTS
+    const distributedUrl = `https://${distributed.callUrlHost}/knock?token=${TOKEN}`
+    const devUrl = `https://${dev.callUrlHost}/knock?token=${TOKEN}`
+
+    expect(readCallToken(devUrl, distributed.callUrlHost)).toBeUndefined()
+    expect(readCallToken(distributedUrl, dev.callUrlHost)).toBeUndefined()
+    expect(readCallToken(distributedUrl, distributed.callUrlHost)).toBe(TOKEN)
+    expect(readCallToken(devUrl, dev.callUrlHost)).toBe(TOKEN)
   })
 })
 

@@ -81,6 +81,7 @@ import to.sava.cloudmarksmultiplatform.app.WriteOutcome
 import to.sava.cloudmarksmultiplatform.app.WriteState
 import to.sava.cloudmarksmultiplatform.browse.BrowseState
 import to.sava.cloudmarksmultiplatform.sync.counts
+import to.sava.cloudmarksmultiplatform.update.AppUpdater
 
 /** 広い画面での、ツリーの枠の幅の初め。 */
 internal val DEFAULT_TREE_PANE_WIDTH = 280.dp
@@ -121,9 +122,17 @@ private data class MainPaneState(
  *
  * [controller] は呼ぶ側が `createCloudMarksController` で組み立て、[CloudMarksController.start] で動かし始め、
  * 使い終えたら [CloudMarksController.close] で閉じる。
+ *
+ * [updater] があれば、設定の画面の末尾に「アプリの更新」の節（[UpdateSection]）を出し、その操作を [updater] へ渡す。
+ * データを変える操作を書いている最中は、インストールを受け付けない（[UpdateActions.canApply]）。
+ * 前の起動で更新を適用できなかったと [updater] が伝えれば（[to.sava.cloudmarksmultiplatform.update.UpdateState.applyFailedVersionName]）、
+ * メインの画面にそのことの帯を出す。[updater] は呼ぶ側が作り、使い終えたら閉じる。null なら、その節も帯も出さない。
+ *
+ * @param onReadyToExit 更新をインストーラへ渡したあとに呼ぶ（[AppUpdater.apply]）。呼ぶ側はここでアプリを終了する。デスクトップのアプリは、
+ * 窓を閉じるときと同じ後始末をする
  */
 @Composable
-fun CloudMarksApp(controller: CloudMarksController) {
+fun CloudMarksApp(controller: CloudMarksController, updater: AppUpdater? = null, onReadyToExit: () -> Unit = {}) {
     val state by controller.state.collectAsState()
     val panes = MainPaneState(
         treePaneWidth = remember { mutableStateOf(DEFAULT_TREE_PANE_WIDTH) },
@@ -134,11 +143,24 @@ fun CloudMarksApp(controller: CloudMarksController) {
     ScaledDensity(state.displayScale) {
         MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
             Surface(modifier = Modifier.fillMaxSize().displayScaleWheel(controller)) {
-                CloudMarksScreen(state, controller, panes, Modifier.safeDrawingPadding())
+                CloudMarksScreen(state, controller, updater, onReadyToExit, panes, Modifier.safeDrawingPadding())
             }
         }
     }
 }
+
+/**
+ * [updater] の操作を呼ぶ、「アプリの更新」の節の操作の入口。インストールは [canApply] のときだけ受け付け、[updater] へ
+ * [onReadyToExit] を渡す。[updater] が null なら、どの操作も何もしない。
+ */
+private fun updateActionsOf(updater: AppUpdater?, canApply: Boolean, onReadyToExit: () -> Unit): UpdateActions =
+    UpdateActions(
+        canApply = canApply,
+        onCheck = { updater?.check() },
+        onDownload = { updater?.download() },
+        onApply = { updater?.apply(onReadyToExit) },
+        onCancel = { updater?.cancel() },
+    )
 
 /**
  * メインの画面の部品に渡す、いまの状態と操作の入口。
@@ -216,10 +238,20 @@ private fun rememberMainScreenParts(controller: CloudMarksController): MainScree
  * （[MainScreenParts]）。ドラッグを始めたあとのポインターは、窓いっぱいの枠で追う（[moveDragTracker]）。
  * タッチの画面（[LocalTouchScreen]）では、システムの戻る操作を受け、[systemBackOf] が決めたことを行う。することが無いあいだは受けない。
  *
+ * @param updater アプリの更新。状態は、設定の画面と、メインの画面の、前の起動で更新を適用できなかったことの帯
+ * （[UpdateApplyFailedBanner]）の中だけで集める。null なら、設定の画面に「アプリの更新」の節を出さず、その帯も出さない
+ * @param onReadyToExit 更新をインストーラへ渡したあとに呼ぶ（[CloudMarksApp] の同じ名前の引数）
  * @param modifier 画面の枠に付ける修飾。[CloudMarksApp] は、システムバー・画面の切り欠き・キーボードに重ならない余白を付ける
  */
 @Composable
-private fun CloudMarksScreen(state: AppState, controller: CloudMarksController, panes: MainPaneState, modifier: Modifier) {
+private fun CloudMarksScreen(
+    state: AppState,
+    controller: CloudMarksController,
+    updater: AppUpdater?,
+    onReadyToExit: () -> Unit,
+    panes: MainPaneState,
+    modifier: Modifier,
+) {
     val wide = currentWindowAdaptiveInfoV2().windowSizeClass
         .isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND)
     LaunchedEffect(wide) { controller.setWideLayout(wide) }
@@ -252,6 +284,8 @@ private fun CloudMarksScreen(state: AppState, controller: CloudMarksController, 
     val shareActions = remember(state.sharesItems, controller) {
         ItemShareActions(onOpenInOtherApp = controller::openItemInOtherApp, onShare = controller::shareItem).takeIf { state.sharesItems }
     }
+    val canApplyUpdate = !state.write.writing
+    val updateActions = remember(updater, canApplyUpdate, onReadyToExit) { updateActionsOf(updater, canApplyUpdate, onReadyToExit) }
     val parts = rememberMainScreenParts(controller)
     val content = MainScreenContent(state, panes, operations, browserActions, shareActions)
     UndoDeleteNotice(
@@ -269,7 +303,7 @@ private fun CloudMarksScreen(state: AppState, controller: CloudMarksController, 
     )
     Box(modifier.fillMaxSize().moveDragTracker(dragState, onDrop = operations.onMove)) {
         if (state.screen == Screen.MAIN && !wide) {
-            NarrowMainScreen(content, controller, parts)
+            NarrowMainScreen(content, controller, updater, parts)
         } else {
             Column(Modifier.fillMaxSize()) {
                 parts.topBar(content)
@@ -280,12 +314,14 @@ private fun CloudMarksScreen(state: AppState, controller: CloudMarksController, 
                         displayScale = state.displayScale,
                         tabLoading = state.tabLoading.takeIf { state.opensMultipleItems },
                         canRestore = state.canRestore,
+                        update = updater?.let { it.state.collectAsState().value },
                         onEdit = controller::editSettings,
                         onSave = controller::saveSettings,
                         onCreateManifest = controller::createManifest,
                         onDisplayScaleChange = controller::setDisplayScale,
                         onTabLoadingChange = controller::setTabLoading,
                         onOpenRevisions = controller::openRevisions,
+                        updateActions = updateActions,
                     )
                     Screen.REVISIONS -> RevisionsScreen(
                         revisions = state.revisions,
@@ -297,7 +333,7 @@ private fun CloudMarksScreen(state: AppState, controller: CloudMarksController, 
                         onDismissNotice = controller::dismissRevisionNotice,
                     )
                     Screen.MAIN -> {
-                        MainBanners(state, controller)
+                        MainBanners(state, controller, updater)
                         WideMainBody(content, parts)
                     }
                 }
@@ -375,9 +411,16 @@ private fun RestoredNotice(
 /**
  * 狭い画面のメインの画面。ツリーはドロワーにし、ハンバーガーで開く。画面の端からのスワイプでは開かない
  * （閉じているあいだはジェスチャーを受けない）。開いたドロワーは、スワイプや外側を押す操作で閉じられる。
+ *
+ * @param updater アプリの更新。前の起動で更新を適用できなかったことの帯（[MainBanners]）に使う
  */
 @Composable
-private fun NarrowMainScreen(content: MainScreenContent, controller: CloudMarksController, parts: MainScreenParts) {
+private fun NarrowMainScreen(
+    content: MainScreenContent,
+    controller: CloudMarksController,
+    updater: AppUpdater?,
+    parts: MainScreenParts,
+) {
     val browse = content.state.browse
     val drawerState = rememberDrawerState(if (browse.drawerOpen) DrawerValue.Open else DrawerValue.Closed)
     LaunchedEffect(browse.drawerOpen) {
@@ -402,7 +445,7 @@ private fun NarrowMainScreen(content: MainScreenContent, controller: CloudMarksC
     ) {
         Column(Modifier.fillMaxSize()) {
             parts.topBar(content)
-            MainBanners(content.state, controller)
+            MainBanners(content.state, controller, updater)
             parts.listPane(content, Modifier)
         }
     }
@@ -501,14 +544,26 @@ private fun PaneDivider(onDrag: (Dp) -> Unit, modifier: Modifier = Modifier) {
 /**
  * メインの画面の、AppBar の下に並べる帯。マニフェストを読んだ様子（[BrowseBanners]）と、操作を書いた様子（[WriteBanner]）と、
  * 溜めた削除があること（[PendingDeletesBanner]）と、項目をブラウザで開こうとして伝えること（[AppState.browserNotice]。
- * [CLOSE_LABEL] を押すと閉じる）。
+ * [CLOSE_LABEL] を押すと閉じる）と、[updater] があれば、前の起動で更新を適用できなかったこと（[UpdateApplyFailedBanner]）。
  */
 @Composable
-private fun MainBanners(state: AppState, controller: CloudMarksController) {
+private fun MainBanners(state: AppState, controller: CloudMarksController, updater: AppUpdater?) {
     BrowseBanners(state.browse, onDismissFailure = controller::dismissReadFailure)
     WriteBanner(state.write, onDismissOutcome = controller::dismissWriteOutcome)
     PendingDeletesBanner(state.browse.pendingDeletes.size)
     state.browserNotice?.let { Banner(describeBrowserNotice(it), onDismiss = controller::dismissBrowserNotice) }
+    updater?.let { UpdateApplyFailedBanner(it) }
+}
+
+/**
+ * 前の起動で更新を適用できなかったことを伝える帯（[updateApplyFailedNotice]）。[CLOSE_LABEL] を押すと
+ * [AppUpdater.dismissApplyFailure] を呼ぶ。伝えることが無ければ出さない。
+ * [updater] の状態はこの中で集め、ダウンロードの進み具合が替わっても、メインの画面のほかの部分を描き直さない。
+ */
+@Composable
+private fun UpdateApplyFailedBanner(updater: AppUpdater) {
+    val versionName = updater.state.collectAsState().value.applyFailedVersionName ?: return
+    Banner(UiMessage(updateApplyFailedNotice(versionName)), onDismiss = updater::dismissApplyFailure)
 }
 
 /** 溜めた削除が [count] 件あれば、そのことを伝える帯（[pendingDeletesNotice]）。閉じるボタンは置かず、溜めた削除が無くなるまで出す。 */

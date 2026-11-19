@@ -9,6 +9,10 @@ Native Messaging のメッセージの形を変えるときは、拡張と `apps
 
 S3 上の形式を変えるときは、`contracts/storage/` の見本も同じ変更で直す。
 
+## リリース
+
+バージョンを上げて配るときは、スキル `release`（`.claude/skills/release/SKILL.md`）の手順に従う。
+
 ## テストのエントリポイント
 
 - **`./gradlew test` は `:shared` のテストを1つも走らせない。** `:shared` に `test` という名前のタスクが無く、

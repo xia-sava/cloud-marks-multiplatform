@@ -1,0 +1,405 @@
+name: extension-release
+
+# 拡張（apps/extension）のリリース。タグ extension-vMAJOR.MINOR.PATCH の push で、配布版の Firefox の拡張を AMO で
+# 自分で配る拡張（unlisted）として署名し、バージョンごとのリリースと、固定のタグ extension-latest のリリースへ公開する。
+# 配布版の Firefox の拡張は、extension-latest のリリースの更新情報（updates.json）で新しいバージョンを確かめる。
+# アプリのインストーラ（release.yml）は、extension-latest のリリースの .xpi を入れる。Chrome の拡張はインストーラが
+# タグのコミットから作って入れるので、ここでは公開しない。
+# AMO は同じバージョンに 2 度署名しないので、手動実行は置かない。
+on:
+  push:
+    tags: ["extension-v*"]
+
+# 既定では GITHUB_TOKEN に何の権限も与えない。各ジョブが要る分だけ宣言する。
+permissions: {}
+
+# 走っているリリースは取り消さず、終わってから次を走らせる。同じグループで待てるのは 1 つだけで、待っているあいだに
+# 次が来ると、待っていた方は取り消される。タグは前のリリースが終わってから打つ。
+concurrency:
+  group: extension-release
+  cancel-in-progress: false
+
+jobs:
+  # バージョンとリリースノートを決める。
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.compute.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          # リリースノートを前のタグから書くため、全履歴とタグを取る。既定の浅い取得では、前のタグが見えない。
+          fetch-depth: 0
+
+      # 公開するのは、公開のリポジトリのときだけにする。非公開のリポジトリのリリースは、Firefox からも、
+      # 公開のあとの確かめからも取れない。
+      # 配布版の拡張が更新を問い合わせるリポジトリと同じかは、sign が拡張を作ってから manifest の update_url で確かめる。
+      - name: Check release repository
+        env:
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -euo pipefail
+          if [ "$REPOSITORY_PRIVATE" != "false" ]; then
+            echo "リポジトリが公開になっていない（private: $REPOSITORY_PRIVATE）。公開にしてからタグを打つ" >&2
+            exit 1
+          fi
+
+      # バージョンはタグ名から extension-v を除いたもの。拡張のバージョン（apps/extension/package.json の version）と
+      # 違えば止める。リリースと更新情報のバージョンは、署名する .xpi のバージョンと揃っていなければならない。
+      - name: Compute version
+        id: compute
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#extension-v}"
+          # 配布するバージョンは major.minor.patch の形に揃える。接尾辞の付いたタグも断る。
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "タグは extension-vMAJOR.MINOR.PATCH の形で打つ（受け取った値: $GITHUB_REF_NAME）" >&2
+            exit 1
+          fi
+          package_version=$(jq -er '.version' apps/extension/package.json)
+          if [ "$package_version" != "$version" ]; then
+            echo "タグのバージョン（$version）と apps/extension/package.json の version（$package_version）が違う" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "version=$version"
+
+      # リリースノート。前の extension-v* のタグから、apps/extension に触れたコミットの件名を並べる。
+      # 前のタグが無ければ最初のリリースとする。extension-latest のリリースの説明も、ここで書く。
+      - name: Write release notes
+        env:
+          VERSION: ${{ steps.compute.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          if previous=$(git describe --tags --abbrev=0 --match 'extension-v*' HEAD^ 2>/dev/null); then
+            git log --format='- %s' "$previous..HEAD" -- apps/extension > artifacts/release-notes.md
+          else
+            echo "最初のリリースです。" > artifacts/release-notes.md
+          fi
+          printf 'Firefox の拡張の最新のバージョン（%s）です。Firefox は、このリリースに置いた更新情報で新しいバージョンを確かめます。\n' \
+            "$VERSION" > artifacts/latest-release-notes.md
+          cat artifacts/release-notes.md
+
+      # release を走らせ直すときにも要るので、sign の成果物と同じだけ置く。
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-notes
+          path: |
+            artifacts/release-notes.md
+            artifacts/latest-release-notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  # 拡張をテストして作り、配布版の Firefox の拡張を AMO で署名して、更新情報を書く。公開の権限は持たず、成果物として
+  # release へ渡す。AMO の API の鍵を持つのはこのジョブの署名のステップだけで、リリースを書き換える権限とは同じジョブに置かない。
+  sign:
+    needs: [version]
+    runs-on: ubuntu-latest
+    # 署名を待つ時間（Sign Firefox extension の APPROVAL_TIMEOUT）に、テストとビルドの分を足したもの。
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    outputs:
+      update-url: ${{ steps.manifest.outputs.update-url }}
+      gecko-id: ${{ steps.manifest.outputs.gecko-id }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Node.js のバージョンは extension.yml と release.yml と揃える。
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: apps/extension/package-lock.json
+
+      - name: Install dependencies
+        working-directory: apps/extension
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: apps/extension
+        run: npm run typecheck
+
+      - name: Test
+        working-directory: apps/extension
+        run: npm test
+
+      - name: Build
+        working-directory: apps/extension
+        run: npm run build
+
+      # 公開するリポジトリが、配布版の拡張が更新を問い合わせる先（manifest の update_url）と同じときだけ進む。
+      # 違うリポジトリに公開しても、配った拡張には届かない。manifest のバージョンがタグと同じことも確かめる。
+      - name: Check built manifest
+        id: manifest
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          manifest=apps/extension/dist/firefox/manifest.json
+          manifest_version=$(jq -er '.version' "$manifest")
+          if [ "$manifest_version" != "$VERSION" ]; then
+            echo "配布版の Firefox の拡張のバージョン（$manifest_version）が、タグのバージョン（$VERSION）と違う" >&2
+            exit 1
+          fi
+          update_url=$(jq -er '.browser_specific_settings.gecko.update_url' "$manifest")
+          expected_update_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/extension-latest/updates.json"
+          if [ "$update_url" != "$expected_update_url" ]; then
+            echo "配布版の拡張が更新を問い合わせる先（$update_url）が、このリポジトリの更新情報（$expected_update_url）と違う" >&2
+            exit 1
+          fi
+          gecko_id=$(jq -er '.browser_specific_settings.gecko.id' "$manifest")
+          echo "update-url=$update_url" >> "$GITHUB_OUTPUT"
+          echo "gecko-id=$gecko_id" >> "$GITHUB_OUTPUT"
+          echo "update_url: $update_url"
+          echo "gecko の ID: $gecko_id"
+
+      # AMO が署名の前に行う検査（addons-linter）を先に走らせ、警告も失敗にする。
+      # 自分で配る拡張は update_url を持つので、AMO が unlisted に対して行うのと同じく --self-hosted を付ける（package.json の lint:firefox）。
+      - name: Lint Firefox extension
+        working-directory: apps/extension
+        run: npm run lint:firefox
+
+      # esbuild でまとめたコードは、AMO にソースの提出を求められる。拡張を作り直すのに要るもの（apps/extension と、
+      # テストと更新情報が読む contracts/native-messaging と、ビルドが拡張の直下に写すリポジトリ直下の LICENSE と
+      # THIRD-PARTY-NOTICES.md）を、タグのコミットからまとめる。作り方は apps/extension/README.md。
+      - name: Archive source code
+        id: source
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          source_archive="$RUNNER_TEMP/cloudmarks-firefox-source-${VERSION}.zip"
+          git archive --format=zip --output "$source_archive" HEAD -- \
+            apps/extension contracts/native-messaging LICENSE THIRD-PARTY-NOTICES.md
+          unzip -l "$source_archive"
+          echo "path=$source_archive" >> "$GITHUB_OUTPUT"
+
+      # 自分で配る拡張（unlisted）として署名する。unlisted なら、新しいアドオンでもストアのページの情報（--amo-metadata）は要らない。
+      # 鍵は環境変数で渡す（web-ext は WEB_EXT_ の付いた環境変数を引数として読む）。引数に載せるとプロセスの一覧から読める。
+      # 承認を待つ時間を過ぎると失敗する（手での審査に回ったときなど）。AMO は同じバージョンに 2 度署名しないので、
+      # そのときは承認のあとに AMO の管理画面から .xpi を落とす。
+      # 鍵を渡すコードは、package-lock.json で固定した apps/extension の web-ext に限る（--no-install で、無ければ入れずに止まる）。
+      - name: Sign Firefox extension
+        working-directory: apps/extension
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+          SOURCE_ARCHIVE: ${{ steps.source.outputs.path }}
+          # 承認を待つ時間（ミリ秒）。web-ext の既定の 15 分の倍。
+          APPROVAL_TIMEOUT: "1800000"
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "$WEB_EXT_API_KEY" ] || missing+=(AMO_JWT_ISSUER)
+          [ -n "$WEB_EXT_API_SECRET" ] || missing+=(AMO_JWT_SECRET)
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "secrets が設定されていない: ${missing[*]}" >&2
+            exit 1
+          fi
+          npx --no-install web-ext sign --channel unlisted --source-dir dist/firefox \
+            --artifacts-dir "$RUNNER_TEMP/signed" \
+            --upload-source-code "$SOURCE_ARCHIVE" \
+            --approval-timeout "$APPROVAL_TIMEOUT"
+
+      # AMO から落とした .xpi の名前は AMO が決める。1 つに決まることを確かめ、バージョンごとのリリースに置く名前にする。
+      - name: Collect signed extension
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mapfile -t xpis < <(find "$RUNNER_TEMP/signed" -maxdepth 1 -name '*.xpi')
+          if [ "${#xpis[@]}" -ne 1 ]; then
+            echo "署名済みの .xpi が 1 つに決まらない（${#xpis[@]} 個）" >&2
+            exit 1
+          fi
+          mkdir -p artifacts
+          cp "${xpis[0]}" "artifacts/cloudmarks-firefox-${VERSION}.xpi"
+
+      # 落としてきた .xpi が、AMO の署名（META-INF/mozilla.rsa）を持ち、manifest のバージョン・gecko の ID・update_url が
+      # 署名に出したものと同じことを確かめる。
+      - name: Verify signed extension
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          GECKO_ID: ${{ steps.manifest.outputs.gecko-id }}
+          UPDATE_URL: ${{ steps.manifest.outputs.update-url }}
+        run: |
+          set -euo pipefail
+          xpi="artifacts/cloudmarks-firefox-${VERSION}.xpi"
+          entries=$(unzip -Z1 "$xpi")
+          if ! grep -qxF 'META-INF/mozilla.rsa' <<<"$entries"; then
+            echo "署名済みの .xpi に AMO の署名（META-INF/mozilla.rsa）が無い" >&2
+            exit 1
+          fi
+          # 署名済みの .xpi の $1 の値 $2 が、署名に出したもの $3 と違えば止める。
+          expect_same() {
+            if [ "$2" != "$3" ]; then
+              echo "署名済みの .xpi の $1（$2）が、署名に出したもの（$3）と違う" >&2
+              exit 1
+            fi
+          }
+          signed_manifest=$(unzip -p "$xpi" manifest.json)
+          signed_version=$(jq -er '.version' <<<"$signed_manifest")
+          signed_id=$(jq -er '.browser_specific_settings.gecko.id' <<<"$signed_manifest")
+          signed_update_url=$(jq -er '.browser_specific_settings.gecko.update_url' <<<"$signed_manifest")
+          expect_same "manifest のバージョン" "$signed_version" "$VERSION"
+          expect_same "manifest の gecko の ID" "$signed_id" "$GECKO_ID"
+          expect_same "manifest の update_url" "$signed_update_url" "$UPDATE_URL"
+          echo "署名済みの .xpi: バージョン ${signed_version}、gecko の ID ${signed_id}"
+
+      # Firefox が update_url から読む更新情報（updates.json）。形は apps/extension/scripts/firefox-updates.ts に書いてある。
+      # update_link が、release が公開する .xpi の URL と同じことを確かめる。
+      - name: Write update info
+        working-directory: apps/extension
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          GECKO_ID: ${{ steps.manifest.outputs.gecko-id }}
+        run: |
+          set -euo pipefail
+          updates="$GITHUB_WORKSPACE/artifacts/updates.json"
+          npm run --silent updates-json -- "$GITHUB_WORKSPACE/artifacts/cloudmarks-firefox-${VERSION}.xpi" "$updates"
+          entries=$(jq --arg id "$GECKO_ID" --arg version "$VERSION" \
+            '[.addons[$id].updates[]? | select(.version == $version)] | length' "$updates")
+          if [ "$entries" != "1" ]; then
+            echo "更新情報に、gecko の ID が ${GECKO_ID} でバージョンが ${VERSION} の項目が 1 つでない（${entries} 個）" >&2
+            exit 1
+          fi
+          link=$(jq -er --arg id "$GECKO_ID" --arg version "$VERSION" \
+            '.addons[$id].updates[] | select(.version == $version) | .update_link' "$updates")
+          expected_link="https://github.com/${GITHUB_REPOSITORY}/releases/download/extension-v${VERSION}/cloudmarks-firefox-${VERSION}.xpi"
+          if [ "$link" != "$expected_link" ]; then
+            echo "更新情報の update_link（$link）が、公開する .xpi の URL（$expected_link）と違う" >&2
+            exit 1
+          fi
+
+      # 署名済みの .xpi は、release が失敗したときに release だけを走らせ直すのに要る。AMO は同じバージョンに
+      # 2 度署名しないので、ほかの成果物より長く置く。Actions のストレージの枠はアカウント全体で共有するので、既定の 90 日は抱えない。
+      - uses: actions/upload-artifact@v7
+        with:
+          name: firefox
+          path: |
+            artifacts/cloudmarks-firefox-${{ needs.version.outputs.version }}.xpi
+            artifacts/updates.json
+          if-no-files-found: error
+          retention-days: 7
+
+  # 成果物を公開するだけのジョブ。contents: write を持つのはここだけで、checkout も npm も走らせない。
+  release:
+    needs: [version, sign]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      # 公開するものだけを、成果物の名前で受け取る。
+      - uses: actions/download-artifact@v8
+        with:
+          name: firefox
+          path: artifacts
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-notes
+          path: artifacts
+
+      # extension-latest のリリースには、バージョンの付かない名前で置く。アプリのインストーラを組むときは、この名前で取る。
+      - name: Name latest extension
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: cp "artifacts/cloudmarks-firefox-${VERSION}.xpi" artifacts/cloudmarks-firefox.xpi
+
+      # バージョンごとのリリース。署名済みの .xpi の実物が残り、更新情報の update_link はこれを指す。
+      # GitHub の「Latest」はアプリのリリースに付けるので、ここでは付けない。
+      # 配布物を書き込む外部のコードなので、動くタグではなくコミットで固定する。
+      - name: Publish versioned release
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Firefox extension ${{ needs.version.outputs.version }}
+          body_path: artifacts/release-notes.md
+          make_latest: "false"
+          fail_on_unmatched_files: true
+          files: artifacts/cloudmarks-firefox-${{ needs.version.outputs.version }}.xpi
+
+      # 配った拡張は、タグ extension-latest のリリースから更新情報を取る。リリースのたびに中身だけを替える。
+      # タグ extension-latest は最初に作ったときのコミットを指したまま動かさない（初回は、リリースを作るときに既定のブランチの先頭に作る）。
+      # .xpi を先に、更新情報を最後に替える。更新情報が、まだ置いていない .xpi を指す間を作らない。
+      - name: Update latest release with extension
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
+        with:
+          tag_name: extension-latest
+          name: Latest Firefox extension
+          body_path: artifacts/latest-release-notes.md
+          prerelease: true
+          make_latest: "false"
+          fail_on_unmatched_files: true
+          files: artifacts/cloudmarks-firefox.xpi
+
+      - name: Update latest release with update info
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
+        with:
+          tag_name: extension-latest
+          name: Latest Firefox extension
+          body_path: artifacts/latest-release-notes.md
+          prerelease: true
+          make_latest: "false"
+          fail_on_unmatched_files: true
+          files: artifacts/updates.json
+
+  # 公開した更新情報を、Firefox と同じ URL（manifest の update_url）から取り直す。sign が書いたものと同じバイト列で、
+  # このバージョンの項目の update_link の .xpi の SHA-256 が update_hash と合うことを確かめる。
+  # アプリのインストーラに入れる extension-latest の .xpi が、それと同じものであることも確かめる。
+  # 公開の URL から取るだけで、リポジトリは読まない。成果物の受け取りに GITHUB_TOKEN の権限は要らない。
+  verify-published:
+    needs: [version, sign, release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: {}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: firefox
+          path: artifacts
+
+      - name: Verify published files
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          UPDATE_URL: ${{ needs.sign.outputs.update-url }}
+          GECKO_ID: ${{ needs.sign.outputs.gecko-id }}
+        run: |
+          set -euo pipefail
+          published="$RUNNER_TEMP/published"
+          mkdir -p "$published"
+          curl -fsSL --retry 3 -o "$published/updates.json" "$UPDATE_URL"
+          cmp artifacts/updates.json "$published/updates.json"
+          entries=$(jq --arg id "$GECKO_ID" --arg version "$VERSION" \
+            '[.addons[$id].updates[]? | select(.version == $version)] | length' "$published/updates.json")
+          if [ "$entries" != "1" ]; then
+            echo "公開した更新情報に、gecko の ID が ${GECKO_ID} でバージョンが ${VERSION} の項目が 1 つでない（${entries} 個）" >&2
+            exit 1
+          fi
+          update=$(jq -ec --arg id "$GECKO_ID" --arg version "$VERSION" \
+            '.addons[$id].updates[] | select(.version == $version)' "$published/updates.json")
+          link=$(jq -er '.update_link' <<<"$update")
+          expected_hash=$(jq -er '.update_hash' <<<"$update")
+          curl -fsSL --retry 3 -o "$published/versioned.xpi" "$link"
+          actual_hash="sha256:$(sha256sum "$published/versioned.xpi" | cut -d' ' -f1)"
+          if [ "$actual_hash" != "$expected_hash" ]; then
+            echo "公開した .xpi（${link}）の SHA-256（${actual_hash}）が、更新情報の update_hash（${expected_hash}）と合わない" >&2
+            exit 1
+          fi
+          echo "${link}: ${actual_hash}"
+          latest_xpi="${UPDATE_URL%/*}/cloudmarks-firefox.xpi"
+          curl -fsSL --retry 3 -o "$published/cloudmarks-firefox.xpi" "$latest_xpi"
+          if ! cmp -s "$published/versioned.xpi" "$published/cloudmarks-firefox.xpi"; then
+            echo "extension-latest の .xpi（${latest_xpi}）が、更新情報の指す .xpi（${link}）と違う" >&2
+            exit 1
+          fi
+          echo "${latest_xpi}: ${actual_hash}"

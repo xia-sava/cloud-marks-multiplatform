@@ -4,9 +4,11 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextClearance
@@ -15,8 +17,12 @@ import androidx.compose.ui.test.performTextReplacement
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
 import to.sava.cloudmarksmultiplatform.settings.SettingsForm
+import to.sava.cloudmarksmultiplatform.update.AppVersion
+import to.sava.cloudmarksmultiplatform.update.FakeAppUpdater
+import to.sava.cloudmarksmultiplatform.update.UpdateState
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /** 設定の画面の、1 行の欄の題。シークレットの欄は伏せ字にするので含めない。 */
 private val PLAIN_FIELD_LABELS = listOf("リージョン", "バケット名", "プレフィックス", "アクセスキー ID")
@@ -69,5 +75,34 @@ class SettingsScreenTest {
 
         assertEquals("ap-northeast-1", fixture.state.settings.form.region)
         settingsField("リージョン").assert(hasText("ap-northeast-1"))
+    }
+
+    // アプリの更新を渡さなければ、設定の画面に「アプリの更新」の節を出さない
+    @Test
+    fun noUpdateSectionWithoutUpdater() = runCloudMarksScreenTest(temporaryFolder) {
+        onNodeWithContentDescription(SETTINGS_DESCRIPTION).performClick()
+        waitForIdle()
+
+        onNodeWithText(REVISIONS_TITLE).performScrollTo().assertIsDisplayed()
+        onNodeWithText(UPDATE_SECTION_TITLE).assertDoesNotExist()
+        onNodeWithText(CHECK_UPDATE_LABEL).assertDoesNotExist()
+    }
+
+    // アプリの更新を渡せば、設定の画面の末尾の、以前の状態に戻す説明より下に「アプリの更新」の節を出す。メインの画面には出さない
+    @Test
+    fun updateSectionIsLastOnSettingsScreen() = runCloudMarksScreenTest(
+        temporaryFolder,
+        updater = FakeAppUpdater(UpdateState(AppVersion(10, "1.0.0", "1.0.0", distributed = true))),
+    ) {
+        onNodeWithText(UPDATE_SECTION_TITLE).assertDoesNotExist()
+        onNodeWithContentDescription(SETTINGS_DESCRIPTION).performClick()
+        waitForIdle()
+
+        onNodeWithText(CHECK_UPDATE_LABEL).performScrollTo().assertIsDisplayed()
+        val revisionsBottom = onNodeWithText(REVISIONS_DESCRIPTION).fetchSemanticsNode().boundsInRoot.bottom
+        val sectionTop = onNodeWithText(UPDATE_SECTION_TITLE).fetchSemanticsNode().boundsInRoot.top
+        val checkTop = onNodeWithText(CHECK_UPDATE_LABEL).fetchSemanticsNode().boundsInRoot.top
+        assertTrue(revisionsBottom < sectionTop, "$revisionsBottom < $sectionTop")
+        assertTrue(sectionTop < checkTop, "$sectionTop < $checkTop")
     }
 }

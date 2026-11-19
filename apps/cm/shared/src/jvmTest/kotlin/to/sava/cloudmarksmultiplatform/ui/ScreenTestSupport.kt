@@ -41,6 +41,7 @@ import to.sava.cloudmarksmultiplatform.sync.replaceItemsAsOtherWriter
 import to.sava.cloudmarksmultiplatform.sync.seed
 import to.sava.cloudmarksmultiplatform.sync.storedItems
 import to.sava.cloudmarksmultiplatform.sync.storedManifest
+import to.sava.cloudmarksmultiplatform.update.AppUpdater
 import kotlin.coroutines.ContinuationInterceptor
 
 /** 画面のテストで、起動して開いているフォルダの項目が出るまで待つ時間の上限。実際の時間で数える。 */
@@ -69,6 +70,8 @@ private const val EDGE_INSET = 2f
  * 動かす
  * @param containerSize 窓の大きさ（[SizedWindow]）。値を替えると、端末を回したときと同じく、描く範囲と窓の幅の区分が替わる。
  * null なら、テストの画面の大きさのまま描く
+ * @param updater 画面に渡すアプリの更新。既定の null では、更新の仕組みを持たない起動のしかたとして振る舞う
+ * @param onReadyToExit 画面に渡す、更新をインストーラへ渡したあとに呼ぶ関数
  */
 @OptIn(ExperimentalTestApi::class)
 internal fun runCloudMarksScreenTest(
@@ -78,6 +81,8 @@ internal fun runCloudMarksScreenTest(
     itemSharer: FakeItemSharer? = null,
     touchScreen: Boolean = false,
     containerSize: State<IntSize>? = null,
+    updater: AppUpdater? = null,
+    onReadyToExit: () -> Unit = {},
     block: suspend ComposeUiTest.(ControllerFixture) -> Unit,
 ) = runComposeUiTest {
     var created: ControllerFixture? = null
@@ -98,9 +103,9 @@ internal fun runCloudMarksScreenTest(
         }
         CompositionLocalProvider(LocalTouchScreen provides (touchScreen || usesTouchScreen)) {
             if (containerSize == null) {
-                CloudMarksApp(fixture.controller)
+                CloudMarksApp(fixture.controller, updater, onReadyToExit)
             } else {
-                SizedWindow(containerSize) { CloudMarksApp(fixture.controller) }
+                SizedWindow(containerSize) { CloudMarksApp(fixture.controller, updater, onReadyToExit) }
             }
         }
     }

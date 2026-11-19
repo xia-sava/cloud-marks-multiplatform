@@ -6,8 +6,10 @@
   "description": "Cloud Marks WebExtension - picks up the selected tabs for the desktop app",
   "scripts": {
     "build": "tsx scripts/build.ts",
+    "lint:firefox": "web-ext lint --self-hosted --warnings-as-errors --source-dir dist/firefox && web-ext lint --self-hosted --warnings-as-errors --source-dir dist/dev/firefox",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "updates-json": "tsx scripts/updates-json.ts"
   },
   "devDependencies": {
     "@types/chrome": "^0.3.7",
@@ -15,6 +17,7 @@
     "esbuild": "^0.28.2",
     "tsx": "^4.19.0",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "web-ext": "^10.8.0"
   }
 }

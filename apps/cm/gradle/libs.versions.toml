@@ -4,6 +4,8 @@ android-compileSdk = "37"
 android-minSdk = "30"
 android-targetSdk = "36"
 androidx-activity = "1.13.0"
+# Android のアプリの更新で、ダウンロードした APK を端末のインストーラへ渡す FileProvider。activity-compose が引き込むものと同じバージョン。
+androidx-core = "1.18.0"
 aws-sdk-kotlin = "1.9.37"
 composeMultiplatform = "1.12.2"
 # デスクトップ（sharedのjvm()とdesktopApp）をコンパイル・テストし、動かすJDKのバージョン。FFM（java.lang.foreign）を使うため22以上。
@@ -12,6 +14,8 @@ kotlin = "2.4.21"
 kotlinx-coroutines = "1.11.0"
 kotlinx-datetime = "0.8.0"
 kotlinx-serialization = "1.12.0"
+# アプリの更新で、更新情報と配布物を GitHub Releases から取る HTTP クライアント。デスクトップも Android も CIO のエンジンで動かす。
+ktor = "3.6.1"
 material3 = "1.12.0-alpha03"
 # 画面の幅の区分（WindowSizeClass）を判定する。
 material3-adaptive = "1.3.0"
@@ -21,6 +25,7 @@ material-icons-core = "1.7.3"
 
 [libraries]
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }
+androidx-core = { module = "androidx.core:core", version.ref = "androidx-core" }
 aws-sdk-s3 = { module = "aws.sdk.kotlin:s3", version.ref = "aws-sdk-kotlin" }
 compose-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "composeMultiplatform" }
 compose-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "material3" }
@@ -37,6 +42,9 @@ kotlinx-coroutinesSwing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-s
 kotlinx-coroutinesTest = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines" }
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinx-datetime" }
 kotlinx-serializationJson = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
+ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
+ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }

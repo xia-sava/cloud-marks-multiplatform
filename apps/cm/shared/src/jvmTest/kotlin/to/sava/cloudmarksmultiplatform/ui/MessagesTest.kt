@@ -15,6 +15,8 @@ import to.sava.cloudmarksmultiplatform.storage.StorageProblem
 import to.sava.cloudmarksmultiplatform.sync.ManifestCounts
 import to.sava.cloudmarksmultiplatform.sync.RevisionFailure
 import to.sava.cloudmarksmultiplatform.sync.SyncFailure
+import to.sava.cloudmarksmultiplatform.update.UpdateCheckFailure
+import to.sava.cloudmarksmultiplatform.update.UpdateInstallFailure
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -379,5 +381,59 @@ class MessagesTest {
     @Test
     fun restoredNoticeHasTime() {
         assertEquals("2026/11/17 14:08 の状態に戻しました。", restoredNotice("2026/11/17 14:08"))
+    }
+
+    // 「アプリの更新」の節の、定数の文
+    @Test
+    fun updateConstants() {
+        assertEquals("アプリの更新", UPDATE_SECTION_TITLE)
+        assertEquals("更新を確認", CHECK_UPDATE_LABEL)
+        assertEquals("確認しています…", CHECKING_UPDATE_NOTICE)
+        assertEquals("最新のバージョンです。", UP_TO_DATE_NOTICE)
+        assertEquals("ダウンロード", DOWNLOAD_UPDATE_LABEL)
+        assertEquals("ダウンロードしています…", DOWNLOADING_UPDATE_NOTICE)
+        assertEquals("ダウンロードしたファイルを確認しています…", VERIFYING_UPDATE_NOTICE)
+        assertEquals("インストールすると Cloud Marks をいったん終了し、更新が終わったら起動し直します。", RESTART_TO_APPLY_NOTICE)
+        assertEquals("今すぐインストール", APPLY_UPDATE_LABEL)
+        assertEquals("インストールを始めます。", LAUNCHING_INSTALLER_NOTICE)
+        assertEquals("開発版では、更新をインストールできません。", DEV_BUILD_UPDATE_NOTICE)
+        assertEquals("キャンセル", CANCEL_LABEL)
+        assertEquals("閉じる", CLOSE_LABEL)
+    }
+
+    // 動いているバージョンの行と、新しいバージョンがあることの文は、バージョンを入れる
+    @Test
+    fun updateVersionLinesHaveVersion() {
+        assertEquals("現在のバージョンは 1.2.3 です。", currentVersionNotice("1.2.3"))
+        assertEquals("現在のバージョンは 0.0.0 (dev-20261118_120000) です。", currentVersionNotice("0.0.0 (dev-20261118_120000)"))
+        assertEquals("新しいバージョン 1.3.0 があります。", updateAvailableNotice("1.3.0"))
+    }
+
+    // 更新を確認できなかった理由は、理由ごとの文だけで、詳細は無い
+    @Test
+    fun updateCheckFailuresHaveTextOnly() {
+        assertEquals(UiMessage("更新情報を取得できませんでした。"), describeUpdateCheckFailure(UpdateCheckFailure.UNREACHABLE))
+        assertEquals(UiMessage("更新情報の署名を確認できませんでした。"), describeUpdateCheckFailure(UpdateCheckFailure.SIGNATURE_UNVERIFIED))
+        assertEquals(UiMessage("更新情報を読み取れませんでした。"), describeUpdateCheckFailure(UpdateCheckFailure.UNREADABLE))
+    }
+
+    // インストーラへ渡せなかった理由は、理由ごとの文だけで、詳細は無い
+    @Test
+    fun updateInstallFailuresHaveTextOnly() {
+        assertEquals(UiMessage("更新をダウンロードできませんでした。"), describeUpdateInstallFailure(UpdateInstallFailure.DOWNLOAD_FAILED))
+        assertEquals(
+            UiMessage("ダウンロードしたファイルの確認に失敗しました。"),
+            describeUpdateInstallFailure(UpdateInstallFailure.VERIFICATION_FAILED),
+        )
+        assertEquals(UiMessage("更新をインストールできませんでした。"), describeUpdateInstallFailure(UpdateInstallFailure.HAND_OVER_FAILED))
+    }
+
+    // 前の起動で更新を適用できなかった知らせは、バージョンを入れ、やり直せる場所を添える
+    @Test
+    fun updateApplyFailedNoticeHasVersion() {
+        assertEquals(
+            "バージョン 1.3.0 への更新を適用できませんでした。設定の画面の「アプリの更新」からやり直せます。",
+            updateApplyFailedNotice("1.3.0"),
+        )
     }
 }

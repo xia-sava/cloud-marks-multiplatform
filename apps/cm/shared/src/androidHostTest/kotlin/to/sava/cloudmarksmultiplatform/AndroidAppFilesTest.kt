@@ -24,6 +24,12 @@ class AndroidAppFilesTest {
         assertEquals(cacheDirectory.resolve("cache"), files.cacheDirectory)
     }
 
+    // アプリの更新でダウンロードした配布物は、キャッシュのディレクトリの下の updates。ローカルキャッシュの cache とは分ける
+    @Test
+    fun updatesAreInCacheDirectory() {
+        assertEquals(cacheDirectory.resolve("updates"), files.updateDirectory)
+    }
+
     // ログと次の起動へ持ち越す記録とコマンドは、アプリのファイルのディレクトリの下の logs・state・commands
     @Test
     fun logsStateAndCommandsAreInFilesDirectory() {

@@ -101,6 +101,7 @@ internal class ControllerFixture(
         stateDirectory = directory.resolve("state"),
         deviceSettingsFile = directory.resolve("device.json"),
         commandDirectory = directory.resolve("commands"),
+        updateDirectory = directory.resolve("updates"),
     )
     val store = FakeObjectStore()
     private val storesByBucket = mutableMapOf<String, FakeObjectStore>()
