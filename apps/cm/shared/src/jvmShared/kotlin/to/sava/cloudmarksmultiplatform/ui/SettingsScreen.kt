@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -78,6 +79,8 @@ private const val PREFIX_HINT = "空欄にすると、バケットの直下に�
  * [onTabLoadingChange] へ渡す（[TabCountField]）。
  * その下に、以前の状態に戻す画面を開くボタン（[REVISIONS_TITLE]）と、その説明（[REVISIONS_DESCRIPTION]）を置く。
  * [update] があれば、末尾に「アプリの更新」の節（[UpdateSection]）を置く。
+ * 画面全体を縦にスクロールし、画面の右端に縦のスクロールバー（[ListVerticalScrollbar]）を出す。入力欄を並べる幅が画面より狭くても、
+ * スクロールバーは画面の右端に出す。
  *
  * @param displayScale いまの表示の大きさ
  * @param tabLoading いまのタブの読み込み方。null なら、その見出しと欄を出さない（まとめて開けないプラットフォーム）
@@ -110,81 +113,85 @@ internal fun SettingsScreen(
     val form = settings.form
     val busy = settings.status.busy
     val missing = (settings.status as? SettingsStatus.Incomplete)?.fields.orEmpty()
-    Box(modifier.fillMaxSize().verticalScroll(rememberScrollState()), contentAlignment = Alignment.TopCenter) {
-        Column(
-            modifier = Modifier.widthIn(max = SETTINGS_MAX_WIDTH).fillMaxWidth().padding(SETTINGS_PADDING),
-            verticalArrangement = Arrangement.spacedBy(SETTINGS_SPACING),
-        ) {
-            settings.readProblem?.let { readProblem ->
-                describeSettingsReadProblem(readProblem)?.let { problem ->
-                    val color = if (readProblem == SettingsReadResult.NotFound) {
-                        MaterialTheme.colorScheme.onSurface
-                    } else {
-                        MaterialTheme.colorScheme.error
+    val scrollState = rememberScrollState()
+    Box(modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().verticalScroll(scrollState), contentAlignment = Alignment.TopCenter) {
+            Column(
+                modifier = Modifier.widthIn(max = SETTINGS_MAX_WIDTH).fillMaxWidth().padding(SETTINGS_PADDING),
+                verticalArrangement = Arrangement.spacedBy(SETTINGS_SPACING),
+            ) {
+                settings.readProblem?.let { readProblem ->
+                    describeSettingsReadProblem(readProblem)?.let { problem ->
+                        val color = if (readProblem == SettingsReadResult.NotFound) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        }
+                        MessageText(problem, color = color)
                     }
-                    MessageText(problem, color = color)
+                }
+                SettingsTextField("リージョン", form.region, { onEdit(form.copy(region = it)) }, SettingsField.REGION in missing, busy)
+                SettingsTextField("バケット名", form.bucket, { onEdit(form.copy(bucket = it)) }, SettingsField.BUCKET in missing, busy)
+                SettingsTextField(
+                    label = "プレフィックス",
+                    value = form.prefix,
+                    onValueChange = { onEdit(form.copy(prefix = it)) },
+                    missing = false,
+                    busy = busy,
+                    hint = PREFIX_HINT,
+                )
+                SettingsTextField(
+                    label = "アクセスキー ID",
+                    value = form.accessKeyId,
+                    onValueChange = { onEdit(form.copy(accessKeyId = it)) },
+                    missing = SettingsField.ACCESS_KEY_ID in missing,
+                    busy = busy,
+                )
+                SettingsTextField(
+                    label = "シークレットアクセスキー",
+                    value = form.secret,
+                    onValueChange = { onEdit(form.copy(secret = it)) },
+                    missing = SettingsField.SECRET in missing,
+                    busy = busy,
+                    hint = STORED_SECRET_HINT.takeIf { settings.hasStoredSettings },
+                    secret = true,
+                )
+                Button(onClick = onSave, enabled = !busy) { Text("保存") }
+                SettingsStatusView(settings.status, onCreateManifest)
+                HorizontalDivider()
+                DisplayScaleField(displayScale, onDisplayScaleChange)
+                tabLoading?.let { loading ->
+                    HorizontalDivider()
+                    Text(OPEN_IN_BROWSER_SECTION_TITLE, style = MaterialTheme.typography.titleSmall)
+                    TabCountField(
+                        label = LOAD_AT_ONCE_LABEL,
+                        value = loading.loadAtOnce,
+                        parse = ::parseTabCount,
+                        invalidNotice = TAB_COUNT_INVALID_NOTICE,
+                        hint = null,
+                    ) { onTabLoadingChange(loading.copy(loadAtOnce = it)) }
+                    TabCountField(
+                        label = LOAD_AHEAD_LABEL,
+                        value = loading.loadAhead,
+                        parse = ::parseLoadAhead,
+                        invalidNotice = LOAD_AHEAD_INVALID_NOTICE,
+                        hint = LOAD_AHEAD_HINT,
+                    ) { onTabLoadingChange(loading.copy(loadAhead = it)) }
+                }
+                HorizontalDivider()
+                Button(onClick = onOpenRevisions, enabled = canRestore) { Text(REVISIONS_TITLE) }
+                Text(
+                    text = REVISIONS_DESCRIPTION,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                update?.let {
+                    HorizontalDivider()
+                    UpdateSection(it, updateActions)
                 }
             }
-            SettingsTextField("リージョン", form.region, { onEdit(form.copy(region = it)) }, SettingsField.REGION in missing, busy)
-            SettingsTextField("バケット名", form.bucket, { onEdit(form.copy(bucket = it)) }, SettingsField.BUCKET in missing, busy)
-            SettingsTextField(
-                label = "プレフィックス",
-                value = form.prefix,
-                onValueChange = { onEdit(form.copy(prefix = it)) },
-                missing = false,
-                busy = busy,
-                hint = PREFIX_HINT,
-            )
-            SettingsTextField(
-                label = "アクセスキー ID",
-                value = form.accessKeyId,
-                onValueChange = { onEdit(form.copy(accessKeyId = it)) },
-                missing = SettingsField.ACCESS_KEY_ID in missing,
-                busy = busy,
-            )
-            SettingsTextField(
-                label = "シークレットアクセスキー",
-                value = form.secret,
-                onValueChange = { onEdit(form.copy(secret = it)) },
-                missing = SettingsField.SECRET in missing,
-                busy = busy,
-                hint = STORED_SECRET_HINT.takeIf { settings.hasStoredSettings },
-                secret = true,
-            )
-            Button(onClick = onSave, enabled = !busy) { Text("保存") }
-            SettingsStatusView(settings.status, onCreateManifest)
-            HorizontalDivider()
-            DisplayScaleField(displayScale, onDisplayScaleChange)
-            tabLoading?.let { loading ->
-                HorizontalDivider()
-                Text(OPEN_IN_BROWSER_SECTION_TITLE, style = MaterialTheme.typography.titleSmall)
-                TabCountField(
-                    label = LOAD_AT_ONCE_LABEL,
-                    value = loading.loadAtOnce,
-                    parse = ::parseTabCount,
-                    invalidNotice = TAB_COUNT_INVALID_NOTICE,
-                    hint = null,
-                ) { onTabLoadingChange(loading.copy(loadAtOnce = it)) }
-                TabCountField(
-                    label = LOAD_AHEAD_LABEL,
-                    value = loading.loadAhead,
-                    parse = ::parseLoadAhead,
-                    invalidNotice = LOAD_AHEAD_INVALID_NOTICE,
-                    hint = LOAD_AHEAD_HINT,
-                ) { onTabLoadingChange(loading.copy(loadAhead = it)) }
-            }
-            HorizontalDivider()
-            Button(onClick = onOpenRevisions, enabled = canRestore) { Text(REVISIONS_TITLE) }
-            Text(
-                text = REVISIONS_DESCRIPTION,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            update?.let {
-                HorizontalDivider()
-                UpdateSection(it, updateActions)
-            }
         }
+        ListVerticalScrollbar(scrollState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
     }
 }
 

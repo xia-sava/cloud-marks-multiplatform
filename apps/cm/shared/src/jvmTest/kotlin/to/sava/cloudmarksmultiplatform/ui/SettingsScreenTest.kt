@@ -1,19 +1,25 @@
 package to.sava.cloudmarksmultiplatform.ui
 
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.unit.IntSize
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
 import to.sava.cloudmarksmultiplatform.settings.SettingsForm
@@ -32,6 +38,12 @@ private const val SECRET_FIELD_LABEL = "シークレットアクセスキー"
 
 /** 改行の後ろに続ける文字。罫線のように、貼り付けたときに付いてくるもの。 */
 private const val AFTER_LINE_BREAK = "─────"
+
+/** 設定の画面が収まらない、低い窓の大きさ。幅は、入力欄を並べる幅の上限より広い。 */
+private val SHORT_WINDOW = IntSize(1024, 400)
+
+/** マウスで押す位置の、窓の右端からの距離（画素）。デスクトップのスクロールバー（幅 8 画素）の上。 */
+private const val SCROLLBAR_INSET = 4f
 
 /** 設定の画面の、題が [label] の入力欄。 */
 @OptIn(ExperimentalTestApi::class)
@@ -104,5 +116,28 @@ class SettingsScreenTest {
         val checkTop = onNodeWithText(CHECK_UPDATE_LABEL).fetchSemanticsNode().boundsInRoot.top
         assertTrue(revisionsBottom < sectionTop, "$revisionsBottom < $sectionTop")
         assertTrue(sectionTop < checkTop, "$sectionTop < $checkTop")
+    }
+
+    // 設定の画面が窓に収まらなければ、入力欄を並べる幅の外の、窓の右端にスクロールバーを出す。つまみをマウスで下端まで動かすと、
+    // 画面の末尾までスクロールする
+    @Test
+    fun scrollbarAtWindowEdgeScrollsSettings() = runCloudMarksScreenTest(temporaryFolder, containerSize = mutableStateOf(SHORT_WINDOW)) {
+        onNodeWithContentDescription(SETTINGS_DESCRIPTION).performClick()
+        waitForIdle()
+        onNodeWithText(REVISIONS_DESCRIPTION).assertIsNotDisplayed()
+        // 先頭にいるときのつまみは、画面の上端から始まり、最初の欄の上端より下まで続く
+        val thumbY = settingsField("リージョン").fetchSemanticsNode().boundsInRoot.top
+        val scrollbarX = SHORT_WINDOW.width - SCROLLBAR_INSET
+
+        onRoot().performMouseInput {
+            moveTo(Offset(scrollbarX, thumbY))
+            press()
+            moveTo(Offset(scrollbarX, SHORT_WINDOW.height.toFloat()))
+            release()
+        }
+        waitForIdle()
+
+        onNodeWithText(REVISIONS_DESCRIPTION).assertIsDisplayed()
+        settingsField("リージョン").assertIsNotDisplayed()
     }
 }

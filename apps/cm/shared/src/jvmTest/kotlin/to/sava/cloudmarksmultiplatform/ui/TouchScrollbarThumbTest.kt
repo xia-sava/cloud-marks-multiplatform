@@ -26,14 +26,14 @@ private fun metrics(itemCount: Int, fraction: Float): ListScrollMetrics {
 }
 
 /** スクロールバーの長さ [TRACK_PX]、どちらへもスクロールできるときの、[this] のつまみ。 */
-private fun TouchScrollbarThumb.geometryOf(metrics: ListScrollMetrics?): ScrollbarThumbGeometry =
+private fun <P : Any> TouchScrollbarThumb<P>.geometryOf(metrics: ScrollMetrics<P>?): ScrollbarThumbGeometry =
     geometry(metrics, TRACK_PX, MIN_LENGTH_PX, canScrollBackward = true, canScrollForward = true)
 
 class TouchScrollbarThumbTest {
     // 触っていなければ、つまみの長さは見えている範囲の割合、位置はスクロールした割合から求める。見積もりが無ければスクロールバーいっぱい
     @Test
     fun geometryFollowsMetricsWhileNotTouched() {
-        val thumb = TouchScrollbarThumb()
+        val thumb = TouchScrollbarThumb<Pair<Int, Int>>()
 
         // 100 行（4000 画素）のうち 400 画素が見えるので、長さは 800 × 0.1 = 80。半分スクロールしていれば、上端は (800 - 80) / 2
         assertEquals(ScrollbarThumbGeometry(topPx = 360f, lengthPx = 80f), thumb.geometryOf(metrics(itemCount = 100, fraction = 0.5f)))
@@ -45,7 +45,7 @@ class TouchScrollbarThumbTest {
     // 触っているあいだは、見積もりが変わっても、触り始めたときのつまみの長さと位置を保つ。離すと、また見積もりから求める
     @Test
     fun geometryKeepsLengthWhileTouched() {
-        val thumb = TouchScrollbarThumb()
+        val thumb = TouchScrollbarThumb<Pair<Int, Int>>()
         val before = thumb.geometryOf(metrics(itemCount = 100, fraction = 0.5f))
 
         thumb.touch()
@@ -60,7 +60,7 @@ class TouchScrollbarThumbTest {
     // スクロールの位置を、触り始めたときの見積もりで返す
     @Test
     fun moveByMovesThumbAndReturnsPosition() {
-        val thumb = TouchScrollbarThumb()
+        val thumb = TouchScrollbarThumb<Pair<Int, Int>>()
         thumb.geometryOf(metrics(itemCount = 100, fraction = 0f))
         thumb.touch()
 
@@ -77,7 +77,7 @@ class TouchScrollbarThumbTest {
     // 触り始めたときに見積もりが無ければ（見えている行が無ければ）、指を動かしてもスクロールの位置を返さない
     @Test
     fun moveByWithoutMetricsReturnsNull() {
-        val thumb = TouchScrollbarThumb()
+        val thumb = TouchScrollbarThumb<Pair<Int, Int>>()
         thumb.geometryOf(null)
         thumb.touch()
 
