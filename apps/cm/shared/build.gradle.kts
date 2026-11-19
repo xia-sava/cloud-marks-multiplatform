@@ -120,7 +120,7 @@ kotlin {
     }
 }
 
-// jvmMainの認証情報の暗号化（DPAPI）とレジストリの読み取り（ブラウザの一覧）をFFMで呼ぶため、デスクトップのJDKで走らせ、
+// jvmMainの認証情報の暗号化（DPAPI）、レジストリの読み取り（ブラウザの一覧）、プロセスの起動（ジョブから抜ける）をFFMで呼ぶため、デスクトップのJDKで走らせ、
 // ネイティブの関数の呼び出しを許す。
 tasks.named<Test>("jvmTest") {
     javaLauncher.set(desktopJdk)

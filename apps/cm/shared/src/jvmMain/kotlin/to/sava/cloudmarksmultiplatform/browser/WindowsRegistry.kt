@@ -1,5 +1,6 @@
 package to.sava.cloudmarksmultiplatform.browser
 
+import to.sava.cloudmarksmultiplatform.files.describeIllegalCaller
 import to.sava.cloudmarksmultiplatform.files.describeThrowable
 import java.lang.foreign.Arena
 import java.lang.foreign.FunctionDescriptor
@@ -113,7 +114,7 @@ internal object WindowsRegistry : RegistryReader {
             throw RegistryException(describeThrowable(e))
         } catch (e: IllegalCallerException) {
             // ネイティブの関数の呼び出しが許されていない
-            throw RegistryException(describeThrowable(e))
+            throw RegistryException(describeIllegalCaller(e))
         }
 }
 

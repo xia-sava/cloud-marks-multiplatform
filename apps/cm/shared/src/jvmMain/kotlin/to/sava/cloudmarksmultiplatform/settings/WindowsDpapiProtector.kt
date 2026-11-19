@@ -1,5 +1,6 @@
 package to.sava.cloudmarksmultiplatform.settings
 
+import to.sava.cloudmarksmultiplatform.files.describeIllegalCaller
 import to.sava.cloudmarksmultiplatform.files.describeThrowable
 import java.lang.foreign.Arena
 import java.lang.foreign.FunctionDescriptor
@@ -94,7 +95,7 @@ private fun probe(): Availability {
         Availability.Unavailable(describeThrowable(e))
     } catch (e: IllegalCallerException) {
         // ネイティブの関数の呼び出しが許されていない
-        Availability.Unavailable(describeThrowable(e))
+        Availability.Unavailable(describeIllegalCaller(e))
     }
 }
 

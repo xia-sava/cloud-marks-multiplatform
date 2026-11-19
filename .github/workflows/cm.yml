@@ -61,7 +61,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 1
 
-  # 認証情報の暗号化（DPAPI）のテストはWindowsでだけ走る。ubuntuではskipされ、壊しても気づけない。
+  # 認証情報の暗号化（DPAPI）、レジストリの読み取り、プロセスの起動のテストはWindowsでだけ走る。ubuntuではskipされ、壊しても気づけない。
   windows-jvm-test:
     runs-on: windows-latest
     permissions:
