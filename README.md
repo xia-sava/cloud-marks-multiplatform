@@ -19,12 +19,9 @@ S3 を正本とし、Android・Windows のアプリとブラウザ拡張から�
 ### Windows
 
 `cloudmarks-setup.exe` をダウンロードして実行する。インストーラにコードの署名をしていないので、Windows の SmartScreen が
-「Windows によって PC が保護されました」と警告する。「詳細情報」を押し、「実行」で進める。
+「Windows によって PC が保護されました」と警告する場合がある。その際は「詳細情報」を押し、「実行」で進める。
 
-管理者権限は要らない。アプリは `%LOCALAPPDATA%\Programs\CloudMarks` に入り、スタートメニューに「Cloud Marks」ができる。
-インストーラは、ブラウザ拡張とやり取りする仕組み（Native Messaging のホスト）を Chrome と Firefox に登録する。
-
-Chrome の拡張は、ストアからではなく、インストールしたフォルダから読み込む。
+Chrome の拡張は、インストールしたフォルダから読み込む。
 
 1. Chrome で `chrome://extensions` を開き、右上のデベロッパーモードを有効にする
 2. 「パッケージ化されていない拡張機能を読み込む」から `%LOCALAPPDATA%\Programs\CloudMarks\extension\chrome` を選ぶ
@@ -52,8 +49,6 @@ Firefox で `about:addons` を開き、歯車のメニューの「ファイル�
    「作成」を押すと、新しく作る。2 台目からは、同じ接続先を入れれば、同じデータを読む
 
 アクセスキーに要る S3 の権限は、[`docs/storage-format.md` の「権限」](docs/storage-format.md#権限)の表のとおり。
-新しくデータを作るとき（その場所にまだデータが無いとき）は、`s3:ListBucket` も要る。無いと、データが無いことをアプリが見分けられず
-（S3 が `404` ではなく `403` を返す）、「新しく作成しますか？」が出ない。
 設定の画面の「以前の状態に戻す」を使うには、バケットのバージョニングを有効にしておく（同じ文書の「バージョニングとの関係」）。
 
 ブラウザ拡張は、Windows のアプリの設定を使う。ブラウザのツールバーの Cloud Marks のボタンを押すと、選んでいるタブを、
