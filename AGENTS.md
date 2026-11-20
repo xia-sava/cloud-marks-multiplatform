@@ -16,11 +16,25 @@ Cloud Marks（CM）の monorepo。URL のリストを端末間でやり取りす
 - `apps/extension` — Chrome と Firefox の WebExtension（TypeScript）。WebStorm で開く。
   選択したタブを Native Messaging でデスクトップ側のホストへ渡し、アプリからのコマンドを受け取ってタブを開き、アプリを開く要求を送る。
   保存形式のロジックを持たない
-- `contracts/storage` — S3 上の形式の見本。`apps/cm` のテストと移行スクリプトが読む
+- `contracts/storage` — S3 上の形式の見本。`apps/cm` のテストが読む
 - `contracts/native-messaging` — 拡張とホストのあいだのメッセージの見本。拡張と `apps/cm` の両方のテストが読む。
   配布版と開発版の名前の一覧（`identities.json`）は、`apps/cm` の Gradle のビルドも読む
 
 TypeScript と Gradle のビルドは統合しない。開発コマンドのエントリポイントはルートの `justfile` に置く。
+
+どのファイルが何を受け持つかは、`apps/cm/README.md` と `apps/extension/README.md` の「コードの地図」にある。
+
+## 作るときの決まり
+
+- **desktop と Android で共有できる処理は `shared` に置く。** プラットフォームで違うのは、差し替え口（`expect`/`actual` や
+  引数で渡す関数）の中だけにする。同じ処理を 2 か所に写さない
+- **画面の文言は、ふつうのアプリの言い方で書く。** です・ます調で、内部の用語（マニフェスト、項目ファイル、ホストなど）を
+  利用者に見せない。新しい文言は、アプリは `Messages.kt`、拡張は `messages.ts` に置く（アプリの画面には、描くファイルに
+  直に書いた短い文言もある）。新しい文言は案を作って確認を取ってから入れる
+- **画面に描く色は、すべてテーマから取る。** アプリと拡張はダークモードに対応している。明るいテーマで見えるだけでは足りない。
+  Material でない部品（デスクトップの `VerticalScrollbar` など）は既定の色が決め打ちなので、テーマの色を渡す
+- **用語は `docs/` の呼び名を使う。** コード、コメント、文書、コミットメッセージのどれでも同じ。同じものを別の言葉で呼ばない
+- **コミットメッセージの件名は、日本語の命令形で簡潔に書く**
 
 ## 同期の前提
 

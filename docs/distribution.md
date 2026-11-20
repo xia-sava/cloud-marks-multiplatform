@@ -328,8 +328,8 @@ Apache License 2.0 の NOTICE の中身と、ライセンスの本文を置く�
     タグを打ち直してもよい
 - **AMO にバージョンを作ったあとで、ソースを送るところ（`--upload-source-code`）だけで失敗したとき：** 同じバージョンはもう AMO にあるので、
   `sign` を走らせ直しても断られる。AMO の管理画面から、そのバージョンにソースを添える。ソースは、`extension-release.yml` と同じく
-  タグのコミットの `apps/extension` と `contracts/native-messaging` をまとめた zip
-  （`git archive --format=zip --output <zip> extension-vX.Y.Z -- apps/extension contracts/native-messaging`）。
+  タグのコミットの `apps/extension`・`contracts/native-messaging`・`LICENSE`・`THIRD-PARTY-NOTICES.md` をまとめた zip
+  （`git archive --format=zip --output <zip> extension-vX.Y.Z -- apps/extension contracts/native-messaging LICENSE THIRD-PARTY-NOTICES.md`）。
   署名が済んで、管理画面から署名済みの `.xpi` をダウンロードできるようになっていれば、上の手順で手で公開する
 - **`release` か `verify-published` で止まったとき：** `sign` の成果物（署名済みの `.xpi` と `updates.json`）は 7 日残るので、失敗したジョブを
   走らせ直す。7 日を過ぎたら署名し直せないので、上の手順で手で公開する（`.xpi` は AMO の管理画面からダウンロードする）
