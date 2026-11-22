@@ -115,10 +115,10 @@ class CloudMarksControllerWriteTest {
                 assertEquals(A_ITEMS + ROOT_ITEMS, fixture.storedItems(FOLDER_A))
                 assertEquals(emptyList(), fixture.storedItems(ROOT_ID))
             },
-            OperationCase("項目のタイトルの変更", act = { it.renameItem(ROOT_ITEMS[1].id, "renamed") }) { fixture ->
+            OperationCase("項目のタイトルの変更", act = { it.renameItem(rootItemRef(1), "renamed") }) { fixture ->
                 assertEquals(listOf(ROOT_ITEMS[0], ROOT_ITEMS[1].copy(title = "renamed")), fixture.storedItems(ROOT_ID))
             },
-            OperationCase("項目のタイトルは空にできる", act = { it.renameItem(ROOT_ITEMS[1].id, "") }) { fixture ->
+            OperationCase("項目のタイトルは空にできる", act = { it.renameItem(rootItemRef(1), "") }) { fixture ->
                 assertEquals(listOf(ROOT_ITEMS[0], ROOT_ITEMS[1].copy(title = "")), fixture.storedItems(ROOT_ID))
             },
             OperationCase("フォルダの作成は、親の子のフォルダの末尾", act = { it.createFolder(ROOT_ID, "C") }) { fixture ->

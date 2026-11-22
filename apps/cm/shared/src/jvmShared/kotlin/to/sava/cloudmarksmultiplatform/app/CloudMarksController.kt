@@ -379,11 +379,6 @@ class CloudMarksController(
         }
     }
 
-    /** 開いているフォルダの項目 [itemId] のタイトルを [title] に変える。開いているフォルダと [itemId] の組で `renameItem(ref, title)` を呼ぶ。 */
-    fun renameItem(itemId: String, title: String) {
-        currentItemRef(itemId)?.let { renameItem(it, title) }
-    }
-
     /**
      * 項目 [ref] のタイトルを [title] に変える。タイトルは空でもよい。開いているフォルダでないフォルダの項目も変えられる。
      * そのフォルダの読めた項目（[BrowseState.loadedItemOf]。溜めた削除の項目は除く）に無ければ何もしない。
@@ -567,11 +562,6 @@ class CloudMarksController(
             val browsers = browserOpener.browsers()
             update { it.copy(browsers = browsers) }
         }
-    }
-
-    /** 開いているフォルダの項目 [itemId] を、既定のブラウザで開く。開いているフォルダと [itemId] の組で `openItem(ref)` を呼ぶ。 */
-    fun openItem(itemId: String) {
-        currentItemRef(itemId)?.let { openItem(it) }
     }
 
     /**

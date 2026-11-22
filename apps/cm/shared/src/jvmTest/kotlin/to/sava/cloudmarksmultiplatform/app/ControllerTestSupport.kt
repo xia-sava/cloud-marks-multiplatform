@@ -11,6 +11,7 @@ import org.junit.rules.TemporaryFolder
 import to.sava.cloudmarksmultiplatform.AppFiles
 import to.sava.cloudmarksmultiplatform.browser.FakeBrowserOpener
 import to.sava.cloudmarksmultiplatform.browser.FakeItemSharer
+import to.sava.cloudmarksmultiplatform.operations.ItemRef
 import to.sava.cloudmarksmultiplatform.remote.FakeObjectStore
 import to.sava.cloudmarksmultiplatform.remote.FakeObjectStore.GetFault
 import to.sava.cloudmarksmultiplatform.settings.ConnectionSettings
@@ -22,6 +23,8 @@ import to.sava.cloudmarksmultiplatform.settings.SettingsWriteResult
 import to.sava.cloudmarksmultiplatform.storage.itemsFileKey
 import to.sava.cloudmarksmultiplatform.storage.manifestKey
 import to.sava.cloudmarksmultiplatform.sync.InMemorySyncCache
+import to.sava.cloudmarksmultiplatform.sync.ROOT_ID
+import to.sava.cloudmarksmultiplatform.sync.ROOT_ITEMS
 import to.sava.cloudmarksmultiplatform.sync.StorageSync
 import java.nio.file.Path
 import kotlin.test.assertEquals
@@ -186,3 +189,6 @@ internal class ControllerFixture(
 
 /** フィクスチャに渡した、項目をほかのアプリで開く仕組みと共有する仕組み。渡していなければ失敗する。 */
 internal val ControllerFixture.sharer: FakeItemSharer get() = checkNotNull(itemSharer)
+
+/** ルートフォルダの項目 [index]（[ROOT_ITEMS]）と、そのフォルダの組。 */
+internal fun rootItemRef(index: Int): ItemRef = ItemRef(ROOT_ID, ROOT_ITEMS[index].id)

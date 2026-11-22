@@ -59,9 +59,6 @@ private const val OTHER_BUCKET = "other-bucket"
 /** S3 につながらないときの失敗。 */
 private val UNREACHABLE = SyncFailure.Unreachable(UNREACHABLE_DETAIL)
 
-/** ルートフォルダの項目 [n]（0 から数える）を指す、溜めた削除の対象。 */
-private fun rootTarget(n: Int): ItemRef = ItemRef(ROOT_ID, ROOT_ITEMS[n].id)
-
 /** 接続先 [settings] の、溜めた削除の記録のファイル。 */
 private fun ControllerFixture.pendingDeletesPath(settings: ConnectionSettings = SETTINGS): Path =
     pendingDeletesFile(appFiles.stateDirectory, settings.bucket, settings.prefix)
@@ -167,7 +164,7 @@ class CloudMarksControllerPendingDeletesTest {
             fixture.deleteItem(ROOT_ITEMS[0])
             runCurrent()
 
-            val expected = setOf(rootTarget(0))
+            val expected = setOf(rootItemRef(0))
             assertEquals(expected, fixture.state.browse.pendingDeletes, name)
             assertEquals(FolderReadResult.Loaded(listOf(ROOT_ITEMS[1])), fixture.state.browse.currentItems, name)
             assertEquals(emptySet(), fixture.state.browse.selectedItemIds, name)
@@ -240,7 +237,7 @@ class CloudMarksControllerPendingDeletesTest {
             "フォルダの名前の変更" to { it.renameFolder(FOLDER_A, "A'") },
             "フォルダの作成" to { it.createFolder(ROOT_ID, "C") },
             "項目の移動" to { it.moveItems(ROOT_ID, listOf(ROOT_ITEMS[0].id), FOLDER_A) },
-            "項目のタイトルの変更" to { it.renameItem(ROOT_ITEMS[0].id, "renamed") },
+            "項目のタイトルの変更" to { it.renameItem(rootItemRef(0), "renamed") },
         )
         cases.forEach { (name, act) ->
             val fixture = started()
@@ -262,15 +259,15 @@ class CloudMarksControllerPendingDeletesTest {
         val fixture = startedWithPendingDelete()
         fixture.deleteItem(ROOT_ITEMS[1])
         runCurrent()
-        assertEquals(setOf(rootTarget(0), rootTarget(1)), fixture.state.browse.pendingDeletes)
-        assertEquals(setOf(rootTarget(1)), fixture.state.write.undoableDelete?.pendingTargets)
+        assertEquals(setOf(rootItemRef(0), rootItemRef(1)), fixture.state.browse.pendingDeletes)
+        assertEquals(setOf(rootItemRef(1)), fixture.state.write.undoableDelete?.pendingTargets)
         val requestsBefore = fixture.store.requests.size
 
         assertTrue(fixture.controller.undoDelete())
         runCurrent()
 
-        assertEquals(setOf(rootTarget(0)), fixture.state.browse.pendingDeletes)
-        assertEquals(setOf(rootTarget(0)), fixture.recordedPendingDeletes())
+        assertEquals(setOf(rootItemRef(0)), fixture.state.browse.pendingDeletes)
+        assertEquals(setOf(rootItemRef(0)), fixture.recordedPendingDeletes())
         assertEquals(FolderReadResult.Loaded(listOf(ROOT_ITEMS[1])), fixture.state.browse.currentItems)
         assertNull(fixture.state.write.undoableDelete)
         assertEquals(requestsBefore, fixture.store.requests.size)
@@ -304,7 +301,7 @@ class CloudMarksControllerPendingDeletesTest {
         assertFalse(fixture.controller.undoDelete())
         runCurrent()
 
-        assertEquals(setOf(rootTarget(0)), fixture.state.browse.pendingDeletes)
+        assertEquals(setOf(rootItemRef(0)), fixture.state.browse.pendingDeletes)
         assertTrue(assertNotNull(fixture.state.write.undoableDelete).pending)
         gate.complete(Unit)
         runCurrent()
@@ -316,7 +313,7 @@ class CloudMarksControllerPendingDeletesTest {
         val first = startedWithPendingDelete()
 
         val offline = started(directory = first.directory) { it.store.unreachable = true }
-        assertEquals(setOf(rootTarget(0)), offline.state.browse.pendingDeletes)
+        assertEquals(setOf(rootItemRef(0)), offline.state.browse.pendingDeletes)
         assertEquals(0, offline.manifestPuts)
 
         val online = started(directory = first.directory)
@@ -351,7 +348,7 @@ class CloudMarksControllerPendingDeletesTest {
             runCurrent()
             fixture.controller.back()
             runCurrent()
-            assertEquals(setOf(rootTarget(0), ItemRef(FOLDER_A, A_ITEMS[0].id)), fixture.state.browse.pendingDeletes, name)
+            assertEquals(setOf(rootItemRef(0), ItemRef(FOLDER_A, A_ITEMS[0].id)), fixture.state.browse.pendingDeletes, name)
             fixture.store.unreachable = false
 
             trigger(fixture)
@@ -376,7 +373,7 @@ class CloudMarksControllerPendingDeletesTest {
         fixture.store.onNextPut(PutFault.WriteThenUnknown { fixture.store.unreachable = true }, key = fixture.isManifest)
         fixture.deleteItem(ROOT_ITEMS[0])
         runCurrent()
-        assertEquals(setOf(rootTarget(0)), fixture.state.browse.pendingDeletes)
+        assertEquals(setOf(rootItemRef(0)), fixture.state.browse.pendingDeletes)
         assertEquals(listOf(ROOT_ITEMS[1]), fixture.storedItems(ROOT_ID))
         fixture.store.unreachable = false
 
@@ -400,7 +397,7 @@ class CloudMarksControllerPendingDeletesTest {
         runCurrent()
 
         assertEquals(putsBefore, fixture.store.puts { true }.size)
-        assertEquals(setOf(rootTarget(0)), fixture.state.browse.pendingDeletes)
+        assertEquals(setOf(rootItemRef(0)), fixture.state.browse.pendingDeletes)
         assertEquals(UNREACHABLE, fixture.state.browse.failure)
         assertNull(fixture.state.write.outcome)
     }
@@ -434,8 +431,8 @@ class CloudMarksControllerPendingDeletesTest {
             fixture.controller.reload()
             runCurrent()
 
-            assertEquals(setOf(rootTarget(0)), fixture.state.browse.pendingDeletes, name)
-            assertEquals(setOf(rootTarget(0)), fixture.recordedPendingDeletes(), name)
+            assertEquals(setOf(rootItemRef(0)), fixture.state.browse.pendingDeletes, name)
+            assertEquals(setOf(rootItemRef(0)), fixture.recordedPendingDeletes(), name)
             assertEquals(expectedOutcome, fixture.state.write.outcome, name)
             assertNull(fixture.state.browse.failure, name)
             assertFalse(fixture.state.write.writing, name)
@@ -505,8 +502,8 @@ class CloudMarksControllerPendingDeletesTest {
             // 操作のマニフェストの PUT は送らない
             assertEquals(expectedManifestPuts, fixture.manifestPuts - manifestPutsBefore, name)
             assertEquals(expectedRootItemsPuts, fixture.store.puts(isRootItemsFile).size - rootItemsPutsBefore, name)
-            assertEquals(setOf(rootTarget(0)), fixture.state.browse.pendingDeletes, name)
-            assertEquals(setOf(rootTarget(0)), fixture.recordedPendingDeletes(), name)
+            assertEquals(setOf(rootItemRef(0)), fixture.state.browse.pendingDeletes, name)
+            assertEquals(setOf(rootItemRef(0)), fixture.recordedPendingDeletes(), name)
             assertFalse(fixture.state.write.writing, name)
         }
     }
@@ -523,8 +520,8 @@ class CloudMarksControllerPendingDeletesTest {
         runCurrent()
 
         assertEquals(WriteOutcome.Failed(SyncFailure.Forbidden), fixture.state.write.outcome)
-        assertEquals(setOf(rootTarget(0)), fixture.state.browse.pendingDeletes)
-        assertEquals(setOf(rootTarget(0)), fixture.recordedPendingDeletes())
+        assertEquals(setOf(rootItemRef(0)), fixture.state.browse.pendingDeletes)
+        assertEquals(setOf(rootItemRef(0)), fixture.recordedPendingDeletes())
         assertNull(fixture.state.write.undoableDelete)
         assertEquals(FolderReadResult.Loaded(listOf(ROOT_ITEMS[1])), fixture.state.browse.currentItems)
         assertEquals(ROOT_ITEMS, fixture.storedItems(ROOT_ID))
@@ -547,9 +544,9 @@ class CloudMarksControllerPendingDeletesTest {
 
         assertEquals(listOf(ROOT_ITEMS[1]), fixture.storedItems(ROOT_ID))
         assertEquals(fixture.store.storedManifest(), fixture.state.browse.tree?.manifest)
-        assertEquals(setOf(rootTarget(1)), fixture.state.browse.pendingDeletes)
-        assertEquals(setOf(rootTarget(1)), fixture.recordedPendingDeletes())
-        assertEquals(setOf(rootTarget(1)), fixture.state.write.undoableDelete?.pendingTargets)
+        assertEquals(setOf(rootItemRef(1)), fixture.state.browse.pendingDeletes)
+        assertEquals(setOf(rootItemRef(1)), fixture.recordedPendingDeletes())
+        assertEquals(setOf(rootItemRef(1)), fixture.state.write.undoableDelete?.pendingTargets)
         assertNull(fixture.state.write.outcome)
         assertEquals(FolderReadResult.Loaded(emptyList()), fixture.state.browse.currentItems)
     }
@@ -678,7 +675,7 @@ class CloudMarksControllerPendingDeletesTest {
             unreachable = true
             seed()
         }
-        PendingDeletesFile(fixture.pendingDeletesPath(other)) {}.write(setOf(rootTarget(1)))
+        PendingDeletesFile(fixture.pendingDeletesPath(other)) {}.write(setOf(rootItemRef(1)))
 
         fixture.controller.openSettings()
         fixture.controller.editSettings(SettingsForm.of(other))
@@ -687,7 +684,7 @@ class CloudMarksControllerPendingDeletesTest {
 
         assertFalse(fixture.pendingDeletesPath().exists())
         assertEquals(ROOT_ITEMS, fixture.storedItems(ROOT_ID))
-        assertEquals(setOf(rootTarget(1)), fixture.state.browse.pendingDeletes)
+        assertEquals(setOf(rootItemRef(1)), fixture.state.browse.pendingDeletes)
         assertNull(fixture.state.write.undoableDelete)
         assertEquals(0, otherStore.puts { true }.size)
     }

@@ -96,7 +96,7 @@ class CloudMarksControllerShareTest {
             cases.forEach { (result, notice) ->
                 val fixture = started()
                 fixture.browserOpener.defaultResult = BrowserOpenResult.LaunchFailed(detail = null)
-                fixture.controller.openItem(ROOT_ITEMS[1].id)
+                fixture.controller.openItem(rootItemRef(1))
                 runCurrent()
                 assertEquals(BrowserNotice.DefaultBrowserLaunchFailed, fixture.state.browserNotice)
                 fixture.sharer.result = result

@@ -13,6 +13,7 @@ import to.sava.cloudmarksmultiplatform.browser.FIREFOX
 import to.sava.cloudmarksmultiplatform.browser.FakeBrowserOpener
 import to.sava.cloudmarksmultiplatform.browser.FakeItemSharer
 import to.sava.cloudmarksmultiplatform.browser.ItemShareResult
+import to.sava.cloudmarksmultiplatform.operations.ItemRef
 import to.sava.cloudmarksmultiplatform.sync.A_ITEMS
 import to.sava.cloudmarksmultiplatform.sync.FOLDER_A
 import to.sava.cloudmarksmultiplatform.sync.ROOT_ID
@@ -72,11 +73,11 @@ class CloudMarksControllerLastOpenedTest {
     @Test
     fun singleOpenedItemIsRemembered() = runTest {
         val cases = listOf(
-            OpenCase("一覧の既定のブラウザ", open = { it.controller.openItem(ROOT_ITEMS[1].id) }) to ROOT_ITEMS[1].id,
+            OpenCase("一覧の既定のブラウザ", open = { it.controller.openItem(rootItemRef(1)) }) to ROOT_ITEMS[1].id,
             OpenCase(
                 "ブラウザを調べずに開く既定のブラウザ",
                 browserOpener = { FakeBrowserOpener(browsers = listOf(FIREFOX)) },
-                open = { it.controller.openItem(ROOT_ITEMS[1].id) },
+                open = { it.controller.openItem(rootItemRef(1)) },
             ) to ROOT_ITEMS[1].id,
             OpenCase("選んだ 1 つの項目", open = selectingRootItem(1) { it.openSelectedItems(FIREFOX) }) to ROOT_ITEMS[1].id,
             OpenCase("直下の項目が 1 つのフォルダ", open = { it.controller.openFolderItems(FOLDER_A, CHROME) }) to A_ITEMS.single().id,
@@ -103,13 +104,13 @@ class CloudMarksControllerLastOpenedTest {
             OpenCase(
                 "一覧の既定のブラウザ",
                 fail = { it.browserOpener.browserResult = launchFailed },
-                open = { it.controller.openItem(ROOT_ITEMS[1].id) },
+                open = { it.controller.openItem(rootItemRef(1)) },
             ),
             OpenCase(
                 "ブラウザを調べずに開く既定のブラウザ",
                 browserOpener = { FakeBrowserOpener(browsers = listOf(FIREFOX)) },
                 fail = { it.browserOpener.defaultResult = launchFailed },
-                open = { it.controller.openItem(ROOT_ITEMS[1].id) },
+                open = { it.controller.openItem(rootItemRef(1)) },
             ),
             OpenCase(
                 "ほかのアプリで、受け取れるアプリが無い",
@@ -124,7 +125,7 @@ class CloudMarksControllerLastOpenedTest {
         )
         cases.forEach { case ->
             val fixture = started(browserOpener = case.browserOpener())
-            fixture.controller.openItem(ROOT_ITEMS[0].id)
+            fixture.controller.openItem(rootItemRef(0))
             runCurrent()
             assertEquals(ROOT_ITEMS[0].id, fixture.state.lastOpenedItemId, case.name)
             case.fail(fixture)
@@ -143,7 +144,7 @@ class CloudMarksControllerLastOpenedTest {
     @Test
     fun multipleOpenAndShareKeepLastOpened() = runTest {
         val fixture = started()
-        fixture.controller.openItem(ROOT_ITEMS[1].id)
+        fixture.controller.openItem(rootItemRef(1))
         runCurrent()
         assertEquals(ROOT_ITEMS[1].id, fixture.state.lastOpenedItemId)
 
@@ -168,7 +169,7 @@ class CloudMarksControllerLastOpenedTest {
     @Test
     fun lastOpenedIsKeptAcrossControllers() = runTest {
         val first = started()
-        first.controller.openItem(ROOT_ITEMS[1].id)
+        first.controller.openItem(rootItemRef(1))
         runCurrent()
 
         val recreated = ControllerFixture(this, temporaryFolder, directory = first.directory)
@@ -198,7 +199,7 @@ class CloudMarksControllerLastOpenedTest {
     fun writeFailureIsOnlyLogged() = runTest {
         val fixture = started { fixture -> Files.createDirectories(fixture.appFiles.lastOpenedItemFile.resolve("child")) }
 
-        fixture.controller.openItem(ROOT_ITEMS[1].id)
+        fixture.controller.openItem(rootItemRef(1))
         runCurrent()
 
         assertEquals(ROOT_ITEMS[1].id, fixture.state.lastOpenedItemId)
@@ -211,7 +212,7 @@ class CloudMarksControllerLastOpenedTest {
     fun moveAndDeleteKeepLastOpened() = runTest {
         val fixture = started()
         val opened = ROOT_ITEMS[0].id
-        fixture.controller.openItem(opened)
+        fixture.controller.openItem(ItemRef(ROOT_ID, opened))
         runCurrent()
 
         fixture.controller.moveItems(ROOT_ID, listOf(opened), FOLDER_A)

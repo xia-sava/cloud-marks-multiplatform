@@ -695,8 +695,6 @@ class CloudMarksControllerSearchTest {
     @Test
     fun itemIdOperationsStayInCurrentFolder() = runTest {
         val operations: List<Pair<String, (CloudMarksController) -> Unit>> = listOf(
-            "既定のブラウザで開く" to { it.openItem(A_ITEMS[0].id) },
-            "タイトルを変える" to { it.renameItem(A_ITEMS[0].id, "renamed") },
             "消す" to { it.deleteItems(setOf(A_ITEMS[0].id)) },
             "ほかのアプリで開く" to { it.openItemInOtherApp(A_ITEMS[0].id) },
             "共有する" to { it.shareItem(A_ITEMS[0].id) },
@@ -726,17 +724,12 @@ class CloudMarksControllerSearchTest {
         fixture.controller.openFolder(FOLDER_A)
         runCurrent()
 
-        fixture.controller.openItem(A_ITEMS[0].id)
         fixture.controller.openItemInOtherApp(A_ITEMS[0].id)
         fixture.controller.shareItem(A_ITEMS[0].id)
         runCurrent()
-        fixture.controller.renameItem(A_ITEMS[0].id, "renamed")
-        runCurrent()
 
-        assertEquals(listOf(FakeBrowserOpener.OpenRequest(CHROME, tabsOf(listOf(A_ITEMS[0])), TabLoading())), fixture.browserOpener.opened)
         assertEquals(listOf(A_ITEMS[0].url), fixture.sharer.openedUrls)
         assertEquals(listOf(A_ITEMS[0].url to A_ITEMS[0].title), fixture.sharer.shared)
-        assertEquals(listOf(A_ITEMS[0].copy(title = "renamed")), fixture.storedItems(FOLDER_A))
 
         fixture.controller.deleteItems(setOf(A_ITEMS[0].id))
         runCurrent()

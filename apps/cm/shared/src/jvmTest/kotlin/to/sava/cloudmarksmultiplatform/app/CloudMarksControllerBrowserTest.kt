@@ -94,7 +94,7 @@ class CloudMarksControllerBrowserTest {
         val fixture = started()
         fixture.controller.selectItem(ROOT_ITEMS[1].id, SelectionMode.TOGGLE)
 
-        fixture.controller.openItem(ROOT_ITEMS[0].id)
+        fixture.controller.openItem(rootItemRef(0))
         runCurrent()
 
         assertEquals(listOf(FakeBrowserOpener.OpenRequest(CHROME, tabsOf(ROOT_ITEMS.take(1)), TabLoading())), fixture.browserOpener.opened)
@@ -109,7 +109,7 @@ class CloudMarksControllerBrowserTest {
         val fixture = started()
         fixture.browserOpener.browserResult = BrowserOpenResult.LaunchFailed(LAUNCH_DETAIL)
 
-        fixture.controller.openItem(ROOT_ITEMS[0].id)
+        fixture.controller.openItem(rootItemRef(0))
         runCurrent()
 
         assertEquals(BrowserNotice.LaunchFailed(CHROME.name, LAUNCH_DETAIL), fixture.state.browserNotice)
@@ -120,7 +120,7 @@ class CloudMarksControllerBrowserTest {
     fun openItemFallsBackToDefaultWithoutCheckingBrowsers() = runTest {
         val fixture = started(browserOpener = FakeBrowserOpener(browsers = listOf(FIREFOX)))
 
-        fixture.controller.openItem(ROOT_ITEMS[0].id)
+        fixture.controller.openItem(rootItemRef(0))
         runCurrent()
 
         assertEquals(listOf(ROOT_ITEMS[0].url), fixture.browserOpener.defaultOpened)
@@ -133,17 +133,17 @@ class CloudMarksControllerBrowserTest {
         val fixture = started(browserOpener = FakeBrowserOpener(browsers = emptyList()))
         fixture.browserOpener.defaultResult = BrowserOpenResult.LaunchFailed(LAUNCH_DETAIL)
 
-        fixture.controller.openItem(ROOT_ITEMS[0].id)
+        fixture.controller.openItem(rootItemRef(0))
         runCurrent()
         assertEquals(BrowserNotice.DefaultBrowserLaunchFailed, fixture.state.browserNotice)
 
         fixture.controller.dismissBrowserNotice()
         assertNull(fixture.state.browserNotice)
 
-        fixture.controller.openItem(ROOT_ITEMS[0].id)
+        fixture.controller.openItem(rootItemRef(0))
         runCurrent()
         fixture.browserOpener.defaultResult = BrowserOpenResult.Opened
-        fixture.controller.openItem(ROOT_ITEMS[1].id)
+        fixture.controller.openItem(rootItemRef(1))
         assertNull(fixture.state.browserNotice)
     }
 
