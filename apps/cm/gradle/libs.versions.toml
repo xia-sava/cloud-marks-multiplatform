@@ -14,7 +14,8 @@ kotlin = "2.4.21"
 kotlinx-coroutines = "1.11.0"
 kotlinx-datetime = "0.8.0"
 kotlinx-serialization = "1.12.0"
-# アプリの更新で、更新情報と配布物を GitHub Releases から取る HTTP クライアント。デスクトップも Android も CIO のエンジンで動かす。
+# アプリの更新で、更新情報と配布物を GitHub Releases から取り、項目の favicon をサイトと外部の取り先から取る HTTP クライアント。
+# デスクトップも Android も CIO のエンジンで動かす。
 ktor = "3.6.1"
 material3 = "1.12.0-alpha03"
 # 画面の幅の区分（WindowSizeClass）を判定する。

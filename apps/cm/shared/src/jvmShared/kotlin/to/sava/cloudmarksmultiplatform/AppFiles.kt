@@ -49,7 +49,8 @@ internal const val SHOW_WINDOW_FILE_NAME = "show-window"
  * ディレクトリを作る。[instanceLockFile] は、ロックを取る側が作る。
  *
  * @property settingsFile 設定のファイル
- * @property cacheDirectory ローカルキャッシュのルートディレクトリ。接続先ごとのディレクトリはこの下に作る
+ * @property cacheDirectory ローカルキャッシュのルートディレクトリ。接続先ごとのディレクトリはこの下に作る。favicon のキャッシュ（`favicons/`）も、
+ * 接続先によらずこの下に置く
  * @property logDirectory ログのファイルを置くディレクトリ
  * @property stateDirectory 次の起動へ持ち越す記録と、同じ端末のプロセスどうしの知らせを、小さなファイルにして置くディレクトリ。
  * 接続先ごとに置くもの（古いファイルの削除を最後に終えた時刻、溜めた削除）と、接続先によらないもの（最後に開いた項目、拡張機能が入っていると

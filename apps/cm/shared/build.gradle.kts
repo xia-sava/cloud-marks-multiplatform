@@ -58,14 +58,15 @@ kotlin {
 
     sourceSets {
         // jvmMainとandroidMainの双方から使うJVMの実装を置く場所。S3へのアクセス、gzipの読み書き、設定のファイルの読み書き、
-        // アプリの更新、画面とその状態を置く。
+        // アプリの更新、favicon の取得、画面とその状態を置く。
         val jvmShared = create("jvmShared") {
             dependsOn(commonMain.get())
             dependencies {
                 implementation(libs.aws.sdk.s3)
                 implementation(libs.compose.material3Adaptive)
                 implementation(libs.compose.materialIconsCore)
-                // アプリの更新で、GitHub Releases から更新情報と配布物を取る。エンジンはデスクトップも Android も CIO。
+                // アプリの更新で、GitHub Releases から更新情報と配布物を取る。項目の favicon も、サイトと外部の取り先から取る。
+                // エンジンはデスクトップも Android も CIO。
                 implementation(libs.ktor.client.core)
                 implementation(libs.ktor.client.cio)
             }
