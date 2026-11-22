@@ -63,6 +63,7 @@ fun selectionModeOf(ctrlPressed: Boolean, shiftPressed: Boolean): SelectionMode 
  * @property drawerOpen 狭い画面で、ドロワーが開いているか
  * @property pendingDeletes 溜めた削除の対象（S3 につながらないために端末に溜めた、項目の削除）。リストとフォルダの件数から消して見せる。
  * [tree] と [folderReads] は読んだままで持ち、見せるとき（[currentItems]・[itemCountOf]・[shownItems]）に除く
+ * @property search 項目の検索の状態。検索を閉じていれば null。ツリーを読み直しても残し、[cleared] で捨てる
  */
 data class BrowseState(
     val tree: LoadedTree? = null,
@@ -80,6 +81,7 @@ data class BrowseState(
     val treePaneVisible: Boolean = true,
     val drawerOpen: Boolean = false,
     val pendingDeletes: Set<ItemRef> = emptySet(),
+    val search: ItemSearchState? = null,
 ) {
     /** 開いているフォルダ。 */
     val currentFolder: FolderNode? get() = currentFolderId?.let { tree?.state?.folders?.get(it) }
@@ -145,8 +147,8 @@ data class BrowseState(
     /** フォルダ [folderId] の項目に、溜めた削除の対象があるか。 */
     private fun hidesItemsOf(folderId: String): Boolean = pendingDeletes.any { it.folderId == folderId }
 
-    /** 戻る操作でできることがあるか。ドロワーが開いているか、履歴があるとき。 */
-    val canGoBack: Boolean get() = drawerOpen || history.isNotEmpty()
+    /** 戻る操作でできることがあるか。ドロワーが開いているか、検索を開いているか、履歴があるとき。 */
+    val canGoBack: Boolean get() = drawerOpen || search != null || history.isNotEmpty()
 
     /** マニフェストを読み始める。 */
     fun startLoading(): BrowseState = copy(loading = true)
@@ -194,15 +196,17 @@ data class BrowseState(
     /**
      * 操作を書けたときの、書いたあとのツリー [written] を受け取る。読み書きできるツリーとして替える。
      *
-     * [written] が持つ項目は、操作の適用に要ったフォルダのものだけなので、[withTreeRead] と違い、いまのツリーで読めた項目を引き継ぐ。
+     * [written] が持つ項目は、操作の適用に要ったフォルダのものだけなので、[withTreeRead] と違い、いまのツリーで読めた項目
+     * （[FolderReadResult.Loaded]）と、項目ファイルが壊れていた結果（[FolderReadResult.Broken]）を引き継ぐ。
      * 引き継ぐのは、[written] でも項目ファイルの ID が同じフォルダのもの（項目ファイルは置くたびに新しい ID なので、
-     * ID が同じなら中身も同じ）。[written] が持つ項目は、引き継いだものより優先する。
+     * ID が同じなら中身も同じ）。読めなかった結果（[FolderReadResult.Failed]）は引き継がず、読み直せるようにする。
+     * [written] が持つ項目は、引き継いだものより優先する。
      * 選んでいた項目と範囲で選ぶときの起点は、引き継いだ項目にまだあるものだけを残す。
      */
     fun withWrittenTree(written: LoadedTree): BrowseState {
         val writtenFolders = written.state.folders
         val kept = folderReads.filter { (folderId, read) ->
-            read is FolderReadResult.Loaded &&
+            (read is FolderReadResult.Loaded || read is FolderReadResult.Broken) &&
                 writtenFolders[folderId]?.let { it.itemsFileId == tree?.state?.folders?.get(folderId)?.itemsFileId } == true
         }
         return withTree(written, readOnly = false, keptReads = kept)
@@ -211,24 +215,75 @@ data class BrowseState(
     /**
      * フォルダ [folderId] を開く。開いていたフォルダを履歴に積み、ドロワーを閉じる。ツリーでは、そのフォルダ自身と祖先を開く。
      *
-     * 開いているフォルダと同じなら、履歴に積まずにドロワーだけを閉じる。ツリーに無いフォルダは開かない。
+     * 検索を開いていれば閉じる。開いているフォルダと同じなら、履歴に積まずにドロワーと検索だけを閉じる。ツリーに無いフォルダは開かない。
      */
     fun openFolder(folderId: String): BrowseState {
         val folders = tree?.state?.folders ?: return this
         if (folderId !in folders) return this
-        if (folderId == currentFolderId) return copy(drawerOpen = false)
-        return showFolder(folderId, history + listOfNotNull(currentFolderId)).copy(drawerOpen = false)
+        if (folderId == currentFolderId) return copy(drawerOpen = false, search = null)
+        return showFolder(folderId, history + listOfNotNull(currentFolderId)).copy(drawerOpen = false, search = null)
     }
 
     /**
-     * 戻る。ドロワーが開いていれば閉じるだけにする。そうでなければ、履歴の最後のフォルダを開き、履歴から除く。
-     * どちらでもなければ何もしない。親のフォルダへは上がらない。
+     * 項目 [ref] が入っているフォルダを開き、その項目だけを選ぶ。検索を閉じる。
+     * フォルダは [openFolder] と同じに開く（履歴に積み、開いているフォルダと同じなら積まない）。
+     * 項目が開いたフォルダの読めた項目に無ければ、選ばない。ツリーに無いフォルダなら何もしない。
+     */
+    fun openFolderOf(ref: ItemRef): BrowseState {
+        if (tree?.state?.folders?.containsKey(ref.folderId) != true) return this
+        return openFolder(ref.folderId).selectItem(ref.itemId, SelectionMode.SINGLE)
+    }
+
+    /**
+     * 戻る。ドロワーが開いていれば閉じるだけにする。そうでなく検索を開いていれば、検索を閉じるだけにする。
+     * どちらでもなければ、履歴の最後のフォルダを開き、履歴から除く。履歴も無ければ何もしない。親のフォルダへは上がらない。
      */
     fun back(): BrowseState =
         when {
             drawerOpen -> copy(drawerOpen = false)
+            search != null -> closeSearch()
             history.isNotEmpty() -> showFolder(history.last(), history.dropLast(1))
             else -> this
+        }
+
+    /**
+     * 検索を開く。入力した語を空にし、ドロワーを閉じ、選んでいる項目と範囲で選ぶときの起点を外す。
+     * 前に読めなかった（失敗した）フォルダは、読んだ結果を除いて読み直せるようにする。既に開いていれば何もしない。
+     */
+    fun openSearch(): BrowseState =
+        if (search != null) {
+            this
+        } else {
+            copy(
+                search = ItemSearchState(),
+                drawerOpen = false,
+                selectedItemIds = emptySet(),
+                selectionAnchorId = null,
+                folderReads = folderReads.filterValues { it !is FolderReadResult.Failed },
+            )
+        }
+
+    /** 検索の入力した語を [query] にする。検索を閉じていれば何もしない。 */
+    fun withSearchQuery(query: String): BrowseState = search?.let { copy(search = it.copy(query = query)) } ?: this
+
+    /** 検索を閉じる。 */
+    fun closeSearch(): BrowseState = copy(search = null)
+
+    /**
+     * 検索のために項目を読む必要があるフォルダの ID。項目を読んだ結果が無く、読んでいる最中でもないフォルダ。ツリーの行きがけ順。
+     * 読んだ結果が [FolderReadResult.Missing] のフォルダは、マニフェストを読み直しているあいだだけなので、読む必要があるものに含めない。
+     */
+    fun foldersToLoadForSearch(): List<String> =
+        tree?.state?.foldersInPreorder().orEmpty().map { it.id }.filter { it !in folderReads && it !in loadingFolders }
+
+    /**
+     * 検索で項目を読めなかったフォルダの ID。読んだ結果が [FolderReadResult.Failed] か [FolderReadResult.Broken] のフォルダ。ツリーの行きがけ順。
+     * [FolderReadResult.Missing] は、そのあとにマニフェストを読み直しているあいだだけ持つので含めない。
+     */
+    fun unreadableFoldersForSearch(): List<String> =
+        tree?.state?.foldersInPreorder().orEmpty().map { it.id }.filter {
+            val read = folderReads[it]
+            read is FolderReadResult.Failed || read is FolderReadResult.Broken
         }
 
     /** ツリーのノード [folderId] を開く、または閉じる。 */

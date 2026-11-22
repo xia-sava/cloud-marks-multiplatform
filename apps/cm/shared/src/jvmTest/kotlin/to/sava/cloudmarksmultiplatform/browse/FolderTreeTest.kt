@@ -87,6 +87,18 @@ class FolderTreeTest {
         assertEquals(emptyList(), tree.ancestorsOf("unknown"))
     }
 
+    // 全フォルダは、ルートフォルダから深さ優先の行きがけ順に返す。兄弟の並びは子の並び（マニフェストの行の順）で、
+    // フォルダの ID から FolderNode への対応の並びには依らない
+    @Test
+    fun foldersInPreorderIgnoresMapOrder() {
+        val expected = listOf(ROOT, A, A1, A1A, A2, B)
+        val reversed = tree.copy(folders = tree.folders.entries.reversed().associate { it.key to it.value })
+        assertEquals(listOf(B, A2, A1A, A1, A, ROOT), reversed.folders.keys.toList())
+
+        assertEquals(expected, tree.foldersInPreorder().map { it.id })
+        assertEquals(expected, reversed.foldersInPreorder().map { it.id })
+    }
+
     // 項目の数は、そのフォルダと子孫のフォルダの、マニフェストの count の合計。項目ファイルを読んでいなくても数える。
     // 子孫の無いフォルダはそのフォルダの count だけ、ツリーに無いフォルダは 0
     @Test

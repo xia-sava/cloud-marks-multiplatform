@@ -1,5 +1,6 @@
 package to.sava.cloudmarksmultiplatform.browse
 
+import to.sava.cloudmarksmultiplatform.operations.FolderNode
 import to.sava.cloudmarksmultiplatform.operations.TreeState
 
 /**
@@ -36,6 +37,17 @@ fun flattenFolderTree(tree: TreeState, expanded: Set<String>): List<FolderTreeRo
             if (open) node.children.forEach { visit(it, depth + 1) }
         }
         visit(tree.rootId, depth = 0)
+    }
+
+/** ツリーの全フォルダ。ルートフォルダから深さ優先の行きがけ順で、兄弟の並びはマニフェストの行の順。 */
+fun TreeState.foldersInPreorder(): List<FolderNode> =
+    buildList {
+        fun visit(folderId: String) {
+            val node = folders[folderId] ?: return
+            add(node)
+            node.children.forEach(::visit)
+        }
+        visit(rootId)
     }
 
 /** ツリーで開いているノード [this] の、[folderId] を開く、または閉じたもの。 */

@@ -71,7 +71,7 @@ Kotlin Multiplatform / Compose Multiplatform で、Android と Windows Desktop �
 | 直下（`to.sava.cloudmarksmultiplatform`） | `jvmShared`・`jvmMain`・`androidMain` | アプリが端末に置くファイルの場所（`AppFiles.kt` と、`DesktopAppFiles.kt`・`AndroidAppFiles.kt`）、配布版か開発版かの見分け（`AppPath.kt`）、デスクトップのウィンドウのタイトル（`DesktopWindowTitle.kt`・`DesktopBuildTime.kt`）、Android の休止中も進む時計（`ElapsedRealtimeTimeSource.kt`） |
 | `ui/` | `jvmShared`（`actual` は `jvmMain`・`androidMain`） | Compose の画面。入口は `CloudMarksApp.kt`。メインの画面のツリーとリスト、設定の画面、以前の状態に戻す画面、ダイアログとメニュー、ドラッグして移すこと、画面の文言（`Messages.kt`） |
 | `app/` | `jvmShared`・`jvmMain`・`androidMain` | 画面の状態（`AppState.kt`・`WriteState.kt`）と、利用者の操作に応じて設定と S3 の読み書きを進めるコントローラ（`CloudMarksController.kt`）。S3 から読み直すきっかけの知らせは、デスクトップが `StorageChangeWatcher.kt`、Android が `ForegroundReturns.kt`・`NetworkAvailability.kt` |
-| `browse/` | `jvmShared` | メインの画面で開いているフォルダと選んでいる項目（`BrowseState.kt`）、ツリーの行の並び（`FolderTree.kt`）、移すものと移動先、ドラッグを落とす位置（`MoveSubject.kt`・`MoveDrop.kt`）。Compose を使わない |
+| `browse/` | `jvmShared` | メインの画面で開いているフォルダと選んでいる項目（`BrowseState.kt`）、ツリーの行の並び（`FolderTree.kt`）、項目の検索：照らし合わせと結果（`ItemSearch.kt`）、移すものと移動先、ドラッグを落とす位置（`MoveSubject.kt`・`MoveDrop.kt`）。Compose を使わない |
 | `operations/` | `commonMain` | データを変える操作の型（`Operations.kt`）と、ツリーの状態への適用（`ApplyOperations.kt`）。`docs/operations.md` の規則を実装する |
 | `storage/` | `commonMain`・`jvmShared` | マニフェストと項目ファイルの型、JSONL の読み書きと検証、キーの組み立て（`StorageKeys.kt`）。gzip の圧縮と展開は `jvmShared` の `StorageGzip.kt` |
 | `remote/` | `jvmShared` | S3 のオブジェクトを読み書きする型（`ObjectStore.kt`）と、AWS SDK による実装（`S3ObjectStore.kt`）。応答を結果の値にする対応（`S3Results.kt`）と、一覧のページング（`ListPaging.kt`） |
