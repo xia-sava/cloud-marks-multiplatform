@@ -69,8 +69,8 @@ Kotlin Multiplatform / Compose Multiplatform で、Android と Windows Desktop �
 | パッケージ | ソースセット | 受け持ち |
 |---|---|---|
 | 直下（`to.sava.cloudmarksmultiplatform`） | `jvmShared`・`jvmMain`・`androidMain` | アプリが端末に置くファイルの場所（`AppFiles.kt` と、`DesktopAppFiles.kt`・`AndroidAppFiles.kt`）、配布版か開発版かの見分け（`AppPath.kt`）、デスクトップのウィンドウのタイトル（`DesktopWindowTitle.kt`・`DesktopBuildTime.kt`）、Android の休止中も進む時計（`ElapsedRealtimeTimeSource.kt`） |
-| `ui/` | `jvmShared`（`actual` は `jvmMain`・`androidMain`） | Compose の画面。入口は `CloudMarksApp.kt`。メインの画面のツリーとリスト、項目の検索の結果（`SearchResultsPane.kt`）と、デスクトップの検索を開くキーの操作（`SearchShortcut.kt`）、設定の画面、以前の状態に戻す画面、ダイアログとメニュー、ドラッグして移すこと、画面の文言（`Messages.kt`） |
-| `app/` | `jvmShared`・`jvmMain`・`androidMain` | 画面の状態（`AppState.kt`・`WriteState.kt`）と、利用者の操作に応じて設定と S3 の読み書きを進めるコントローラ（`CloudMarksController.kt`）。S3 から読み直すきっかけの知らせは、デスクトップが `StorageChangeWatcher.kt`、Android が `ForegroundReturns.kt`・`NetworkAvailability.kt` |
+| `ui/` | `jvmShared`（`actual` は `jvmMain`・`androidMain`） | Compose の画面。入口は `CloudMarksApp.kt`。メインの画面のツリーとリスト、項目の検索の結果（`SearchResultsPane.kt`）と、デスクトップの検索を開くキーの操作（`SearchShortcut.kt`）、設定の画面、以前の状態に戻す画面、ダイアログとメニュー、ドラッグして移すこと、画面の文言（`Messages.kt`）、項目の行に描く favicon（`ItemFavicon.kt`。favicon を返す仕組みを渡す `LocalFaviconSource` もここ）と、favicon が無いときの地球儀のアイコン（`GlobeIcon.kt`） |
+| `app/` | `jvmShared`・`jvmMain`・`androidMain` | 画面の状態（`AppState.kt`・`WriteState.kt`）と、利用者の操作に応じて設定と S3 の読み書きを進めるコントローラ（`CloudMarksController.kt`。`createCloudMarksController()` が `favicon/` のストアを作って持たせる）。S3 から読み直すきっかけの知らせは、デスクトップが `StorageChangeWatcher.kt`、Android が `ForegroundReturns.kt`・`NetworkAvailability.kt` |
 | `browse/` | `jvmShared` | メインの画面で開いているフォルダと選んでいる項目（`BrowseState.kt`）、ツリーの行の並び（`FolderTree.kt`）、項目の検索：照らし合わせと結果（`ItemSearch.kt`）、移すものと移動先、ドラッグを落とす位置（`MoveSubject.kt`・`MoveDrop.kt`）。Compose を使わない |
 | `operations/` | `commonMain` | データを変える操作の型（`Operations.kt`）と、ツリーの状態への適用（`ApplyOperations.kt`）。`docs/operations.md` の規則を実装する |
 | `storage/` | `commonMain`・`jvmShared` | マニフェストと項目ファイルの型、JSONL の読み書きと検証、キーの組み立て（`StorageKeys.kt`）。gzip の圧縮と展開は `jvmShared` の `StorageGzip.kt` |
@@ -90,7 +90,8 @@ Kotlin Multiplatform / Compose Multiplatform で、Android と Windows Desktop �
 #### 画面の見た目や文言を直す
 
 - 画面は `ui/` にある。`CloudMarksApp.kt` が、AppBar、画面の切り替え、広い画面と狭い画面での並べ方を持つ。
-  ツリーは `FolderTreePane.kt`、リストは `FolderListPane.kt`、検索の結果は `SearchResultsPane.kt`（項目の行はリストと共有する）、
+  ツリーは `FolderTreePane.kt`、リストは `FolderListPane.kt`、検索の結果は `SearchResultsPane.kt`（項目の行 `ItemRow` はリストと共有する。
+  行の左に、`ItemFavicon.kt` の favicon を描く）、
   設定の画面は `SettingsScreen.kt` と `UpdateSection.kt`、以前の状態に戻す画面は `RevisionsScreen.kt`、ダイアログは `OperationDialogs.kt`、
   メニューは `ContextMenus.kt`
 - 文言は `ui/Messages.kt` に集めてある。デスクトップと Android で違う文は `expect` にし、`Messages.jvm.kt` と

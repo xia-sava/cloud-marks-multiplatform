@@ -114,22 +114,9 @@ private val indeterminateProgress = SemanticsMatcher.expectValue(SemanticsProper
 /** [items] を開くときのタブ。 */
 private fun tabsOf(items: List<Item>): List<BrowserTab> = items.map { BrowserTab(it.url, it.title) }
 
-/** AppBar の検索の入力欄。 */
-@OptIn(ExperimentalTestApi::class)
-private fun ComposeUiTest.searchField(): SemanticsNodeInteraction = onNode(hasSetTextAction() and !hasAnyAncestor(isDialog()))
-
 /** ダイアログの中の、文が [text] の要素。 */
 @OptIn(ExperimentalTestApi::class)
 private fun ComposeUiTest.inDialog(text: String): SemanticsNodeInteraction = onNode(hasText(text) and hasAnyAncestor(isDialog()))
-
-/** AppBar のルーペを押して検索を開き、[query] が空でなければ、入力欄に入れる。描き終えるまで待つ。 */
-@OptIn(ExperimentalTestApi::class)
-private fun ComposeUiTest.search(query: String) {
-    onNodeWithContentDescription(SEARCH_DESCRIPTION).performClick()
-    waitForIdle()
-    if (query.isNotEmpty()) searchField().performTextInput(query)
-    waitForIdle()
-}
 
 /** 検索の結果の、項目 [n]（[item]）の行。入力欄にタイトルと同じ語を入れていても、入力欄は除く。 */
 @OptIn(ExperimentalTestApi::class)

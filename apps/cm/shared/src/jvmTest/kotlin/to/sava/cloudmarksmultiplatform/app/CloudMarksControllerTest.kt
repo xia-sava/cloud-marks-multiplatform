@@ -10,6 +10,7 @@ import org.junit.Rule
 import org.junit.rules.TemporaryFolder
 import to.sava.cloudmarksmultiplatform.AppFiles
 import to.sava.cloudmarksmultiplatform.browse.SelectionMode
+import to.sava.cloudmarksmultiplatform.favicon.FaviconStore
 import to.sava.cloudmarksmultiplatform.remote.FakeObjectStore.GetFault
 import to.sava.cloudmarksmultiplatform.remote.FakeObjectStore.Request
 import to.sava.cloudmarksmultiplatform.settings.CREDENTIALS
@@ -159,6 +160,36 @@ class CloudMarksControllerTest {
 
         assertEquals(Screen.SETTINGS, state.screen)
         assertIs<SettingsReadResult.Undecryptable>(state.settings.readProblem)
+        controller.close()
+    }
+
+    // 組み立てたコントローラは、favicon を返す仕組みとして、favicon のストアを持つ。コントローラを閉じると、ストアの HTTP クライアントも閉じる
+    @Test
+    fun createdControllerHoldsFaviconStore() = runTest {
+        val directory = temporaryFolder.root.toPath().resolve("created-favicons")
+        val appFiles = AppFiles(
+            settingsFile = directory.resolve("settings.json"),
+            cacheDirectory = directory.resolve("cache"),
+            logDirectory = directory.resolve("logs"),
+            stateDirectory = directory.resolve("state"),
+            deviceSettingsFile = directory.resolve("device.json"),
+            commandDirectory = directory.resolve("commands"),
+            updateDirectory = directory.resolve("updates"),
+        )
+        val controller = createCloudMarksController(
+            appFiles = appFiles,
+            protector = FakeSecretProtector(),
+            timeSource = TestTimeSource(),
+            updatedBy = "desktop",
+            storageChanges = { emptyFlow() },
+            deletesStaleFiles = false,
+            browserOpener = { FakeBrowserOpener() },
+            itemSharer = null,
+            scope = backgroundScope,
+        )
+
+        assertIs<FaviconStore>(controller.favicons)
+        controller.close()
     }
 
     // 設定を読めたら、その設定で接続を作り、メインの画面でマニフェストとルートフォルダの項目を出す。

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -73,6 +74,9 @@ import to.sava.cloudmarksmultiplatform.sync.FolderReadResult
 private val LIST_HORIZONTAL_PADDING = 16.dp
 private val LIST_ROW_VERTICAL_PADDING = 8.dp
 private val LIST_ICON_GAP = 12.dp
+
+/** 行の左に置くアイコン（フォルダの行のアイコンと、項目の行の favicon を置く場所）の大きさ。タイトルの始まりを行どうしで揃える。 */
+private val LIST_ICON_SIZE = 24.dp
 private val LIST_STATUS_PADDING = 24.dp
 
 /** 項目の行の、タイトルと URL のあいだの間隔。 */
@@ -92,6 +96,7 @@ private const val STATUS_KEY = "status"
  * 子のフォルダの行には、子孫のフォルダの項目まで足した数（[BrowseState.itemCountWithDescendantsOf]）を出す。
  * 溜めた削除の項目（[BrowseState.pendingDeletes]）は、項目の行にも数にも出さない。
  * 項目は 1 行に、タイトルとその右の URL を並べ、折り返さずに、行ごとに横へずらして見られるようにする。
+ * 項目の行の左には、favicon（[ItemFavicon]）を描く。
  * 選んでいる項目の行と、最後に開いた項目（[lastOpenedItemId]）の行は、それぞれ違う色で強調する。最後に開いた項目を選んでいれば、
  * 選んでいる行の色にする。
  * 右端に縦のスクロールバー（[ListVerticalScrollbar]）を出す。
@@ -313,7 +318,7 @@ private fun ChildFolderRow(
                     .padding(horizontal = LIST_HORIZONTAL_PADDING, vertical = LIST_ROW_VERTICAL_PADDING),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(imageVector = FolderIcon, contentDescription = null)
+                Icon(imageVector = FolderIcon, contentDescription = null, modifier = Modifier.size(LIST_ICON_SIZE))
                 Spacer(Modifier.width(LIST_ICON_GAP))
                 ScrollableLine(folder.name, MaterialTheme.typography.bodyLarge, Modifier.weight(1f))
                 Spacer(Modifier.width(LIST_ICON_GAP))
@@ -498,7 +503,9 @@ private fun FolderItemRow(
 }
 
 /**
- * 項目の行。タイトルとその右の URL を 1 行に並べ、折り返さずに、横へずらして見られるようにする。[caption] があれば、その下に小さく 1 行で出す。
+ * 項目の行。左に favicon（[ItemFavicon]）を置き、その右にタイトルとその右の URL を 1 行に並べ、折り返さずに、横へずらして見られるようにする。
+ * favicon を置く場所はフォルダの行のアイコンと同じ幅で、タイトルの始まりをフォルダの名前の始まりと揃える。favicon は、ずらしても動かない。
+ * [caption] があれば、タイトルの始まりに揃えて、その下に小さく 1 行で出す。
  * 開いているフォルダのリストの行（[FolderItemRow]）と、検索の結果の行（`SearchResultsPane.kt` の `SearchResultRow`）が使う。
  * 項目の上では、ポインターを指の形にする。
  *
@@ -586,27 +593,37 @@ internal fun ItemRow(
                     .padding(horizontal = LIST_HORIZONTAL_PADDING, vertical = LIST_ROW_VERTICAL_PADDING),
             ) {
                 Column {
-                    // タイトルと URL は 1 つの横の並びとして、一緒にずらす
-                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                        Text(
-                            text = item.title,
-                            style = MaterialTheme.typography.bodyLarge,
-                            softWrap = false,
-                            maxLines = 1,
-                            modifier = Modifier.alignByBaseline(),
-                        )
-                        Spacer(Modifier.width(ITEM_URL_GAP))
-                        Text(
-                            text = item.url,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            softWrap = false,
-                            maxLines = 1,
-                            modifier = Modifier.alignByBaseline(),
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // favicon は、横へずらしても動かない
+                        Box(Modifier.size(LIST_ICON_SIZE), contentAlignment = Alignment.Center) { ItemFavicon(item.url) }
+                        Spacer(Modifier.width(LIST_ICON_GAP))
+                        // タイトルと URL は 1 つの横の並びとして、一緒にずらす
+                        Row(Modifier.weight(1f).horizontalScroll(rememberScrollState())) {
+                            Text(
+                                text = item.title,
+                                style = MaterialTheme.typography.bodyLarge,
+                                softWrap = false,
+                                maxLines = 1,
+                                modifier = Modifier.alignByBaseline(),
+                            )
+                            Spacer(Modifier.width(ITEM_URL_GAP))
+                            Text(
+                                text = item.url,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                softWrap = false,
+                                maxLines = 1,
+                                modifier = Modifier.alignByBaseline(),
+                            )
+                        }
                     }
                     caption?.let {
-                        ScrollableLine(it, MaterialTheme.typography.bodySmall, Modifier.fillMaxWidth(), MaterialTheme.colorScheme.onSurfaceVariant)
+                        ScrollableLine(
+                            it,
+                            MaterialTheme.typography.bodySmall,
+                            Modifier.fillMaxWidth().padding(start = LIST_ICON_SIZE + LIST_ICON_GAP),
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }

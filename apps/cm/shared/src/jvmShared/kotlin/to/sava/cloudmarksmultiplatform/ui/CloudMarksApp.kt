@@ -51,6 +51,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
@@ -132,6 +133,7 @@ private data class MainPaneState(
  * 画面全体を、表示の大きさ（[AppState.displayScale]）で拡大縮小して描く（[ScaledDensity]。ダイアログ・メニュー・ツールチップの中身は
  * [ScaledPopupContent]）。メインの画面・設定の画面・以前の状態に戻す画面の上で、Ctrl を押しながらホイールを縦に回すと、表示の大きさを 1 段ずつ替える
  * （[displayScaleWheel]）。画面の中身は、システムバー・画面の切り欠き・キーボードに重ならないように置く。
+ * 項目の行には、[controller] の favicon（[CloudMarksController.favicons]）を描く（[LocalFaviconSource]）。
  *
  * [controller] は呼ぶ側が `createCloudMarksController` で組み立て、[CloudMarksController.start] で動かし始め、
  * 使い終えたら [CloudMarksController.close] で閉じる。
@@ -162,10 +164,12 @@ fun CloudMarksApp(
         // 入力した語が替わったら、検索の結果を先頭から見せる
         searchResultListState = remember(state.browse.search?.query) { LazyListState() },
     )
-    ScaledDensity(state.displayScale) {
-        MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
-            Surface(modifier = Modifier.fillMaxSize().displayScaleWheel(controller)) {
-                CloudMarksScreen(state, controller, updater, onReadyToExit, searchShortcut, panes, Modifier.safeDrawingPadding())
+    CompositionLocalProvider(LocalFaviconSource provides controller.favicons) {
+        ScaledDensity(state.displayScale) {
+            MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
+                Surface(modifier = Modifier.fillMaxSize().displayScaleWheel(controller)) {
+                    CloudMarksScreen(state, controller, updater, onReadyToExit, searchShortcut, panes, Modifier.safeDrawingPadding())
+                }
             }
         }
     }

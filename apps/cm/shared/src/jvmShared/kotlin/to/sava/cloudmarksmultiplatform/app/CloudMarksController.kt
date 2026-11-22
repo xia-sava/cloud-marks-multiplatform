@@ -33,6 +33,9 @@ import to.sava.cloudmarksmultiplatform.browser.BrowserOpener
 import to.sava.cloudmarksmultiplatform.browser.BrowserTab
 import to.sava.cloudmarksmultiplatform.browser.ItemShareResult
 import to.sava.cloudmarksmultiplatform.browser.ItemSharer
+import to.sava.cloudmarksmultiplatform.favicon.FaviconSource
+import to.sava.cloudmarksmultiplatform.favicon.NoFavicons
+import to.sava.cloudmarksmultiplatform.favicon.createFaviconStore
 import to.sava.cloudmarksmultiplatform.files.describeIoFailure
 import to.sava.cloudmarksmultiplatform.logging.FileLog
 import to.sava.cloudmarksmultiplatform.operations.ChangeItemTitle
@@ -134,6 +137,7 @@ private const val MAX_CONCURRENT_FOLDER_READS = 4
  * @param deletesStaleFiles 古いファイルの削除を行うか。デスクトップのアプリだけが行う
  * @param browserOpener 項目をブラウザで開く仕組み
  * @param itemSharer 項目をほかのアプリで開く仕組みと、共有する仕組み。持たないプラットフォームでは null
+ * @param favicons 項目の URL から favicon を返す仕組み。[AutoCloseable] なら、[close] で閉じる。既定は、何も取りに行かない [NoFavicons]
  * @param ioDispatcher 設定のファイルと端末ごとの設定のファイルの読み書き、接続を作ること、ローカルキャッシュのディレクトリを消すこと、
  * 古いファイルの削除の記録と最後に開いた項目の記録と溜めた削除の記録の読み書きに使う
  * @param clock 古いファイルの削除を前に終えてからの経過を測る、端末の時計
@@ -148,6 +152,7 @@ class CloudMarksController(
     deletesStaleFiles: Boolean,
     private val browserOpener: BrowserOpener,
     private val itemSharer: ItemSharer?,
+    val favicons: FaviconSource = NoFavicons,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     clock: Clock = Clock.System,
 ) : AutoCloseable {
@@ -733,7 +738,7 @@ class CloudMarksController(
         }
     }
 
-    /** [storageChanges] を集める処理と走っている読み書きを取り消し、S3 のクライアントを閉じる。 */
+    /** [storageChanges] を集める処理と走っている読み書きを取り消し、S3 のクライアントと [favicons] を閉じる。 */
     override fun close() {
         storageChangeWatching.cancel()
         active?.let { previous ->
@@ -741,6 +746,7 @@ class CloudMarksController(
             previous.connection.close()
         }
         active = null
+        (favicons as? AutoCloseable)?.close()
     }
 
     private suspend fun save(settings: ConnectionSettings) {
@@ -1336,6 +1342,7 @@ class CloudMarksController(
  * [CloudMarksController] を組み立てる。Android とデスクトップのエントリポイントが、プラットフォームごとに違うもの（ファイルの場所、
  * 認証情報を暗号化する仕組み、時計、マニフェストの `updatedBy`、S3 から読み直すきっかけの知らせ、古いファイルの削除を行うか、
  * 項目をブラウザで開く仕組み、項目をほかのアプリで開く仕組みと共有する仕組み）を渡して呼ぶ。ログは [AppFiles.logDirectory] のファイルに書く。
+ * 項目の favicon を取って [AppFiles.cacheDirectory] の下にキャッシュする仕組み（[createFaviconStore]）も、ここで作って [scope] で動かす。
  *
  * 呼んだ側が、作ったコントローラを [CloudMarksController.start] で動かし始め、使い終えたら [CloudMarksController.close] で閉じる。
  *
@@ -1375,5 +1382,6 @@ fun createCloudMarksController(
         deletesStaleFiles = deletesStaleFiles,
         browserOpener = browserOpener(log::write),
         itemSharer = itemSharer?.invoke(log::write),
+        favicons = createFaviconStore(appFiles.cacheDirectory, scope, log::write),
     )
 }

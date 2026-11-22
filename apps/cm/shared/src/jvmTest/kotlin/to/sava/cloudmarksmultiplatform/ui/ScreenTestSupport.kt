@@ -22,14 +22,19 @@ import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performMouseInput
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.toSize
@@ -39,6 +44,8 @@ import to.sava.cloudmarksmultiplatform.app.CloudMarksController
 import to.sava.cloudmarksmultiplatform.app.ControllerFixture
 import to.sava.cloudmarksmultiplatform.browser.FakeBrowserOpener
 import to.sava.cloudmarksmultiplatform.browser.FakeItemSharer
+import to.sava.cloudmarksmultiplatform.favicon.FaviconSource
+import to.sava.cloudmarksmultiplatform.favicon.NoFavicons
 import to.sava.cloudmarksmultiplatform.storage.Item
 import to.sava.cloudmarksmultiplatform.sync.FolderReadResult
 import to.sava.cloudmarksmultiplatform.sync.ROOT_ID
@@ -74,6 +81,7 @@ private const val EDGE_INSET = 2f
  *
  * @param browserOpener コントローラが項目をブラウザで開く仕組み。既定では、まとめて開けるプラットフォームとして振る舞う
  * @param itemSharer コントローラが項目をほかのアプリで開く仕組みと共有する仕組み。既定の null では、持たないプラットフォームとして振る舞う
+ * @param favicons コントローラが項目の favicon を返す仕組み。既定は、何も取りに行かない [NoFavicons]
  * @param touchScreen 画面を、タッチの画面の振る舞い（[LocalTouchScreen]）で動かすか。偽なら、プラットフォームの値（デスクトップの振る舞い）のまま
  * 動かす
  * @param containerSize 窓の大きさ（[SizedWindow]）。値を替えると、端末を回したときと同じく、描く範囲と窓の幅の区分が替わる。
@@ -89,6 +97,7 @@ internal fun runCloudMarksScreenTest(
     arrange: (ControllerFixture) -> Unit = {},
     browserOpener: FakeBrowserOpener = FakeBrowserOpener(),
     itemSharer: FakeItemSharer? = null,
+    favicons: FaviconSource = NoFavicons,
     touchScreen: Boolean = false,
     containerSize: State<IntSize>? = null,
     updater: AppUpdater? = null,
@@ -101,7 +110,7 @@ internal fun runCloudMarksScreenTest(
         val scope = rememberCoroutineScope()
         val fixture = remember {
             val dispatcher = scope.coroutineContext[ContinuationInterceptor] as CoroutineDispatcher
-            ControllerFixture(scope, dispatcher, temporaryFolder, browserOpener = browserOpener, itemSharer = itemSharer).also {
+            ControllerFixture(scope, dispatcher, temporaryFolder, browserOpener = browserOpener, itemSharer = itemSharer, favicons = favicons).also {
                 it.store.seed()
                 it.storeSettings()
                 arrange(it)
@@ -159,6 +168,19 @@ internal fun ComposeUiTest.listFolderRow(name: String): SemanticsNodeInteraction
 /** リストの、項目 [n]（[item]）の行。 */
 @OptIn(ExperimentalTestApi::class)
 internal fun ComposeUiTest.itemRow(n: Int): SemanticsNodeInteraction = onNodeWithText(item(n).title)
+
+/** AppBar の検索の入力欄。 */
+@OptIn(ExperimentalTestApi::class)
+internal fun ComposeUiTest.searchField(): SemanticsNodeInteraction = onNode(hasSetTextAction() and !hasAnyAncestor(isDialog()))
+
+/** AppBar のルーペを押して検索を開き、[query] が空でなければ、入力欄に入れる。描き終えるまで待つ。 */
+@OptIn(ExperimentalTestApi::class)
+internal fun ComposeUiTest.search(query: String) {
+    onNodeWithContentDescription(SEARCH_DESCRIPTION).performClick()
+    waitForIdle()
+    if (query.isNotEmpty()) searchField().performTextInput(query)
+    waitForIdle()
+}
 
 /** メニューの行 [labels] が、どれも出ていて、上からこの順に並んでいるか。 */
 @OptIn(ExperimentalTestApi::class)

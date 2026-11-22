@@ -11,6 +11,8 @@ import org.junit.rules.TemporaryFolder
 import to.sava.cloudmarksmultiplatform.AppFiles
 import to.sava.cloudmarksmultiplatform.browser.FakeBrowserOpener
 import to.sava.cloudmarksmultiplatform.browser.FakeItemSharer
+import to.sava.cloudmarksmultiplatform.favicon.FaviconSource
+import to.sava.cloudmarksmultiplatform.favicon.NoFavicons
 import to.sava.cloudmarksmultiplatform.operations.ItemRef
 import to.sava.cloudmarksmultiplatform.remote.FakeObjectStore
 import to.sava.cloudmarksmultiplatform.remote.FakeObjectStore.GetFault
@@ -60,6 +62,7 @@ internal class TestClock(var current: Instant) : Clock {
  * @param browserOpener コントローラが項目をブラウザで開く仕組み。ブラウザを起動せず、頼まれたことを記録する
  * @param itemSharer コントローラが項目をほかのアプリで開く仕組みと共有する仕組み。アプリの一覧を出さず、頼まれたことを記録する。
  * null なら、持たないプラットフォームとして振る舞う
+ * @param favicons コントローラが項目の favicon を返す仕組み。既定は、何も取りに行かない [NoFavicons]
  */
 internal class ControllerFixture(
     scope: CoroutineScope,
@@ -71,6 +74,7 @@ internal class ControllerFixture(
     val directory: Path = temporaryFolder.newFolder().toPath(),
     val browserOpener: FakeBrowserOpener = FakeBrowserOpener(),
     val itemSharer: FakeItemSharer? = null,
+    val favicons: FaviconSource = NoFavicons,
 ) {
     /**
      * コントローラの処理を [scope] の `backgroundScope` で走らせ、`runCurrent` で進める（`advanceUntilIdle` は
@@ -85,6 +89,7 @@ internal class ControllerFixture(
         directory: Path = temporaryFolder.newFolder().toPath(),
         browserOpener: FakeBrowserOpener = FakeBrowserOpener(),
         itemSharer: FakeItemSharer? = null,
+        favicons: FaviconSource = NoFavicons,
     ) : this(
         scope = scope.backgroundScope,
         ioDispatcher = StandardTestDispatcher(scope.testScheduler),
@@ -95,6 +100,7 @@ internal class ControllerFixture(
         directory = directory,
         browserOpener = browserOpener,
         itemSharer = itemSharer,
+        favicons = favicons,
     )
 
     val appFiles = AppFiles(
@@ -145,6 +151,7 @@ internal class ControllerFixture(
         deletesStaleFiles = deletesStaleFiles,
         browserOpener = browserOpener,
         itemSharer = itemSharer,
+        favicons = favicons,
         ioDispatcher = ioDispatcher,
         clock = clock,
     )
