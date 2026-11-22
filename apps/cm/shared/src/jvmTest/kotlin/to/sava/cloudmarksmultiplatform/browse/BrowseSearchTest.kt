@@ -300,18 +300,84 @@ class BrowseSearchTest {
         assertEquals(listOf(A1A, A2), replaced.foldersToLoadForSearch())
     }
 
-    // マニフェストを読み直すと、ツリーと一緒に読まなかったフォルダの項目は読んだ結果から外れ、検索で読む必要があるフォルダに戻る
+    // マニフェストを読み直したとき（読み書きできるツリーでも読むだけのツリーでも）、ツリーと一緒に読まなかったフォルダのうち、
+    // 項目ファイルの ID が同じものの読めた項目と壊れていた結果は引き継ぐ。読めなかった結果と項目ファイルが無かった結果は引き継がず、読み直す
     @Test
-    fun withTreeReadMakesUnreadFoldersLoadableAgain() {
-        val before = browseWithA1Loaded()
+    fun withTreeReadKeepsLoadedAndBrokenReadsOfSameItemsFile() {
+        val before = browseWithUnreadItems()
+            .withFolderRead("\"etag-1\"", A1, FolderReadResult.Broken(BROKEN))
+            .withFolderRead("\"etag-1\"", A1A, FolderReadResult.Loaded(listOf(item(3))))
+            .withFolderRead("\"etag-1\"", A2, FolderReadResult.Failed(FAILURE))
+        val missing = browseWithUnreadItems()
+            .withFolderRead("\"etag-1\"", A1, FolderReadResult.Loaded(A1_ITEMS))
+            .withFolderRead("\"etag-1\"", A1A, FolderReadResult.Missing)
+            .withFolderRead("\"etag-1\"", A2, FolderReadResult.Loaded(listOf(item(4))))
+        val reread = loadedTree(entriesWithItemFiles(), eTag = "\"etag-2\"")
+        val results = listOf(TreeReadResult.Readable(reread), TreeReadResult.ReadOnly(reread))
+
+        results.forEach { result ->
+            val after = before.startLoading().withTreeRead(result)
+            assertEquals(FolderReadResult.Broken(BROKEN), after.folderReads[A1], "$result")
+            assertEquals(FolderReadResult.Loaded(listOf(item(3))), after.folderReads[A1A], "$result")
+            assertFalse(A2 in after.folderReads, "$result")
+            assertEquals(listOf(A2), after.foldersToLoadForSearch(), "$result")
+
+            val afterMissing = missing.startLoading().withTreeRead(result)
+            assertEquals(FolderReadResult.Loaded(A1_ITEMS), afterMissing.folderReads[A1], "$result")
+            assertFalse(A1A in afterMissing.folderReads, "$result")
+            assertEquals(FolderReadResult.Loaded(listOf(item(4))), afterMissing.folderReads[A2], "$result")
+            assertEquals(listOf(A1A), afterMissing.foldersToLoadForSearch(), "$result")
+        }
+    }
+
+    // マニフェストを読み直したとき、項目ファイルの ID が替わったフォルダ（ほかの書き手が替えた）の結果は引き継がず、検索で読む必要があるフォルダに戻る。
+    // 読めた結果も壊れていた結果も同じ
+    @Test
+    fun withTreeReadDropsReadsOfFoldersWithNewItemsFile() {
+        val before = browseWithUnreadItems()
+            .withFolderRead("\"etag-1\"", A1, FolderReadResult.Broken(BROKEN))
             .withFolderRead("\"etag-1\"", A1A, FolderReadResult.Loaded(listOf(item(3))))
             .withFolderRead("\"etag-1\"", A2, FolderReadResult.Loaded(listOf(item(4))))
-        assertEquals(emptyList(), before.foldersToLoadForSearch())
-        val reread = loadedTree(entriesWithItemFiles(), eTag = "\"etag-2\"", loadedItems = mapOf(A1 to A1_ITEMS))
+        val replacedEntries = entriesWithItemFiles().map { if (it.id == A1 || it.id == A1A) it.copy(items = fileId(99)) else it }
+        val reread = loadedTree(replacedEntries, eTag = "\"etag-2\"")
 
         val after = before.startLoading().withTreeRead(TreeReadResult.Readable(reread))
 
-        assertEquals(listOf(A1A, A2), after.foldersToLoadForSearch())
+        assertFalse(A1 in after.folderReads)
+        assertFalse(A1A in after.folderReads)
+        assertEquals(FolderReadResult.Loaded(listOf(item(4))), after.folderReads[A2])
+        assertEquals(listOf(A1, A1A), after.foldersToLoadForSearch())
+    }
+
+    // マニフェストを読み直したとき、ツリーと一緒に読んだ結果は、引き継いだ結果より優先する
+    @Test
+    fun withTreeReadPrefersReadsLoadedWithTree() {
+        val before = browseWithUnreadItems()
+            .withFolderRead("\"etag-1\"", A1, FolderReadResult.Loaded(A1_ITEMS))
+            .withFolderRead("\"etag-1\"", A1A, FolderReadResult.Loaded(listOf(item(3))))
+            .withFolderRead("\"etag-1\"", A2, FolderReadResult.Loaded(listOf(item(4))))
+        val reread = loadedTree(entriesWithItemFiles(), eTag = "\"etag-2\"", loadedItems = mapOf(A1 to listOf(item(9))))
+            .copy(brokenFolders = mapOf(A1A to BROKEN))
+
+        val after = before.startLoading().withTreeRead(TreeReadResult.Readable(reread))
+
+        assertEquals(FolderReadResult.Loaded(listOf(item(9))), after.folderReads[A1])
+        assertEquals(FolderReadResult.Broken(BROKEN), after.folderReads[A1A])
+        assertEquals(FolderReadResult.Loaded(listOf(item(4))), after.folderReads[A2])
+    }
+
+    // 接続を作り直した（cleared）あとは前の結果が無いので、読んだマニフェストと一緒に読んだ結果のほかは何も引き継がない
+    @Test
+    fun withTreeReadAfterClearedKeepsNothing() {
+        val before = browseWithUnreadItems()
+            .withFolderRead("\"etag-1\"", A1, FolderReadResult.Loaded(A1_ITEMS))
+            .withFolderRead("\"etag-1\"", A1A, FolderReadResult.Broken(BROKEN))
+        val reread = loadedTree(entriesWithItemFiles(), eTag = "\"etag-2\"")
+
+        val after = before.cleared().startLoading().withTreeRead(TreeReadResult.Readable(reread))
+
+        assertEquals(reread.state.items.mapValues { (_, items) -> FolderReadResult.Loaded(items) }, after.folderReads)
+        assertEquals(listOf(A1, A1A, A2), after.foldersToLoadForSearch())
     }
 
     // 検索のための読み込みの最中か：検索を開いていて、読む必要があるフォルダ・読んでいる最中のフォルダ・項目ファイルが無かったフォルダの

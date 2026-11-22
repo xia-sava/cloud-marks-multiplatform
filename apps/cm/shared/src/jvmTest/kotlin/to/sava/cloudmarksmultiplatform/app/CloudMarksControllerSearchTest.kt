@@ -1,11 +1,14 @@
 package to.sava.cloudmarksmultiplatform.app
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
+import to.sava.cloudmarksmultiplatform.browse.BrowseState
 import to.sava.cloudmarksmultiplatform.browse.searchItems
 import to.sava.cloudmarksmultiplatform.browser.BrowserTab
 import to.sava.cloudmarksmultiplatform.browser.CHROME
@@ -28,6 +31,7 @@ import to.sava.cloudmarksmultiplatform.sync.A_ITEMS
 import to.sava.cloudmarksmultiplatform.sync.FOLDER_A
 import to.sava.cloudmarksmultiplatform.sync.FolderReadResult
 import to.sava.cloudmarksmultiplatform.sync.ROOT_ID
+import to.sava.cloudmarksmultiplatform.sync.ROOT_ITEMS
 import to.sava.cloudmarksmultiplatform.sync.fileId
 import to.sava.cloudmarksmultiplatform.sync.folderId
 import to.sava.cloudmarksmultiplatform.sync.gets
@@ -174,10 +178,10 @@ class CloudMarksControllerSearchTest {
         EXTRA_FOLDERS.forEach { assertEquals(FolderReadResult.Loaded(it.items), fixture.state.browse.folderReads[it.id], it.id) }
     }
 
-    // 検索を開いているあいだにマニフェストを読み直すと（一緒に読むのは開いているフォルダだけ）、そのあとに、検索のために読むフォルダを読み直す。
-    // ほかの書き手が替えたフォルダは、新しい項目になる
+    // 検索を開いているあいだにマニフェストを読み直すと（一緒に読むのは開いているフォルダだけ）、読んだ結果は、項目ファイルの ID が同じフォルダのものを
+    // 引き継ぎ、ほかの書き手が替えたフォルダだけを、そのあとに読み直して新しい項目にする
     @Test
-    fun rereadWhileSearchingReadsSearchFoldersAgain() = runTest {
+    fun rereadWhileSearchingReadsOnlyReplacedFoldersAgain() = runTest {
         val fixture = searching()
         val replaced = EXTRA_FOLDERS[2]
         val newItems = listOf(item(40))
@@ -191,6 +195,34 @@ class CloudMarksControllerSearchTest {
         assertEquals(FolderReadResult.Loaded(newItems), browse.folderReads[replaced.id])
         assertEquals(FolderReadResult.Loaded(A_ITEMS), browse.folderReads[FOLDER_A])
         (EXTRA_FOLDERS - replaced).forEach { assertEquals(FolderReadResult.Loaded(it.items), browse.folderReads[it.id], it.id) }
+        assertFalse(browse.searchLoading)
+    }
+
+    // 検索を開いて全フォルダを読み終えたあと、マニフェストが変わらない読み直しをしても、項目ファイルを GET し直さず、
+    // 検索の結果は読み直しのあいだも減らない
+    @Test
+    fun rereadWithSameManifestWhileSearchingKeepsResults() = runTest {
+        val fixture = searching()
+        fixture.controller.setSearchQuery("title")
+        val resultsOf = { browse: BrowseState -> browse.searchItems(assertNotNull(browse.search).query).map { it.ref } }
+        val expected = resultsOf(fixture.state.browse)
+        assertEquals(ROOT_ITEMS.size + A_ITEMS.size + EXTRA_FOLDERS.size, expected.size)
+        val treeBefore = assertNotNull(fixture.state.browse.tree)
+        val itemsGetsBefore = fixture.itemsFileGets().size
+        val observed = mutableListOf<List<ItemRef>>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            fixture.controller.state.collect { observed += resultsOf(it.browse) }
+        }
+
+        fixture.controller.reload()
+        runCurrent()
+
+        val browse = fixture.state.browse
+        assertTrue(treeBefore !== assertNotNull(browse.tree))
+        assertEquals(treeBefore.eTag, browse.tree?.eTag)
+        assertEquals(itemsGetsBefore, fixture.itemsFileGets().size)
+        assertTrue(observed.size > 1)
+        observed.forEach { assertEquals(expected, it) }
         assertFalse(browse.searchLoading)
     }
 

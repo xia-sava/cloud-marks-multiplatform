@@ -52,7 +52,8 @@ fun selectionModeOf(ctrlPressed: Boolean, shiftPressed: Boolean): SelectionMode 
  * @property currentFolderId 開いているフォルダ。[tree] が null なら null
  * @property history 戻る先のフォルダ。最後が、直前に開いていたもの
  * @property expandedFolders ツリーで開いているノード
- * @property folderReads フォルダの項目を読んだ結果。[tree] のマニフェストで読んだものだけを持つ。まだ読んでいないフォルダと、
+ * @property folderReads フォルダの項目を読んだ結果。[tree] のマニフェストで読んだものと、前のツリーで読んだもののうち、
+ * [tree] でも項目ファイルの ID が同じフォルダの読めた結果と壊れていた結果を持つ。まだ読んでいないフォルダと、
  * 読んでいる最中のフォルダは含まない。[FolderReadResult.Missing] は、そのあとにマニフェストを読み直しているあいだだけ持つ
  * @property loadingFolders 項目を読んでいる最中のフォルダ。同時に読むフォルダの数の上限のために、読み始めるのを待っているフォルダも含む。
  * 待っているあいだに読む必要が無くなったフォルダは、読まずに外す（[withoutFolderLoading]）
@@ -186,7 +187,8 @@ data class BrowseState(
      * 履歴とツリーで開いているノードからは、新しいツリーに無いフォルダを除く。初めてツリーを読んだときは、ルートフォルダだけを開く。
      * 選んでいた項目は、開いているフォルダが替わらなければ、新しいツリーと一緒に読んだそのフォルダの項目にまだあるものだけを残す。
      * 範囲で選ぶときの起点も、同じくまだあれば残す。
-     * 項目を読んだ結果は、新しいツリーと一緒に読んだものだけにする。
+     * 項目を読んだ結果は、新しいツリーと一緒に読んだものに、いまのツリーで読んだ結果のうち引き継げるもの（[keptReadsFor]）を足して持つ。
+     * 同じフォルダなら、新しいツリーと一緒に読んだものが優先する。
      *
      * 読めなければ、前に読めたツリーを残したまま、失敗を持つ。項目ファイルが無かった（[FolderReadResult.Missing]）
      * フォルダは、その失敗で読めなかったとする（開き直すと読み直す）。
@@ -207,20 +209,27 @@ data class BrowseState(
     /**
      * 操作を書けたときの、書いたあとのツリー [written] を受け取る。読み書きできるツリーとして替える。
      *
-     * [written] が持つ項目は、操作の適用に要ったフォルダのものだけなので、[withTreeRead] と違い、いまのツリーで読めた項目
-     * （[FolderReadResult.Loaded]）と、項目ファイルが壊れていた結果（[FolderReadResult.Broken]）を引き継ぐ。
-     * 引き継ぐのは、[written] でも項目ファイルの ID が同じフォルダのもの（項目ファイルは置くたびに新しい ID なので、
-     * ID が同じなら中身も同じ）。読めなかった結果（[FolderReadResult.Failed]）は引き継がず、読み直せるようにする。
-     * [written] が持つ項目は、引き継いだものより優先する。
+     * [written] が持つ項目は、操作の適用に要ったフォルダのものだけなので、いまのツリーで読んだ結果のうち引き継げるもの
+     * （[keptReadsFor]）を引き継ぐ。[written] が持つ項目は、引き継いだものより優先する。
      * 選んでいた項目と範囲で選ぶときの起点は、引き継いだ項目にまだあるものだけを残す。
      */
-    fun withWrittenTree(written: LoadedTree): BrowseState {
-        val writtenFolders = written.state.folders
-        val kept = folderReads.filter { (folderId, read) ->
+    fun withWrittenTree(written: LoadedTree): BrowseState = withTree(written, readOnly = false)
+
+    /**
+     * いまのツリーで読んだ結果のうち、新しいツリー [next] に引き継ぐもの。項目を読めた結果（[FolderReadResult.Loaded]）と、
+     * 項目ファイルが壊れていた結果（[FolderReadResult.Broken]）で、[next] でも項目ファイルの ID（[FolderNode.itemsFileId]）が
+     * 同じフォルダのもの（項目ファイルは置くたびに新しい ID なので、ID が同じなら中身も同じ）。
+     * 読めなかった結果（[FolderReadResult.Failed]）と項目ファイルが無かった結果（[FolderReadResult.Missing]）は引き継がず、読み直せるようにする。
+     */
+    private fun keptReadsFor(next: LoadedTree): Map<String, FolderReadResult> {
+        val currentFolders = tree?.state?.folders.orEmpty()
+        val nextFolders = next.state.folders
+        return folderReads.filter { (folderId, read) ->
+            val current = currentFolders[folderId]
+            val upcoming = nextFolders[folderId]
             (read is FolderReadResult.Loaded || read is FolderReadResult.Broken) &&
-                writtenFolders[folderId]?.let { it.itemsFileId == tree?.state?.folders?.get(folderId)?.itemsFileId } == true
+                current != null && upcoming != null && upcoming.itemsFileId == current.itemsFileId
         }
-        return withTree(written, readOnly = false, keptReads = kept)
     }
 
     /**
@@ -369,11 +378,14 @@ data class BrowseState(
             copy(folderReads = folderReads + (folderId to result), loadingFolders = loadingFolders - folderId)
         }
 
-    /** [keptReads] は、[loaded] と一緒に読んだ項目に足して持つ、前のツリーから引き継いだ項目の読み。同じフォルダなら [loaded] のものが優先する。 */
-    private fun withTree(loaded: LoadedTree, readOnly: Boolean, keptReads: Map<String, FolderReadResult> = emptyMap()): BrowseState {
+    /**
+     * ツリーを [loaded] に替える。項目の読みは、[loaded] と一緒に読んだものに、いまのツリーから引き継げるもの（[keptReadsFor]）を足して持つ。
+     * 同じフォルダなら [loaded] と一緒に読んだものが優先する。
+     */
+    private fun withTree(loaded: LoadedTree, readOnly: Boolean): BrowseState {
         val folders = loaded.state.folders
         val current = folderToOpenIn(loaded.state)
-        val reads = keptReads + loaded.state.items.mapValues { (_, items) -> FolderReadResult.Loaded(items) } +
+        val reads = keptReadsFor(loaded) + loaded.state.items.mapValues { (_, items) -> FolderReadResult.Loaded(items) } +
             loaded.brokenFolders.mapValues { (_, problem) -> FolderReadResult.Broken(problem) }
         val remainingIds = if (current == currentFolderId) {
             (reads[current] as? FolderReadResult.Loaded)?.items.orEmpty().map { it.id }.toSet()
