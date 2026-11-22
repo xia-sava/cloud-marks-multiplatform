@@ -54,7 +54,8 @@ fun selectionModeOf(ctrlPressed: Boolean, shiftPressed: Boolean): SelectionMode 
  * @property expandedFolders ツリーで開いているノード
  * @property folderReads フォルダの項目を読んだ結果。[tree] のマニフェストで読んだものだけを持つ。まだ読んでいないフォルダと、
  * 読んでいる最中のフォルダは含まない。[FolderReadResult.Missing] は、そのあとにマニフェストを読み直しているあいだだけ持つ
- * @property loadingFolders 項目を読んでいる最中のフォルダ
+ * @property loadingFolders 項目を読んでいる最中のフォルダ。同時に読むフォルダの数の上限のために、読み始めるのを待っているフォルダも含む。
+ * 待っているあいだに読む必要が無くなったフォルダは、読まずに外す（[withoutFolderLoading]）
  * @property selectedItemIds リストで選んでいる、開いているフォルダの項目。開いているフォルダの読めた項目にあるものだけを持つ
  * @property selectionAnchorId 範囲で選ぶときの起点にする、開いているフォルダの項目。その項目だけを選んだときと、
  * 選ぶ・外すを切り替えたときに押した項目になる。無ければ null
@@ -113,6 +114,16 @@ data class BrowseState(
         if (!hidesItemsOf(folderId)) return items
         return items.filterNot { ItemRef(folderId, it.id) in pendingDeletes }
     }
+
+    /** フォルダ [folderId] の、読めた項目。溜めた削除の項目は除く。表示の並び順。読めていなければ空。 */
+    fun loadedItemsOf(folderId: String): List<Item> =
+        (folderReads[folderId] as? FolderReadResult.Loaded)?.let { shownItems(folderId, it.items) }.orEmpty()
+
+    /**
+     * 項目 [ref] を、そのフォルダの読めた項目（[loadedItemsOf]。溜めた削除の項目は除く）から引く。
+     * そのフォルダの項目を読めていないか、溜めた削除の項目か、読めた項目に無ければ null。
+     */
+    fun loadedItemOf(ref: ItemRef): Item? = loadedItemsOf(ref.folderId).firstOrNull { it.id == ref.itemId }
 
     /**
      * フォルダ [folderId] の直下の項目の数。溜めた削除の項目は数えない。ツリーに無いフォルダは 0。
@@ -277,6 +288,16 @@ data class BrowseState(
         tree?.state?.foldersInPreorder().orEmpty().map { it.id }.filter { it !in folderReads && it !in loadingFolders }
 
     /**
+     * 検索のための読み込みの最中か。検索を開いていて、次のどれかに当たるとき。検索のために項目を読む必要があるフォルダがある
+     * （[foldersToLoadForSearch]）、項目を読んでいる最中のフォルダがある、項目ファイルが無かった（[FolderReadResult.Missing]）
+     * フォルダがある（そのあとにマニフェストを読み直す）、マニフェストを読んでいる最中。検索を閉じていれば false。
+     */
+    val searchLoading: Boolean
+        get() = search != null &&
+            (loading || loadingFolders.isNotEmpty() || folderReads.values.any { it is FolderReadResult.Missing } ||
+                foldersToLoadForSearch().isNotEmpty())
+
+    /**
      * 検索で項目を読めなかったフォルダの ID。読んだ結果が [FolderReadResult.Failed] か [FolderReadResult.Broken] のフォルダ。ツリーの行きがけ順。
      * [FolderReadResult.Missing] は、そのあとにマニフェストを読み直しているあいだだけ持つので含めない。
      */
@@ -332,10 +353,14 @@ data class BrowseState(
     /** フォルダ [folderId] の項目を読み始める。 */
     fun withFolderLoading(folderId: String): BrowseState = copy(loadingFolders = loadingFolders + folderId)
 
+    /** フォルダ [folderId] の項目を、読まずにやめる。読んでいる最中のフォルダから外し、読んだ結果は替えない。 */
+    fun withoutFolderLoading(folderId: String): BrowseState = copy(loadingFolders = loadingFolders - folderId)
+
     /**
      * ETag が [eTag] のマニフェストのツリーで、フォルダ [folderId] の項目を読んだ結果を受け取る。
      * いまのツリーのマニフェストの ETag と違えば、前のツリーで読んだものなので捨てる。
-     * [FolderReadResult.Missing] を渡したら、呼び出し側は続けてマニフェストを読み直し、その結果を [withTreeRead] に渡す。
+     * [FolderReadResult.Missing] を渡したら、呼び出し側は、マニフェストを読んでいる最中（[loading]）でなければ、続けてマニフェストを読み直し、
+     * その結果を [withTreeRead] に渡す。読んでいる最中なら読み直さず、読み終えたマニフェストのツリーで、そのフォルダの項目をもう一度読む。
      */
     fun withFolderRead(eTag: String, folderId: String, result: FolderReadResult): BrowseState =
         if (tree?.eTag != eTag) {

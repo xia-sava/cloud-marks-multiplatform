@@ -35,6 +35,12 @@ private fun browseWithUnreadItems(): BrowseState = browseWithTree(loadedTree(ent
 private fun browseWithA1Loaded(): BrowseState =
     browseWithUnreadItems().openFolder(A1).withFolderRead("\"etag-1\"", A1, FolderReadResult.Loaded(A1_ITEMS))
 
+/** [browseWithUnreadItems] で、A1 と A1A の項目を読んだ状態。A2 だけが、項目を読んでいないフォルダ。ルートフォルダを開いている。 */
+private fun browseWithA2Unread(): BrowseState =
+    browseWithUnreadItems()
+        .withFolderRead("\"etag-1\"", A1, FolderReadResult.Loaded(A1_ITEMS))
+        .withFolderRead("\"etag-1\"", A1A, FolderReadResult.Loaded(listOf(item(3))))
+
 class BrowseSearchTest {
     // 検索を開くと、入力した語は空で、選んでいる項目と範囲で選ぶときの起点を外す。開く前は閉じている
     @Test
@@ -306,6 +312,94 @@ class BrowseSearchTest {
         val after = before.startLoading().withTreeRead(TreeReadResult.Readable(reread))
 
         assertEquals(listOf(A1A, A2), after.foldersToLoadForSearch())
+    }
+
+    // 検索のための読み込みの最中か：検索を開いていて、読む必要があるフォルダ・読んでいる最中のフォルダ・項目ファイルが無かったフォルダの
+    // どれかがあるか、マニフェストを読んでいる最中なら最中。読めなかった・壊れていたフォルダが残るだけなら終わり。検索を閉じていれば最中でない
+    @Test
+    fun searchLoadingFollowsFolderReadsAndManifestLoading() {
+        val allRead = browseWithA2Unread().withFolderRead("\"etag-1\"", A2, FolderReadResult.Loaded(listOf(item(4))))
+        val cases: List<Triple<String, BrowseState, Boolean>> = listOf(
+            Triple("読む必要があるフォルダがある", browseWithA2Unread().openSearch(), true),
+            Triple("読んでいる最中のフォルダがある", browseWithA2Unread().openSearch().withFolderLoading(A2), true),
+            Triple(
+                "項目ファイルが無かったフォルダがある",
+                browseWithA2Unread().withFolderRead("\"etag-1\"", A2, FolderReadResult.Missing).openSearch(),
+                true,
+            ),
+            Triple("マニフェストを読んでいる最中", allRead.openSearch().startLoading(), true),
+            Triple("すべて読めた", allRead.openSearch(), false),
+            Triple(
+                "読めなかった・壊れていたフォルダが残るだけ",
+                browseWithA2Unread().openSearch()
+                    .withFolderRead("\"etag-1\"", A2, FolderReadResult.Failed(FAILURE))
+                    .withFolderRead("\"etag-1\"", A1A, FolderReadResult.Broken(BROKEN)),
+                false,
+            ),
+            Triple("検索を閉じている（読む必要があるフォルダがある）", browseWithUnreadItems(), false),
+            Triple("検索を閉じている（読んでいる最中）", browseWithUnreadItems().withFolderLoading(A1).startLoading(), false),
+        )
+
+        cases.forEach { (name, state, expected) -> assertEquals(expected, state.searchLoading, name) }
+    }
+
+    // 読んでいる最中のフォルダと項目ファイルが無かったフォルダは、それぞれ単独で最中にする（読む必要があるフォルダが残っていなくても）
+    @Test
+    fun searchLoadingWithoutFoldersToLoad() {
+        val loading = browseWithA2Unread().openSearch().withFolderLoading(A2)
+        val missing = browseWithA2Unread().withFolderRead("\"etag-1\"", A2, FolderReadResult.Missing).openSearch()
+
+        listOf(loading, missing).forEach { state ->
+            assertEquals(emptyList(), state.foldersToLoadForSearch())
+            assertFalse(state.loading)
+            assertTrue(state.searchLoading)
+        }
+    }
+
+    // 読まずにやめると、そのフォルダだけを読んでいる最中から外し、ほかの読んでいる最中のフォルダと読んだ結果は替えない。
+    // 読んでいる最中でないフォルダなら何も替えない。外したフォルダは、検索のために読む必要があるフォルダに戻る
+    @Test
+    fun withoutFolderLoadingRemovesOnlyThatFolder() {
+        val loading = browseWithUnreadItems().openSearch().withFolderLoading(A1).withFolderLoading(A2)
+
+        val stopped = loading.withoutFolderLoading(A2)
+
+        assertEquals(setOf(A1), stopped.loadingFolders)
+        assertEquals(loading.folderReads, stopped.folderReads)
+        assertEquals(listOf(A1A, A2), stopped.foldersToLoadForSearch())
+        assertEquals(loading, loading.withoutFolderLoading(A1A))
+    }
+
+    // フォルダの読めた項目は、開いているフォルダでなくても引ける。溜めた削除の項目は除き、並びは変えない。
+    // 読んでいないフォルダ・読めなかったフォルダ・ツリーに無いフォルダは空
+    @Test
+    fun loadedItemsOfAnyFolderExcludesPendingDeletes() {
+        val state = browseWithA2Unread()
+            .withFolderRead("\"etag-1\"", A1A, FolderReadResult.Failed(FAILURE))
+            .withPendingDeletes(setOf(ItemRef(A1, item(1).id)))
+        assertEquals(ROOT, state.currentFolderId)
+
+        assertEquals(listOf(item(2)), state.loadedItemsOf(A1))
+        assertEquals(A1_ITEMS, browseWithA2Unread().loadedItemsOf(A1))
+        assertEquals(emptyList(), state.loadedItemsOf(A2))
+        assertEquals(emptyList(), state.loadedItemsOf(A1A))
+        assertEquals(emptyList(), state.loadedItemsOf("unknown"))
+    }
+
+    // フォルダと項目の組から、そのフォルダの読めた項目を引く。開いているフォルダでなくても引ける。溜めた削除の項目、
+    // 読んでいないフォルダの項目、そのフォルダの読めた項目に無い項目（ほかのフォルダにある項目を含む）は null
+    @Test
+    fun loadedItemOfLooksUpItsFolder() {
+        val state = browseWithA2Unread().withPendingDeletes(setOf(ItemRef(A1, item(1).id)))
+        assertEquals(ROOT, state.currentFolderId)
+
+        assertEquals(item(2), state.loadedItemOf(ItemRef(A1, item(2).id)))
+        assertEquals(item(3), state.loadedItemOf(ItemRef(A1A, item(3).id)))
+        assertNull(state.loadedItemOf(ItemRef(A1, item(1).id)))
+        assertNull(state.loadedItemOf(ItemRef(A2, item(4).id)))
+        assertNull(state.loadedItemOf(ItemRef(A1, item(99).id)))
+        assertNull(state.loadedItemOf(ItemRef(A1A, item(2).id)))
+        assertNull(state.loadedItemOf(ItemRef("unknown", item(2).id)))
     }
 
     // マニフェストを読み直しても、書いたあとのツリーに替えても、検索の状態は残す。接続先を替えたとき（cleared）は捨てる

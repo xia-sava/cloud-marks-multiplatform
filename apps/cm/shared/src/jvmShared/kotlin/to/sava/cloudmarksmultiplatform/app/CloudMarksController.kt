@@ -16,7 +16,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import to.sava.cloudmarksmultiplatform.AppFiles
 import to.sava.cloudmarksmultiplatform.browse.BrowseState
@@ -59,6 +61,7 @@ import to.sava.cloudmarksmultiplatform.storage.newId
 import to.sava.cloudmarksmultiplatform.sync.CreateManifestResult
 import to.sava.cloudmarksmultiplatform.sync.FolderReadResult
 import to.sava.cloudmarksmultiplatform.sync.LoadedRevision
+import to.sava.cloudmarksmultiplatform.sync.LoadedTree
 import to.sava.cloudmarksmultiplatform.sync.RestoreResult
 import to.sava.cloudmarksmultiplatform.sync.Revision
 import to.sava.cloudmarksmultiplatform.sync.RevisionFailure
@@ -80,6 +83,9 @@ import kotlin.time.TimeSource
 /** マニフェストを読む関数。読んだマニフェストのツリーから、項目を一緒に読むフォルダを決める関数を受け取る。 */
 private typealias TreeRead = suspend (foldersToLoad: (TreeState) -> Set<String>) -> TreeReadResult
 
+/** 読んであるツリーからフォルダの項目を読むとき（開いているフォルダと、検索のために読むフォルダ）に、同時に読むフォルダの数の上限。 */
+private const val MAX_CONCURRENT_FOLDER_READS = 4
+
 /**
  * 画面の状態を持ち、利用者の操作に応じて、設定の読み書きと S3 の読み書きを進める。
  *
@@ -88,14 +94,16 @@ private typealias TreeRead = suspend (foldersToLoad: (TreeState) -> Set<String>)
  * 使い終えたら [close] を呼ぶ。[scope] の取り消しは渡した側が行う。
  *
  * S3 からマニフェストを読み直すのは、[start] で設定を読めたとき、[reload] を呼んだとき、[storageChanges] で知らせを受けたとき、
- * 設定を保存したとき、マニフェストを作ろうとして既にあったとき、開いたフォルダとブラウザで開くフォルダの項目ファイルが `404` を
- * 返したときだけ。
+ * 設定を保存したとき、マニフェストを作ろうとして既にあったとき、開いたフォルダとブラウザで開くフォルダと検索のために読むフォルダの
+ * 項目ファイルが `404` を返したときだけ。
  * フォルダを開いたときはマニフェストを GET せず、読んであるツリーからそのフォルダの項目ファイルだけを読む。
+ * 検索を開いているあいだは、項目を読んでいないフォルダの項目ファイルを、読んであるツリーからすべて読む（[loadFolders]）。
  *
  * データを変える操作（`docs/operations.md`）は、一度に 1 つだけ書く。書いているあいだは、ほかの操作も読み直しも受け付けない。
  * 書けたら書いたあとのツリーに替え、マニフェストは GET し直さない。
  *
- * 項目の削除（選んでいる項目の削除）が S3 につながらないために書けなかったら（[isUnreachable]）、その削除を端末に溜め、接続先ごとの
+ * 項目の削除（選んでいる項目の削除、開いているフォルダの項目を指定した削除と、フォルダと項目の組を指定した削除）が S3 につながらないために
+ * 書けなかったら（[isUnreachable]）、その削除を端末に溜め、接続先ごとの
  * 溜めた削除の記録のファイル（[pendingDeletesFile]）に書く。ほかの失敗では溜めず、ほかの操作も溜めない。溜めた削除の項目は、
  * リストとフォルダの件数から消して見せる（[BrowseState.pendingDeletes]）。
  * 溜めた削除は、起動したときと設定を保存したとき、読み直したとき（[reload] と [storageChanges]）にマニフェストを読み書きできるツリーとして
@@ -157,6 +165,9 @@ class CloudMarksController(
 
     /** 最後に開いた項目の記録のファイルへの書き込みを、1 つずつ順に行う。 */
     private val lastOpenedItemWriting = Mutex()
+
+    /** 読んであるツリーからフォルダの項目を読むことを、同時に [MAX_CONCURRENT_FOLDER_READS] 本までにする（[loadFolders]）。 */
+    private val folderReading = Semaphore(MAX_CONCURRENT_FOLDER_READS)
 
     /** 古いファイルの削除。行わないなら null。 */
     private val staleFileDeletion: StaleFileDeletion? =
@@ -245,7 +256,7 @@ class CloudMarksController(
             }
         }
         if (state.value.screen != Screen.REVISIONS) cancelRevisionReading()
-        loadCurrentFolder()
+        loadFolders()
     }
 
     /** ツリーを出し入れする。広い画面ではツリーの枠を、狭い画面ではドロワーを。 */
@@ -268,10 +279,43 @@ class CloudMarksController(
         updateBrowse { it.toggleExpanded(folderId) }
     }
 
-    /** フォルダを開き、まだ読んでいなければ、そのフォルダの項目を読む。 */
+    /** フォルダを開き、まだ読んでいなければ、そのフォルダの項目を読む。検索を開いていれば閉じる（[BrowseState.openFolder]）。 */
     fun openFolder(folderId: String) {
         updateBrowse { it.openFolder(folderId) }
-        loadCurrentFolder()
+        loadFolders()
+    }
+
+    /**
+     * 項目 [ref] が入っているフォルダを開き、その項目だけを選ぶ（[BrowseState.openFolderOf]）。検索を閉じる。
+     * そのフォルダの項目をまだ読んでいなければ読む。
+     */
+    fun openFolderOf(ref: ItemRef) {
+        updateBrowse { it.openFolderOf(ref) }
+        loadFolders()
+    }
+
+    /**
+     * 検索を開き（[BrowseState.openSearch]）、項目を読んでいないフォルダの項目をすべて読む（[loadFolders]）。
+     * 前に読めなかった（失敗した）フォルダも読み直す。
+     */
+    fun openSearch() {
+        updateBrowse { it.openSearch() }
+        loadFolders()
+    }
+
+    /** 検索の入力した語を [query] にする。検索を閉じていれば何もしない。 */
+    fun setSearchQuery(query: String) {
+        updateBrowse { it.withSearchQuery(query) }
+    }
+
+    /**
+     * 検索を閉じる。開いているフォルダの項目をまだ読んでいなければ読む。
+     * 検索のために読むフォルダのうち、順番を待っていて、まだ読み始めていないものは読まない（[loadFolder]）。
+     * 読み始めていた（GET を送った）読み込みは取り消さず、読めた結果は使う。
+     */
+    fun closeSearch() {
+        updateBrowse { it.closeSearch() }
+        loadFolders()
     }
 
     /** 開いているフォルダの項目 [itemId] を、[mode] の選び方で選ぶ。 */
@@ -290,21 +334,21 @@ class CloudMarksController(
     }
 
     /**
-     * 開いているフォルダの読めた項目のうち、ID が [itemIds] にあるものを消す。消すものが無ければ何もしない。選んでいる項目は変えない。
-     * 書けたら、消した項目を元の位置へ戻せるようにする（[undoDelete]）。S3 につながらないために書けなければ（[isUnreachable]）、
-     * その削除を溜め（[pendDeletes]）、溜めた削除として元に戻せるようにする。
+     * 開いているフォルダの読めた項目のうち、ID が [itemIds] にあるものを消す（[deleteLoadedItems]）。消すものが無ければ何もしない。
+     * 選んでいる項目は変えない。書けたら元に戻せる削除にし、S3 につながらないために書けなければ、溜めた削除にする。
      */
     fun deleteItems(itemIds: Set<String>) {
-        val browse = state.value.browse
-        val folderId = browse.currentFolderId ?: return
-        val deletedIds = browse.currentLoadedItems.map { it.id }.filter { it in itemIds }.toSet()
-        if (deletedIds.isEmpty()) return
-        val targets = deletedIds.map { ItemRef(folderId, it) }
-        writeOperations(
-            listOf(DeleteItems(targets)),
-            undoOnSuccess = UndoableDelete(restoringInsertions(folderId, browse.currentLoadedItems, deletedIds)),
-            pendsWhenUnreachable = targets.toSet(),
-        )
+        val folderId = state.value.browse.currentFolderId ?: return
+        deleteLoadedItems(folderId, itemIds)
+    }
+
+    /**
+     * 項目 [ref] を消す（[deleteLoadedItems]）。開いているフォルダでないフォルダの項目も消せる。そのフォルダの読めた項目
+     * （[BrowseState.loadedItemsOf]。溜めた削除の項目は除く）に無ければ何もしない。選んでいる項目は変えない。
+     * 書けたら元に戻せる削除にし、S3 につながらないために書けなければ、溜めた削除にする。
+     */
+    fun deleteItem(ref: ItemRef) {
+        deleteLoadedItems(ref.folderId, setOf(ref.itemId))
     }
 
     /** 選んでいる項目を、フォルダ [destinationId] の項目の末尾へ、表示の並び順に移す。選んでいる項目が無ければ何もしない。 */
@@ -335,10 +379,18 @@ class CloudMarksController(
         }
     }
 
-    /** 開いているフォルダの項目 [itemId] のタイトルを [title] に変える。タイトルは空でもよい。 */
+    /** 開いているフォルダの項目 [itemId] のタイトルを [title] に変える。開いているフォルダと [itemId] の組で `renameItem(ref, title)` を呼ぶ。 */
     fun renameItem(itemId: String, title: String) {
-        val folderId = state.value.browse.currentFolderId ?: return
-        writeOperations(listOf(ChangeItemTitle(ItemRef(folderId, itemId), title)))
+        currentItemRef(itemId)?.let { renameItem(it, title) }
+    }
+
+    /**
+     * 項目 [ref] のタイトルを [title] に変える。タイトルは空でもよい。開いているフォルダでないフォルダの項目も変えられる。
+     * そのフォルダの読めた項目（[BrowseState.loadedItemOf]。溜めた削除の項目は除く）に無ければ何もしない。
+     */
+    fun renameItem(ref: ItemRef, title: String) {
+        if (state.value.browse.loadedItemOf(ref) == null) return
+        writeOperations(listOf(ChangeItemTitle(ref, title)))
     }
 
     /** フォルダ [parentId] の子のフォルダの末尾に、名前が [name] のフォルダを作る。名前が空なら適用されない（[WriteOutcome.NotApplied]）。 */
@@ -459,8 +511,8 @@ class CloudMarksController(
      *
      * 戻し始めるときに、前の操作の結果と元に戻せる削除を消し、書いている最中の状態にする。溜めた削除があれば先に書き
      * （[writePendingDeletes]）、書けなければ戻さず、溜めた削除を書いた結果を戻した結果として扱う。
-     * 戻せたら、メインの画面へ移り、戻したあとのツリーに替え（マニフェストは GET し直さない）、開いているフォルダの項目を、
-     * 読んであるものを引き継いだうえで足りなければ読む。戻せたことは結果（[WriteOutcome.Restored]）で伝える。
+     * 戻せたら、メインの画面へ移り、戻したあとのツリーに替え（マニフェストは GET し直さない）、開いているフォルダと検索のために読む
+     * フォルダの項目を、読んであるものを引き継いだうえで足りなければ読む（[loadFolders]）。戻せたことは結果（[WriteOutcome.Restored]）で伝える。
      * 戻せなければ、以前の状態に戻す画面に残ってそのことを伝える。戻せたかどうかを確かめられなければ、メインの画面へ移り、
      * 操作を確かめられなかったときと同じく結果に出す。ツリーは戻す前のまま。
      * メインの画面へ移るときは、以前の状態に戻す画面の状態を初めの値にし、設定の画面の入力を保存済みの設定から作り直す。
@@ -517,16 +569,21 @@ class CloudMarksController(
         }
     }
 
+    /** 開いているフォルダの項目 [itemId] を、既定のブラウザで開く。開いているフォルダと [itemId] の組で `openItem(ref)` を呼ぶ。 */
+    fun openItem(itemId: String) {
+        currentItemRef(itemId)?.let { openItem(it) }
+    }
+
     /**
-     * 開いているフォルダの項目 [itemId] を、既定のブラウザで開く。開いているフォルダの読めた項目に無ければ何もしない。
-     * 選んでいる項目は変えない。
+     * 項目 [ref] を、既定のブラウザで開く。開いているフォルダでないフォルダの項目も開ける。そのフォルダの読めた項目
+     * （[BrowseState.loadedItemOf]。溜めた削除の項目は除く）に無ければ何もしない。選んでいる項目は変えない。
      *
      * この端末に入っているブラウザ（[AppState.browsers]）に既定のブラウザがあれば、メニューでそのブラウザを選んだときと同じく
      * [openInBrowser] で開く。無ければ、ブラウザを調べずに既定のブラウザで開く（[BrowserOpener.openInDefaultBrowser]）。
      * 開けたら、その項目を最後に開いた項目として覚える（[rememberOpenedItem]）。起動できなければ知らせる。
      */
-    fun openItem(itemId: String) {
-        val item = state.value.browse.currentLoadedItems.firstOrNull { it.id == itemId } ?: return
+    fun openItem(ref: ItemRef) {
+        val item = state.value.browse.loadedItemOf(ref) ?: return
         state.value.browsers.firstOrNull { it.isDefault }?.let { browser ->
             openInBrowser(browser, listOf(item))
             return
@@ -544,6 +601,15 @@ class CloudMarksController(
     /** 選んでいる項目を、表示の並び順に [browser] で開く（[openInBrowser]）。 */
     fun openSelectedItems(browser: Browser) {
         openInBrowser(browser, state.value.browse.selectedItems)
+    }
+
+    /**
+     * 項目 [ref] を [browser] で開く（[openInBrowser]）。開いているフォルダでないフォルダの項目も開ける。そのフォルダの読めた項目
+     * （[BrowseState.loadedItemOf]。溜めた削除の項目は除く）に無ければ何もしない。選んでいる項目は変えない。
+     */
+    fun openItem(ref: ItemRef, browser: Browser) {
+        val item = state.value.browse.loadedItemOf(ref) ?: return
+        openInBrowser(browser, listOf(item))
     }
 
     /**
@@ -583,34 +649,48 @@ class CloudMarksController(
     }
 
     /**
-     * 選んでいる項目が 1 つだけなら、選ぶのをやめてから、その項目を [openItemInOtherApp] で開く（[handOverSelectedItem]）。
+     * 選んでいる項目が 1 つだけなら、選ぶのをやめてから、その項目を `openItemInOtherApp(itemId)` で開く（[handOverSelectedItem]）。
      */
     fun openSelectedItemInOtherApp() {
         handOverSelectedItem(::openItemInOtherApp)
     }
 
     /**
-     * 選んでいる項目が 1 つだけなら、選ぶのをやめてから、その項目を [shareItem] で共有する（[handOverSelectedItem]）。
+     * 選んでいる項目が 1 つだけなら、選ぶのをやめてから、その項目を `shareItem(itemId)` で共有する（[handOverSelectedItem]）。
      */
     fun shareSelectedItem() {
         handOverSelectedItem(::shareItem)
     }
 
     /**
-     * 開いているフォルダの項目 [itemId] を、開けるアプリの一覧を出して開く（[ItemSharer.openInOtherApp]）。選んでいる項目は変えない。
-     * 一覧を出せたら、その項目を最後に開いた項目として覚える（[rememberOpenedItem]）。
-     * 受け取れるアプリが無いか、ほかの理由で開けなければ知らせる（[handOverItem]）。
+     * 開いているフォルダの項目 [itemId] を、開けるアプリの一覧を出して開く。開いているフォルダと [itemId] の組で
+     * `openItemInOtherApp(ref)` を呼ぶ。
      */
     fun openItemInOtherApp(itemId: String) {
-        handOverItem(itemId, onShown = { item -> rememberOpenedItem(item.id) }) { sharer, item -> sharer.openInOtherApp(item.url) }
+        currentItemRef(itemId)?.let { openItemInOtherApp(it) }
     }
 
     /**
-     * 開いているフォルダの項目 [itemId] の URL を、タイトルを添えて、共有する先のアプリの一覧を出して渡す（[ItemSharer.share]）。
-     * 選んでいる項目は変えない。最後に開いた項目は替えない。受け取れるアプリが無いか、ほかの理由で渡せなければ知らせる（[handOverItem]）。
+     * 項目 [ref] を、開けるアプリの一覧を出して開く（[ItemSharer.openInOtherApp]）。開いているフォルダでないフォルダの項目も開ける。
+     * 選んでいる項目は変えない。一覧を出せたら、その項目を最後に開いた項目として覚える（[rememberOpenedItem]）。
+     * 受け取れるアプリが無いか、ほかの理由で開けなければ知らせる（[handOverItem]）。
      */
+    fun openItemInOtherApp(ref: ItemRef) {
+        handOverItem(ref, onShown = { item -> rememberOpenedItem(item.id) }) { sharer, item -> sharer.openInOtherApp(item.url) }
+    }
+
+    /** 開いているフォルダの項目 [itemId] を共有する。開いているフォルダと [itemId] の組で `shareItem(ref)` を呼ぶ。 */
     fun shareItem(itemId: String) {
-        handOverItem(itemId) { sharer, item -> sharer.share(item.url, item.title) }
+        currentItemRef(itemId)?.let { shareItem(it) }
+    }
+
+    /**
+     * 項目 [ref] の URL を、タイトルを添えて、共有する先のアプリの一覧を出して渡す（[ItemSharer.share]）。開いているフォルダでない
+     * フォルダの項目も渡せる。選んでいる項目は変えない。最後に開いた項目は替えない。受け取れるアプリが無いか、ほかの理由で渡せなければ
+     * 知らせる（[handOverItem]）。
+     */
+    fun shareItem(ref: ItemRef) {
+        handOverItem(ref) { sharer, item -> sharer.share(item.url, item.title) }
     }
 
     /** ブラウザで開こうとして知らせたことを閉じる。 */
@@ -768,14 +848,35 @@ class CloudMarksController(
         connection.scope.launch { deletion.runIfDue(connection.settings, connection.connection.sync) }
     }
 
+    /** 開いているフォルダの項目 [itemId] と、そのフォルダの組。フォルダを開いていなければ null。 */
+    private fun currentItemRef(itemId: String): ItemRef? = state.value.browse.currentFolderId?.let { ItemRef(it, itemId) }
+
+    /**
+     * フォルダ [folderId] の読めた項目（[BrowseState.loadedItemsOf]。溜めた削除の項目は除く）のうち、ID が [itemIds] にあるものを消す。
+     * 消すものが無ければ何もしない。選んでいる項目は変えない。
+     * 書けたら、消した項目を元の位置へ戻せるようにする（[undoDelete]）。S3 につながらないために書けなければ（[isUnreachable]）、
+     * その削除を溜め（[pendDeletes]）、溜めた削除として元に戻せるようにする。
+     */
+    private fun deleteLoadedItems(folderId: String, itemIds: Set<String>) {
+        val itemsBefore = state.value.browse.loadedItemsOf(folderId)
+        val deletedIds = itemsBefore.map { it.id }.filter { it in itemIds }.toSet()
+        if (deletedIds.isEmpty()) return
+        val targets = deletedIds.map { ItemRef(folderId, it) }
+        writeOperations(
+            listOf(DeleteItems(targets)),
+            undoOnSuccess = UndoableDelete(restoringInsertions(folderId, itemsBefore, deletedIds)),
+            pendsWhenUnreachable = targets.toSet(),
+        )
+    }
+
     /**
      * [operations] を 1 回の書き込みとして書き始め、書き始めたら true を返す。操作を受け付けないとき（[AppState.canWrite]）は何もせず、
      * false を返す。
      *
      * 書き始めるときに、前の操作の結果と、元に戻せる削除を消す。溜めた削除があれば、先にそれを書き（[writePendingDeletes]）、
      * 書けなければ [operations] は書かず、溜めた削除を書いた結果を [operations] の結果として扱う。
-     * 書けたら、書いたあとのツリーに替え（マニフェストは GET し直さない）、
-     * 開いているフォルダの項目を、読んであるものを引き継いだうえで足りなければ読み、[undoOnSuccess] を元に戻せる削除にする。
+     * 書けたら、書いたあとのツリーに替え（マニフェストは GET し直さない）、開いているフォルダと検索のために読むフォルダの項目を、
+     * 読んであるものを引き継いだうえで足りなければ読み（[loadFolders]）、[undoOnSuccess] を元に戻せる削除にする。
      * [pendsWhenUnreachable] があり、S3 につながらないために書けなければ（[isUnreachable]）、それを溜め（[pendDeletes]）、
      * [undoOnSuccess] を、その回に溜めた削除として元に戻せるようにする。
      * そのほかで書けなかったか確かめられなかったときは、ツリーは書く前のままにし、[undoOnFailure] を元に戻せる削除にする。
@@ -829,7 +930,8 @@ class CloudMarksController(
      * 溜めた削除があれば、それをすべてまとめて 1 回の書き込みとして書き、結果を返す。溜めた削除が無ければ何もせず null を返す。
      *
      * 書けたら、書いたあとのツリーに替え（[BrowseState.withWrittenTree]）、書いた対象を溜めた削除から外して記録のファイルを書き直し
-     * （空になればファイルを消す）、開いているフォルダの項目を、足りなければ読む。元に戻せる削除が、書いた対象を溜めた削除なら、
+     * （空になればファイルを消す）、開いているフォルダと検索のために読むフォルダの項目を、足りなければ読む（[loadFolders]）。
+     * 元に戻せる削除が、書いた対象を溜めた削除なら、
      * S3 に書けた削除にする（[UndoableDelete.afterApplying]）。書けなければ溜めたままにし、理由をログに書く。
      * 書いている最中の状態と結果は替えない。
      */
@@ -848,7 +950,7 @@ class CloudMarksController(
             )
         }
         storePendingDeletes(connection.settings)
-        loadCurrentFolder()
+        loadFolders()
         return result
     }
 
@@ -867,7 +969,10 @@ class CloudMarksController(
         storePendingDeletes(connection.settings)
     }
 
-    /** 操作を書いた結果 [result] を状態に入れる。書けたら、書いたあとのツリーに替え、開いているフォルダの項目を読む。 */
+    /**
+     * 操作を書いた結果 [result] を状態に入れる。書けたら、書いたあとのツリーに替え、開いているフォルダと検索のために読むフォルダの項目を、
+     * 足りなければ読む（[loadFolders]）。
+     */
     private fun showWriteResult(result: WriteResult, undoOnSuccess: UndoableDelete?, undoOnFailure: UndoableDelete?) {
         when (result) {
             is WriteResult.Success -> {
@@ -881,7 +986,7 @@ class CloudMarksController(
                         ),
                     )
                 }
-                loadCurrentFolder()
+                loadFolders()
             }
             is WriteResult.Unconfirmed ->
                 updateWrite { WriteState(outcome = WriteOutcome.Unconfirmed(result.failure), undoableDelete = undoOnFailure) }
@@ -953,7 +1058,7 @@ class CloudMarksController(
                         write = WriteState(outcome = WriteOutcome.Restored(loaded.revision.lastModified)),
                     )
                 }
-                loadCurrentFolder()
+                loadFolders()
             }
             is RestoreResult.Failed -> update {
                 it.copy(
@@ -972,39 +1077,85 @@ class CloudMarksController(
         copy(screen = Screen.MAIN, revisions = RevisionsScreenState(), settings = editingStoredSettings(settings))
 
     /**
-     * マニフェストを読んだ結果 [result] をツリーに入れ、開いているフォルダの項目を読む。読めて、[clearsWriteOutcome] なら、
-     * 直前の操作の結果を消す。
+     * マニフェストを読んだ結果 [result] をツリーに入れ、開いているフォルダと検索のために読むフォルダの項目を、足りなければ読む
+     * （[loadFolders]）。読めて、[clearsWriteOutcome] なら、直前の操作の結果を消す。
      */
     private fun showTree(result: TreeReadResult, clearsWriteOutcome: Boolean = true) {
         update { current ->
             val read = current.copy(browse = current.browse.withTreeRead(result))
             if (result is TreeReadResult.Failed || !clearsWriteOutcome) read else read.copy(write = read.write.copy(outcome = null))
         }
-        loadCurrentFolder()
+        loadFolders()
     }
 
     /**
-     * 開いているフォルダの項目をまだ読んでいなければ、読んであるツリーから読む。マニフェストは GET しない。
+     * 開いているフォルダの項目（[BrowseState.folderToLoad]）と、検索を開いていれば、検索のために読む必要があるフォルダの項目
+     * （[BrowseState.foldersToLoadForSearch]）を、読んであるツリーから読む。マニフェストは GET しない。読む必要が無ければ何もしない。
      *
-     * 項目ファイルが `404` を返したら、マニフェストを一度だけ読み直し（[reload] と同じくツリーを替え、開いているノード・
-     * 開いていたフォルダ・選んでいた項目を保つ）、そのあと開いているフォルダの項目を読む。読み直したマニフェストがまだ同じファイルを
-     * 指していれば、そのフォルダは壊れているとし、もう読み直さない。
+     * 読むフォルダは、すぐに読んでいる最中にする。読むのは開いているフォルダから順に、同時に [MAX_CONCURRENT_FOLDER_READS] 本までにする。
+     * 順番を待っていたフォルダは、読み始めるとき（[loadFolder]）に読む必要が無くなっていれば読まない。ツリーが替わっていれば、
+     * 替わったツリーで読む。検索を閉じていて、開いているフォルダでもなければ、読まずに読んでいる最中から外す。
+     * 読み始めていた（GET を送った）読み込みは、検索を閉じても取り消さず、読めた結果は使う。
+     * 項目ファイルが `404` を返したら、マニフェストを読み直す（[rereadAfterMissing]）。
      */
-    private fun loadCurrentFolder() {
+    private fun loadFolders() {
         val connection = active ?: return
         val browse = state.value.browse
         val tree = browse.tree ?: return
-        val folderId = browse.folderToLoad() ?: return
-        updateBrowse { it.withFolderLoading(folderId) }
-        connection.scope.launch {
-            val result = connection.connection.sync.readFolder(tree, folderId)
-            updateBrowse { it.withFolderRead(tree.eTag, folderId, result) }
-            if (result is FolderReadResult.Missing) {
-                readTree(connection, read = { foldersToLoad ->
-                    connection.connection.sync.readAfterMissing(tree, folderId, foldersToLoad)
-                })
+        val searchFolderIds = if (browse.search != null) browse.foldersToLoadForSearch() else emptyList()
+        val folderIds = (listOfNotNull(browse.folderToLoad()) + searchFolderIds).distinct()
+        if (folderIds.isEmpty()) return
+        updateBrowse { current -> folderIds.fold(current, BrowseState::withFolderLoading) }
+        folderIds.forEach { folderId -> connection.scope.launch { loadFolder(connection, tree, folderId) } }
+    }
+
+    /**
+     * ツリー [tree] で、フォルダ [folderId] の項目を読み、結果を入れる（[BrowseState.withFolderRead]）。同時に読むフォルダが
+     * 上限（[folderReading]）に達していれば、ほかのフォルダを読み終えるまで待つ。
+     *
+     * 読み始めるときに、次のどちらかなら読まない。
+     * - ツリーが [tree] から替わっている（マニフェストが変わらない読み直しで替わったときも）。替わったツリーで読むので、状態は替えない
+     * - 検索を閉じていて、[folderId] が開いているフォルダでもない。読まずに読んでいる最中から外す（[BrowseState.withoutFolderLoading]）
+     *
+     * 項目ファイルが `404` を返したら、マニフェストを読み直す（[rereadAfterMissing]）。
+     */
+    private suspend fun loadFolder(connection: ActiveConnection, tree: LoadedTree, folderId: String) {
+        val result = folderReading.withPermit {
+            val browse = state.value.browse
+            if (browse.tree !== tree) return
+            if (browse.search == null && folderId != browse.currentFolderId) {
+                updateBrowse { it.withoutFolderLoading(folderId) }
+                return
             }
+            connection.connection.sync.readFolder(tree, folderId)
         }
+        updateBrowse { it.withFolderRead(tree.eTag, folderId, result) }
+        if (result is FolderReadResult.Missing) rereadAfterMissing(connection, tree, folderId)
+    }
+
+    /**
+     * ツリー [tree] でフォルダ [folderId] の項目ファイルが `404` を返したあとに、マニフェストを一度だけ読み直す（[reload] と同じく
+     * ツリーを替え、開いているノード・開いていたフォルダ・選んでいた項目を保つ）。読み直したマニフェストのツリーで、開いているフォルダと
+     * [folderId] の項目を一緒に読む。読み直したマニフェストがまだ同じファイルを指していれば、そのフォルダは壊れているとし、
+     * もう読み直さない。
+     *
+     * 読み直したツリーは、一緒に読んだフォルダの結果だけを持つ。そのため、読み直したマニフェストを読めた時点で項目ファイルが壊れていたか
+     * `404` を返していたフォルダ（[FolderReadResult.Broken] か [FolderReadResult.Missing]）も一緒に読み、壊れていたことを持ち越す。
+     *
+     * マニフェストを読んでいる最中は、新たに読み直さない。読み直したツリーで、まだ読めていないフォルダは、そのあとに読む（[loadFolders]）。
+     * ツリーのマニフェストの ETag が [tree] から替わっていたときも、替わったツリーで読むので、読み直さない（ETag が同じなら、
+     * [BrowseState.withFolderRead] が結果を入れるので、読み直す）。
+     */
+    private fun rereadAfterMissing(connection: ActiveConnection, tree: LoadedTree, folderId: String) {
+        val browse = state.value.browse
+        if (browse.loading || browse.tree?.eTag != tree.eTag) return
+        readTree(connection, read = { foldersToLoad ->
+            connection.connection.sync.readAfterMissing(tree, folderId) { reread ->
+                val unreadable = state.value.browse.folderReads
+                    .filterValues { it is FolderReadResult.Broken || it is FolderReadResult.Missing }.keys
+                foldersToLoad(reread) + folderId + unreadable
+            }
+        })
     }
 
     /** いまの接続を、走っている処理を取り消してから閉じ、[settings] の接続を作る。 */
@@ -1114,17 +1265,18 @@ class CloudMarksController(
     }
 
     /**
-     * 開いているフォルダの項目 [itemId] を、[handOver] でほかのアプリへ渡す。項目をほかのアプリで開く仕組みが無いか、開いているフォルダの
-     * 読めた項目に無ければ何もしない。選んでいる項目は変えない。渡し始めるときに、前に知らせたことを消す。受け取るアプリの一覧を出せたら、
-     * 渡した項目で [onShown] を呼ぶ。受け取れるアプリが無いか、ほかの理由で渡せなければ知らせる。
+     * 項目 [ref] を、[handOver] でほかのアプリへ渡す。項目をほかのアプリで開く仕組みが無いか、そのフォルダの読めた項目
+     * （[BrowseState.loadedItemOf]。溜めた削除の項目は除く）に無ければ何もしない。選んでいる項目は変えない。渡し始めるときに、
+     * 前に知らせたことを消す。受け取るアプリの一覧を出せたら、渡した項目で [onShown] を呼ぶ。受け取れるアプリが無いか、
+     * ほかの理由で渡せなければ知らせる。
      */
     private fun handOverItem(
-        itemId: String,
+        ref: ItemRef,
         onShown: (Item) -> Unit = {},
         handOver: suspend (ItemSharer, Item) -> ItemShareResult,
     ) {
         val sharer = itemSharer ?: return
-        val item = state.value.browse.currentLoadedItems.firstOrNull { it.id == itemId } ?: return
+        val item = state.value.browse.loadedItemOf(ref) ?: return
         updateBrowserNotice(null)
         scope.launch {
             when (handOver(sharer, item)) {
