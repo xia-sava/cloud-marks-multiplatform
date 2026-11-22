@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -40,6 +41,8 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
@@ -60,8 +63,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.platform.LocalDensity
@@ -80,6 +90,7 @@ import to.sava.cloudmarksmultiplatform.app.UndoableDelete
 import to.sava.cloudmarksmultiplatform.app.WriteOutcome
 import to.sava.cloudmarksmultiplatform.app.WriteState
 import to.sava.cloudmarksmultiplatform.browse.BrowseState
+import to.sava.cloudmarksmultiplatform.operations.ItemRef
 import to.sava.cloudmarksmultiplatform.sync.counts
 import to.sava.cloudmarksmultiplatform.update.AppUpdater
 
@@ -107,11 +118,13 @@ private val APP_BAR_HORIZONTAL_PADDING = 4.dp
  * @property treePaneWidth 広い画面での、ツリーの枠の幅。窓の幅に合わせて詰める前の値
  * @property treeListState ツリーのスクロール位置。広い画面のツリーの枠と、狭い画面のドロワーで同じものを使う
  * @property itemListState 開いているフォルダのリストのスクロール位置
+ * @property searchResultListState 検索の結果のスクロール位置
  */
 private data class MainPaneState(
     val treePaneWidth: MutableState<Dp>,
     val treeListState: LazyListState,
     val itemListState: LazyListState,
+    val searchResultListState: LazyListState,
 )
 
 /**
@@ -130,20 +143,29 @@ private data class MainPaneState(
  *
  * @param onReadyToExit 更新をインストーラへ渡したあとに呼ぶ（[AppUpdater.apply]）。呼ぶ側はここでアプリを終了する。デスクトップのアプリは、
  * 窓を閉じるときと同じ後始末をする
+ * @param searchShortcut 検索を開くキーの操作（[SearchShortcut]）。デスクトップのアプリが、窓で受けたキーの操作を渡すものと同じものを渡す。
+ * それで検索を開くたびに、AppBar の検索の入力欄に焦点を移す。キーの操作で検索を開かないプラットフォーム（Android）では null
  */
 @Composable
-fun CloudMarksApp(controller: CloudMarksController, updater: AppUpdater? = null, onReadyToExit: () -> Unit = {}) {
+fun CloudMarksApp(
+    controller: CloudMarksController,
+    updater: AppUpdater? = null,
+    onReadyToExit: () -> Unit = {},
+    searchShortcut: SearchShortcut? = null,
+) {
     val state by controller.state.collectAsState()
     val panes = MainPaneState(
         treePaneWidth = remember { mutableStateOf(DEFAULT_TREE_PANE_WIDTH) },
         treeListState = rememberLazyListState(),
         // フォルダを替えたら、リストを先頭から見せる
         itemListState = remember(state.browse.currentFolderId) { LazyListState() },
+        // 入力した語が替わったら、検索の結果を先頭から見せる
+        searchResultListState = remember(state.browse.search?.query) { LazyListState() },
     )
     ScaledDensity(state.displayScale) {
         MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
             Surface(modifier = Modifier.fillMaxSize().displayScaleWheel(controller)) {
-                CloudMarksScreen(state, controller, updater, onReadyToExit, panes, Modifier.safeDrawingPadding())
+                CloudMarksScreen(state, controller, updater, onReadyToExit, searchShortcut, panes, Modifier.safeDrawingPadding())
             }
         }
     }
@@ -166,6 +188,7 @@ private fun updateActionsOf(updater: AppUpdater?, canApply: Boolean, onReadyToEx
  * メインの画面の部品に渡す、いまの状態と操作の入口。
  *
  * @property shareActions 項目をほかのアプリで開く操作と共有する操作の入口。できないプラットフォームでは null
+ * @property searchShortcut 検索を開くキーの操作（[CloudMarksApp] の同じ名前の引数）。無ければ null
  */
 private data class MainScreenContent(
     val state: AppState,
@@ -173,6 +196,7 @@ private data class MainScreenContent(
     val operations: OperationActions,
     val browserActions: BrowserActions,
     val shareActions: ItemShareActions?,
+    val searchShortcut: SearchShortcut?,
 )
 
 /**
@@ -187,7 +211,9 @@ private data class MainScreenContent(
  *
  * @property topBar 最上部の AppBar（[CloudMarksTopBar]）
  * @property treePane フォルダのツリー（[FolderTreePane]）。渡した修飾を、ツリーの枠に付ける
- * @property listPane 開いているフォルダのリスト（[FolderListPane]）。渡した修飾を、リストの枠に付ける
+ * @property listPane 開いているフォルダのリスト（[FolderListPane]）。検索を開いているあいだは、代わりに検索の結果（[SearchResultsPane]）。
+ * 渡した修飾を、リストの枠に付ける。検索の結果から項目が入っているフォルダを開いたら、開いたフォルダのリストで、その項目の行が見える位置まで
+ * スクロールし、リストに焦点を移す
  */
 private class MainScreenParts(
     val topBar: @Composable (MainScreenContent) -> Unit,
@@ -201,7 +227,7 @@ private fun rememberMainScreenParts(controller: CloudMarksController): MainScree
     remember(controller) {
         MainScreenParts(
             topBar = movableContentOf { content: MainScreenContent ->
-                CloudMarksTopBar(content.state, controller, content.operations)
+                CloudMarksTopBar(content.state, controller, content.operations, content.searchShortcut)
             },
             treePane = movableContentOf { content: MainScreenContent, modifier: Modifier ->
                 FolderTreePane(
@@ -215,18 +241,38 @@ private fun rememberMainScreenParts(controller: CloudMarksController): MainScree
                 )
             },
             listPane = movableContentOf { content: MainScreenContent, modifier: Modifier ->
-                FolderListPane(
-                    browse = content.state.browse,
-                    lastOpenedItemId = content.state.lastOpenedItemId,
-                    listState = content.panes.itemListState,
-                    actions = content.operations,
-                    browserActions = content.browserActions,
-                    shareActions = content.shareActions,
-                    onOpenFolder = controller::openFolder,
-                    onSelectItem = controller::selectItem,
-                    onClearSelection = controller::clearSelection,
-                    modifier = modifier,
-                )
+                // 検索の結果から開いたフォルダのリストで、見える位置までスクロールする項目
+                var revealItemId by remember { mutableStateOf<String?>(null) }
+                if (content.state.browse.search != null) {
+                    SearchResultsPane(
+                        browse = content.state.browse,
+                        lastOpenedItemId = content.state.lastOpenedItemId,
+                        listState = content.panes.searchResultListState,
+                        actions = content.operations,
+                        browserActions = content.browserActions,
+                        shareActions = content.shareActions,
+                        onOpenFolderOf = { ref ->
+                            revealItemId = ref.itemId
+                            controller.openFolderOf(ref)
+                        },
+                        modifier = modifier,
+                    )
+                } else {
+                    FolderListPane(
+                        browse = content.state.browse,
+                        lastOpenedItemId = content.state.lastOpenedItemId,
+                        listState = content.panes.itemListState,
+                        actions = content.operations,
+                        browserActions = content.browserActions,
+                        shareActions = content.shareActions,
+                        onOpenFolder = controller::openFolder,
+                        onSelectItem = controller::selectItem,
+                        onClearSelection = controller::clearSelection,
+                        modifier = modifier,
+                        revealItemId = revealItemId,
+                        onItemRevealed = { revealItemId = null },
+                    )
+                }
             },
         )
     }
@@ -241,6 +287,7 @@ private fun rememberMainScreenParts(controller: CloudMarksController): MainScree
  * @param updater アプリの更新。状態は、設定の画面と、メインの画面の、前の起動で更新を適用できなかったことの帯
  * （[UpdateApplyFailedBanner]）の中だけで集める。null なら、設定の画面に「アプリの更新」の節を出さず、その帯も出さない
  * @param onReadyToExit 更新をインストーラへ渡したあとに呼ぶ（[CloudMarksApp] の同じ名前の引数）
+ * @param searchShortcut 検索を開くキーの操作（[CloudMarksApp] の同じ名前の引数）
  * @param modifier 画面の枠に付ける修飾。[CloudMarksApp] は、システムバー・画面の切り欠き・キーボードに重ならない余白を付ける
  */
 @Composable
@@ -249,6 +296,7 @@ private fun CloudMarksScreen(
     controller: CloudMarksController,
     updater: AppUpdater?,
     onReadyToExit: () -> Unit,
+    searchShortcut: SearchShortcut?,
     panes: MainPaneState,
     modifier: Modifier,
 ) {
@@ -267,7 +315,7 @@ private fun CloudMarksScreen(
             dragState = dragState,
             onOpenDialog = { dialog = it },
             onDeleteSelectedItems = controller::deleteSelectedItems,
-            onDeleteItem = { itemId -> controller.deleteItems(setOf(itemId)) },
+            onDeleteItem = controller::deleteItem,
             onMove = controller::moveTo,
         )
     }
@@ -276,6 +324,7 @@ private fun CloudMarksScreen(
         BrowserActions(
             browsers = state.browsers,
             onOpenItem = controller::openItem,
+            onOpenItemInBrowser = controller::openItem,
             onOpenSelectedItems = controller::openSelectedItems,
             onOpenFolderItems = controller::openFolderItems,
             onMenuOpen = controller::refreshBrowsers,
@@ -287,7 +336,7 @@ private fun CloudMarksScreen(
     val canApplyUpdate = !state.write.writing
     val updateActions = remember(updater, canApplyUpdate, onReadyToExit) { updateActionsOf(updater, canApplyUpdate, onReadyToExit) }
     val parts = rememberMainScreenParts(controller)
-    val content = MainScreenContent(state, panes, operations, browserActions, shareActions)
+    val content = MainScreenContent(state, panes, operations, browserActions, shareActions, searchShortcut)
     UndoDeleteNotice(
         undoable = state.write.undoableDelete,
         visible = state.screen == Screen.MAIN,
@@ -641,37 +690,107 @@ internal fun StatusBanner(message: UiMessage) {
 
 /**
  * 最上部の AppBar。左にハンバーガーと戻るボタン、右に読み直すボタンと歯車。
- * メインの画面で項目を選んでいるあいだは、読み直すボタンの左に、選んでいる項目を消すボタンと移すボタンを出す。
+ * メインの画面では、読み直すボタンの左に、項目の検索を開くボタン（ルーペ）を出す。ツリーを読めていないあいだは押せない（[canOpenSearch]）。
+ * メインの画面で項目を選んでいるあいだは、ルーペの左に、選んでいる項目を消すボタンと移すボタンを出す。
+ * メインの画面で検索を開いているあいだは、ハンバーガーと戻るボタンの代わりに検索を閉じるボタンを、題の代わりに検索の入力欄
+ * （[SearchField]）を出し、ルーペは出さない。
  * タッチの画面（[LocalTouchScreen]）では、メインの画面で項目を選んでいるあいだ、選ぶ状態の AppBar（[SelectionTopBar]）に替える。
  * どのボタンも、ボタンの説明をツールチップに出す。
+ *
+ * @param searchShortcut 検索を開くキーの操作。それで検索を開くたびに、検索の入力欄に焦点を移す。無ければ null
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CloudMarksTopBar(state: AppState, controller: CloudMarksController, operations: OperationActions) {
+private fun CloudMarksTopBar(
+    state: AppState,
+    controller: CloudMarksController,
+    operations: OperationActions,
+    searchShortcut: SearchShortcut?,
+) {
     val onMain = state.screen == Screen.MAIN
     val selecting = onMain && state.browse.selectedItemIds.isNotEmpty()
     if (selecting && LocalTouchScreen.current) {
         SelectionTopBar(state, controller, operations)
         return
     }
+    val search = state.browse.search?.takeIf { onMain }
     TopAppBar(
-        title = { Text(titleOf(state), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        navigationIcon = {
-            Row {
-                TooltipIconButton(Icons.Filled.Menu, TREE_PANE_DESCRIPTION, onClick = controller::toggleTreePane, enabled = onMain)
-                TooltipIconButton(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    BACK_DESCRIPTION,
-                    onClick = controller::back,
-                    enabled = state.canGoBack,
+        title = {
+            if (search != null) {
+                SearchField(
+                    query = search.query,
+                    focusRequests = searchShortcut?.focusRequests ?: 0,
+                    onQueryChange = controller::setSearchQuery,
+                    onClose = controller::closeSearch,
                 )
+            } else {
+                Text(titleOf(state), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        },
+        navigationIcon = {
+            if (search != null) {
+                TooltipIconButton(Icons.Filled.Close, CLOSE_SEARCH_DESCRIPTION, onClick = controller::closeSearch)
+            } else {
+                Row {
+                    TooltipIconButton(Icons.Filled.Menu, TREE_PANE_DESCRIPTION, onClick = controller::toggleTreePane, enabled = onMain)
+                    TooltipIconButton(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        BACK_DESCRIPTION,
+                        onClick = controller::back,
+                        enabled = state.canGoBack,
+                    )
+                }
             }
         },
         actions = {
             if (selecting) SelectedItemsButtons(state.browse, operations)
+            if (onMain && search == null) {
+                TooltipIconButton(Icons.Filled.Search, SEARCH_DESCRIPTION, onClick = controller::openSearch, enabled = state.canOpenSearch)
+            }
             TooltipIconButton(Icons.Filled.Refresh, RELOAD_DESCRIPTION, onClick = controller::reload, enabled = state.canReload)
             TooltipIconButton(Icons.Filled.Settings, SETTINGS_DESCRIPTION, onClick = controller::openSettings, enabled = onMain)
         },
+    )
+}
+
+/**
+ * 検索を開いているあいだの AppBar の、題の位置に置く 1 行の入力欄。値は入力した語 [query] で、変えたら [onQueryChange] に渡す。
+ * 空のあいだは、欄の中に案内（[SEARCH_PLACEHOLDER]）を薄く出す。欄で Esc を押すと [onClose] を呼ぶ。
+ * 出したときと、[focusRequests] が替わったときに、焦点を取る。
+ * 欄の背景は透明にして AppBar の色を見せ、文字・案内・カーソル・下線の色はテーマから取る（明るいテーマでも暗いテーマでも、AppBar の上で見える）。
+ *
+ * @param focusRequests 焦点を移すよう頼んだ回数（[SearchShortcut.focusRequests]）
+ */
+@Composable
+private fun SearchField(query: String, focusRequests: Int, onQueryChange: (String) -> Unit, onClose: () -> Unit) {
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(focusRequests) { focusRequester.requestFocus() }
+    val colors = MaterialTheme.colorScheme
+    TextField(
+        value = query,
+        onValueChange = onQueryChange,
+        textStyle = MaterialTheme.typography.bodyLarge,
+        placeholder = { Text(SEARCH_PLACEHOLDER, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        singleLine = true,
+        colors = TextFieldDefaults.colors(
+            focusedTextColor = colors.onSurface,
+            unfocusedTextColor = colors.onSurface,
+            focusedContainerColor = Color.Transparent,
+            unfocusedContainerColor = Color.Transparent,
+            cursorColor = colors.primary,
+            focusedIndicatorColor = colors.primary,
+            unfocusedIndicatorColor = colors.onSurfaceVariant,
+            focusedPlaceholderColor = colors.onSurfaceVariant,
+            unfocusedPlaceholderColor = colors.onSurfaceVariant,
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .focusRequester(focusRequester)
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown || event.key != Key.Escape) return@onPreviewKeyEvent false
+                onClose()
+                true
+            },
     )
 }
 
@@ -686,6 +805,7 @@ private fun CloudMarksTopBar(state: AppState, controller: CloudMarksController, 
 private fun SelectionTopBar(state: AppState, controller: CloudMarksController, operations: OperationActions) {
     val count = state.browse.selectedItemIds.size
     val selectedItem = state.browse.selectedItems.singleOrNull()
+    val folderId = state.browse.currentFolderId
     TopAppBar(
         title = { Text(selectionTitle(count), maxLines = 1, overflow = TextOverflow.Ellipsis) },
         navigationIcon = {
@@ -693,14 +813,15 @@ private fun SelectionTopBar(state: AppState, controller: CloudMarksController, o
         },
         actions = {
             SelectedItemsButtons(state.browse, operations)
-            if (count == 1 && selectedItem != null) {
+            // 選んでいる項目があれば、開いているフォルダがある
+            if (count == 1 && selectedItem != null && folderId != null) {
                 MoreOptionsButton(
                     sharesItems = state.sharesItems,
                     canWrite = operations.canWrite,
                     onOpenInOtherApp = controller::openSelectedItemInOtherApp,
                     onShare = controller::shareSelectedItem,
                     onRename = {
-                        operations.onOpenDialog(OperationDialog.RenameItem(selectedItem.id, selectedItem.title))
+                        operations.onOpenDialog(OperationDialog.RenameItem(ItemRef(folderId, selectedItem.id), selectedItem.title))
                         controller.clearSelection()
                     },
                 )

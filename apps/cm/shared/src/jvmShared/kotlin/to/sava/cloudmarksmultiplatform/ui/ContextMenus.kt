@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import to.sava.cloudmarksmultiplatform.browse.MoveSubject
 import to.sava.cloudmarksmultiplatform.browser.Browser
+import to.sava.cloudmarksmultiplatform.operations.ItemRef
 
 /**
  * 要素が押されたときの様子。
@@ -142,18 +143,27 @@ internal fun ContextMenu(state: ContextMenuState, content: @Composable ColumnSco
 
 /**
  * 項目のメニューの中身。押した項目の操作を呼ぶ。メニューを閉じるのは呼ぶ側。
- * 右クリックの項目のメニューと、タッチの画面の、項目の行を長押ししたときの項目のメニュー（[ItemLongPressMenuItems]）に使う。
+ * 右クリックの項目のメニュー（[ItemContextMenu]）と、タッチの画面の、項目の行を長押ししたときの項目のメニュー（[ItemLongPressMenuItems]）に使う。
+ * タイトルを変更・移動・削除の行を並べ、[onOpenFolder] があれば、最後に項目が入っているフォルダを開く行を並べる。
  *
- * @param enabled 押せるか。偽なら、どの項目も押せない
+ * @param enabled タイトルを変更・移動・削除の行を押せるか。偽なら押せない。項目が入っているフォルダを開く行は、いつでも押せる
  * @param onRename 項目のタイトルを変える
- * @param onMove 項目を移す。右クリックのメニューでは選んでいる項目、長押しのメニューでは長押しした項目
- * @param onDelete 項目を消す。右クリックのメニューでは選んでいる項目、長押しのメニューでは長押しした項目
+ * @param onMove 項目を移す。開いているフォルダのリストの右クリックのメニューでは選んでいる項目、ほかのメニューでは押した項目
+ * @param onDelete 項目を消す。開いているフォルダのリストの右クリックのメニューでは選んでいる項目、ほかのメニューでは押した項目
+ * @param onOpenFolder 項目が入っているフォルダを開く。null なら、その行を出さない
  */
 @Composable
-internal fun ItemMenuItems(enabled: Boolean, onRename: () -> Unit, onMove: () -> Unit, onDelete: () -> Unit) {
+internal fun ItemMenuItems(
+    enabled: Boolean,
+    onRename: () -> Unit,
+    onMove: () -> Unit,
+    onDelete: () -> Unit,
+    onOpenFolder: (() -> Unit)? = null,
+) {
     MenuItem(RENAME_ITEM_LABEL, enabled, onRename)
     MenuItem(MOVE_LABEL, enabled, onMove)
     MenuItem(DELETE_LABEL, enabled, onDelete)
+    onOpenFolder?.let { MenuItem(OPEN_CONTAINING_FOLDER_LABEL, enabled = true, it) }
 }
 
 /**
@@ -183,8 +193,8 @@ internal fun MoreOptionsMenuItems(
  * タッチの画面の、選ぶ状態でないときに項目の行を長押しして出す、項目のメニューの中身。長押しした項目について、押した項目の操作を呼ぶ。
  * メニューを閉じるのは呼ぶ側。
  * 先頭に、項目を既定のブラウザで開く行を並べる。項目をほかのアプリで開くことと共有することができるプラットフォーム（[sharesItems]）なら、
- * 続けてほかのアプリで開く行と共有の行を並べ（[ShareMenuItems]）、続けて右クリックの項目のメニューと同じ行（[ItemMenuItems]）を、
- * 最後に選ぶ状態に入る行を並べる。
+ * 続けてほかのアプリで開く行と共有の行を並べ（[ShareMenuItems]）、続けて右クリックの項目のメニューと同じ行（[ItemMenuItems]。
+ * [onOpenFolder] があれば、項目が入っているフォルダを開く行も）を、[onSelect] があれば、最後に選ぶ状態に入る行を並べる。
  *
  * @param sharesItems ほかのアプリで開く行と共有の行を出すか
  * @param canWrite タイトルを変更・移動・削除の行を押せるか。偽なら押せない
@@ -194,7 +204,8 @@ internal fun MoreOptionsMenuItems(
  * @param onRename 項目のタイトルを変える
  * @param onMove 項目を移す
  * @param onDelete 項目を消す
- * @param onSelect 項目だけを選び、選ぶ状態に入る
+ * @param onSelect 項目だけを選び、選ぶ状態に入る。null なら、その行を出さない
+ * @param onOpenFolder 項目が入っているフォルダを開く。null なら、その行を出さない
  */
 @Composable
 internal fun ItemLongPressMenuItems(
@@ -206,12 +217,98 @@ internal fun ItemLongPressMenuItems(
     onRename: () -> Unit,
     onMove: () -> Unit,
     onDelete: () -> Unit,
-    onSelect: () -> Unit,
+    onSelect: (() -> Unit)?,
+    onOpenFolder: (() -> Unit)? = null,
 ) {
     MenuItem(OPEN_LABEL, enabled = true, onOpen)
     ShareMenuItems(sharesItems, onOpenInOtherApp, onShare)
-    ItemMenuItems(canWrite, onRename, onMove, onDelete)
-    MenuItem(SELECT_LABEL, enabled = true, onSelect)
+    ItemMenuItems(canWrite, onRename, onMove, onDelete, onOpenFolder)
+    onSelect?.let { MenuItem(SELECT_LABEL, enabled = true, it) }
+}
+
+/**
+ * 項目の右クリックのメニュー。項目の行（[ItemRow]）の中に置く。ブラウザで開く行（[OpenInBrowserMenuItems]）と、項目のメニューの中身
+ * （[ItemMenuItems]）を並べる。行を押すと、メニューを閉じてから、その行の操作を呼ぶ。
+ * 開いているフォルダのリストでは、ブラウザで開く・移動・削除は選んでいる項目について、タイトルを変更は右クリックした項目について行う。
+ * 検索の結果では、どれも右クリックした項目について行う。
+ *
+ * @param browsers この端末に入っているブラウザ
+ * @param itemCount ブラウザで開く項目の数
+ * @param canWrite タイトルを変更・移動・削除の行を押せるか（[OperationActions.canWrite]）
+ * @param onOpenInBrowser 項目を、渡したブラウザで開く
+ * @param onRename 項目のタイトルを変える
+ * @param onMove 項目を移す
+ * @param onDelete 項目を消す
+ * @param onOpenFolder 項目が入っているフォルダを開く。null なら、その行を出さない
+ */
+@Composable
+internal fun ItemContextMenu(
+    state: ContextMenuState,
+    browsers: List<Browser>,
+    itemCount: Int,
+    canWrite: Boolean,
+    onOpenInBrowser: (Browser) -> Unit,
+    onRename: () -> Unit,
+    onMove: () -> Unit,
+    onDelete: () -> Unit,
+    onOpenFolder: (() -> Unit)? = null,
+) {
+    ContextMenu(state) {
+        OpenInBrowserMenuItems(browsers, itemCount) { browser ->
+            state.close()
+            onOpenInBrowser(browser)
+        }
+        ItemMenuItems(
+            enabled = canWrite,
+            onRename = state.closing(onRename),
+            onMove = state.closing(onMove),
+            onDelete = state.closing(onDelete),
+            onOpenFolder = onOpenFolder?.let(state::closing),
+        )
+    }
+}
+
+/**
+ * タッチの画面の、項目 [ref] の行を長押ししたときのメニュー（[ItemLongPressMenuItems]）。項目の行（[ItemRow]）の中に置く。
+ * 行を押すと、メニューを閉じてから、その行の操作を [ref] について呼ぶ。
+ *
+ * @param title 項目のタイトル。タイトルを変えるダイアログに、変える前のタイトルとして入れる
+ * @param shareActions 項目をほかのアプリで開く操作と共有する操作の入口。null なら、それらの行を出さない
+ * @param onOpen [ref] を、選ぶ状態でないときに押したときと同じに、既定のブラウザで開く
+ * @param onSelect [ref] だけを選び、選ぶ状態に入る。null なら、その行を出さない
+ * @param onOpenFolder [ref] が入っているフォルダを開く。null なら、その行を出さない
+ */
+@Composable
+internal fun ItemLongPressMenu(
+    state: ContextMenuState,
+    ref: ItemRef,
+    title: String,
+    actions: OperationActions,
+    shareActions: ItemShareActions?,
+    onOpen: () -> Unit,
+    onSelect: (() -> Unit)? = null,
+    onOpenFolder: (() -> Unit)? = null,
+) {
+    ContextMenu(state) {
+        ItemLongPressMenuItems(
+            sharesItems = shareActions != null,
+            canWrite = actions.canWrite,
+            onOpen = state.closing(onOpen),
+            onOpenInOtherApp = state.closing { shareActions?.onOpenInOtherApp(ref) },
+            onShare = state.closing { shareActions?.onShare(ref) },
+            onRename = state.closing { actions.onOpenDialog(OperationDialog.RenameItem(ref, title)) },
+            onMove = state.closing { actions.openItemMoveDialog(ref) },
+            onDelete = state.closing { actions.onDeleteItem(ref) },
+            onSelect = onSelect?.let(state::closing),
+            onOpenFolder = onOpenFolder?.let(state::closing),
+        )
+    }
+}
+
+/** メニュー [this] を閉じてから [action] を呼ぶ関数。メニューの行の操作に使う。 */
+private fun ContextMenuState.closing(action: () -> Unit): () -> Unit = {
+    close()
+    action()
 }
 
 /**

@@ -10,6 +10,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -17,6 +19,8 @@ import androidx.compose.ui.platform.WindowInfo
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
@@ -31,6 +35,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.toSize
 import kotlinx.coroutines.CoroutineDispatcher
 import org.junit.rules.TemporaryFolder
+import to.sava.cloudmarksmultiplatform.app.CloudMarksController
 import to.sava.cloudmarksmultiplatform.app.ControllerFixture
 import to.sava.cloudmarksmultiplatform.browser.FakeBrowserOpener
 import to.sava.cloudmarksmultiplatform.browser.FakeItemSharer
@@ -45,6 +50,7 @@ import to.sava.cloudmarksmultiplatform.sync.storedItems
 import to.sava.cloudmarksmultiplatform.sync.storedManifest
 import to.sava.cloudmarksmultiplatform.update.AppUpdater
 import kotlin.coroutines.ContinuationInterceptor
+import kotlin.test.assertEquals
 
 /** 画面のテストで、起動して開いているフォルダの項目が出るまで待つ時間の上限。実際の時間で数える。 */
 private const val STARTUP_TIMEOUT_MILLIS = 5_000L
@@ -74,6 +80,8 @@ private const val EDGE_INSET = 2f
  * null なら、テストの画面の大きさのまま描く
  * @param updater 画面に渡すアプリの更新。既定の null では、更新の仕組みを持たない起動のしかたとして振る舞う
  * @param onReadyToExit 画面に渡す、更新をインストーラへ渡したあとに呼ぶ関数
+ * @param searchShortcutOf コントローラから、画面に渡す検索を開くキーの操作（[SearchShortcut]）を作る。既定の null では渡さない
+ * （キーの操作で検索を開かないプラットフォームとして振る舞う）
  */
 @OptIn(ExperimentalTestApi::class)
 internal fun runCloudMarksScreenTest(
@@ -85,6 +93,7 @@ internal fun runCloudMarksScreenTest(
     containerSize: State<IntSize>? = null,
     updater: AppUpdater? = null,
     onReadyToExit: () -> Unit = {},
+    searchShortcutOf: ((CloudMarksController) -> SearchShortcut)? = null,
     block: suspend ComposeUiTest.(ControllerFixture) -> Unit,
 ) = runComposeUiTest {
     var created: ControllerFixture? = null
@@ -99,15 +108,16 @@ internal fun runCloudMarksScreenTest(
                 created = it
             }
         }
+        val searchShortcut = remember(fixture) { searchShortcutOf?.invoke(fixture.controller) }
         DisposableEffect(fixture) {
             fixture.controller.start()
             onDispose { fixture.controller.close() }
         }
         CompositionLocalProvider(LocalTouchScreen provides (touchScreen || usesTouchScreen)) {
             if (containerSize == null) {
-                CloudMarksApp(fixture.controller, updater, onReadyToExit)
+                CloudMarksApp(fixture.controller, updater, onReadyToExit, searchShortcut)
             } else {
-                SizedWindow(containerSize) { CloudMarksApp(fixture.controller, updater, onReadyToExit) }
+                SizedWindow(containerSize) { CloudMarksApp(fixture.controller, updater, onReadyToExit, searchShortcut) }
             }
         }
     }
@@ -150,6 +160,14 @@ internal fun ComposeUiTest.listFolderRow(name: String): SemanticsNodeInteraction
 @OptIn(ExperimentalTestApi::class)
 internal fun ComposeUiTest.itemRow(n: Int): SemanticsNodeInteraction = onNodeWithText(item(n).title)
 
+/** メニューの行 [labels] が、どれも出ていて、上からこの順に並んでいるか。 */
+@OptIn(ExperimentalTestApi::class)
+internal fun ComposeUiTest.assertMenuRowsInOrder(labels: List<String>) {
+    val tops = labels.map { label -> onNodeWithText(label).assertIsDisplayed().fetchSemanticsNode().boundsInRoot.top }
+    assertEquals(tops.sorted(), tops)
+    assertEquals(labels.size, tops.toSet().size)
+}
+
 /** 文が [text] の要素（メニューの行など）を、タッチで押し、描き終えるまで待つ。タッチの画面の操作は、タッチで押す。 */
 @OptIn(ExperimentalTestApi::class)
 internal fun ComposeUiTest.tapText(text: String) {
@@ -163,6 +181,27 @@ internal fun ComposeUiTest.clickItemRowWithKey(n: Int, key: Key) {
     onRoot().performKeyInput { keyDown(key) }
     itemRow(n).performMouseInput { click() }
     onRoot().performKeyInput { keyUp(key) }
+}
+
+/** 行の背景の色を見る、行の上端からの距離（画素）。行の上の余白（8 画素）の中で、文字にかからない。 */
+private const val BACKGROUND_SAMPLE_Y = 2
+
+/** マウスを動かして離れる先の、画面の下端からの距離（画素）。リストの行の無いところ。 */
+private const val BLANK_INSET = 40f
+
+/** リストの、項目 [n]（[item]）の行の背景の色。行の右寄り（文字の無いところ）の、上の余白の画素の色。 */
+@OptIn(ExperimentalTestApi::class)
+internal fun ComposeUiTest.itemRowBackground(n: Int): Color {
+    val pixels = itemRow(n).captureToImage().toPixelMap()
+    return pixels[pixels.width * 3 / 4, BACKGROUND_SAMPLE_Y]
+}
+
+/** マウスを、リストの行の無いところへ動かす。行にマウスが載っているあいだの色を、行の背景の色と見分けるため。 */
+@OptIn(ExperimentalTestApi::class)
+internal fun ComposeUiTest.moveMouseToBlank() {
+    val blank = Offset(itemRow(1).spot(RowSpot.MIDDLE).x, onRoot().fetchSemanticsNode().size.height - BLANK_INSET)
+    onRoot().performMouseInput { moveTo(blank) }
+    waitForIdle()
 }
 
 /** リストの、項目 [n]（[item]）の行の上端（根の座標）。リストに無ければ（スクロールして外れていれば）null。 */

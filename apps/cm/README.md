@@ -51,7 +51,7 @@ Kotlin Multiplatform / Compose Multiplatform で、Android と Windows Desktop �
 
 | ファイル | 受け持ち |
 |---|---|
-| `desktopApp` の `main.kt` | デスクトップのアプリのエントリポイント。多重起動を防ぎ、コントローラとアプリの更新を組み立て、記録した位置と大きさでウィンドウを開く |
+| `desktopApp` の `main.kt` | デスクトップのアプリのエントリポイント。多重起動を防ぎ、コントローラとアプリの更新を組み立て、記録した位置と大きさでウィンドウを開く。検索を開くキーの操作（Ctrl+F）は、ウィンドウで受ける |
 | `desktopApp` の `HostMain.kt` | Native Messaging のホストのエントリポイント。処理は `shared` の `host/` にある |
 | `desktopApp` の `DesktopVersion.kt` | ビルド（`generateVersionProperties`）が書いたリソースから、バージョンを読む |
 | `desktopApp/build.gradle.kts` | 配布物、ホストの起動口とホストを登録する JSON、開発版のホスト、インストーラに入れるファイル、インストーラを作るタスク（下の「開発版のホスト」「配布物のビルド」） |
@@ -69,7 +69,7 @@ Kotlin Multiplatform / Compose Multiplatform で、Android と Windows Desktop �
 | パッケージ | ソースセット | 受け持ち |
 |---|---|---|
 | 直下（`to.sava.cloudmarksmultiplatform`） | `jvmShared`・`jvmMain`・`androidMain` | アプリが端末に置くファイルの場所（`AppFiles.kt` と、`DesktopAppFiles.kt`・`AndroidAppFiles.kt`）、配布版か開発版かの見分け（`AppPath.kt`）、デスクトップのウィンドウのタイトル（`DesktopWindowTitle.kt`・`DesktopBuildTime.kt`）、Android の休止中も進む時計（`ElapsedRealtimeTimeSource.kt`） |
-| `ui/` | `jvmShared`（`actual` は `jvmMain`・`androidMain`） | Compose の画面。入口は `CloudMarksApp.kt`。メインの画面のツリーとリスト、設定の画面、以前の状態に戻す画面、ダイアログとメニュー、ドラッグして移すこと、画面の文言（`Messages.kt`） |
+| `ui/` | `jvmShared`（`actual` は `jvmMain`・`androidMain`） | Compose の画面。入口は `CloudMarksApp.kt`。メインの画面のツリーとリスト、項目の検索の結果（`SearchResultsPane.kt`）と、デスクトップの検索を開くキーの操作（`SearchShortcut.kt`）、設定の画面、以前の状態に戻す画面、ダイアログとメニュー、ドラッグして移すこと、画面の文言（`Messages.kt`） |
 | `app/` | `jvmShared`・`jvmMain`・`androidMain` | 画面の状態（`AppState.kt`・`WriteState.kt`）と、利用者の操作に応じて設定と S3 の読み書きを進めるコントローラ（`CloudMarksController.kt`）。S3 から読み直すきっかけの知らせは、デスクトップが `StorageChangeWatcher.kt`、Android が `ForegroundReturns.kt`・`NetworkAvailability.kt` |
 | `browse/` | `jvmShared` | メインの画面で開いているフォルダと選んでいる項目（`BrowseState.kt`）、ツリーの行の並び（`FolderTree.kt`）、項目の検索：照らし合わせと結果（`ItemSearch.kt`）、移すものと移動先、ドラッグを落とす位置（`MoveSubject.kt`・`MoveDrop.kt`）。Compose を使わない |
 | `operations/` | `commonMain` | データを変える操作の型（`Operations.kt`）と、ツリーの状態への適用（`ApplyOperations.kt`）。`docs/operations.md` の規則を実装する |
@@ -89,8 +89,9 @@ Kotlin Multiplatform / Compose Multiplatform で、Android と Windows Desktop �
 #### 画面の見た目や文言を直す
 
 - 画面は `ui/` にある。`CloudMarksApp.kt` が、AppBar、画面の切り替え、広い画面と狭い画面での並べ方を持つ。
-  ツリーは `FolderTreePane.kt`、リストは `FolderListPane.kt`、設定の画面は `SettingsScreen.kt` と `UpdateSection.kt`、
-  以前の状態に戻す画面は `RevisionsScreen.kt`、ダイアログは `OperationDialogs.kt`、メニューは `ContextMenus.kt`
+  ツリーは `FolderTreePane.kt`、リストは `FolderListPane.kt`、検索の結果は `SearchResultsPane.kt`（項目の行はリストと共有する）、
+  設定の画面は `SettingsScreen.kt` と `UpdateSection.kt`、以前の状態に戻す画面は `RevisionsScreen.kt`、ダイアログは `OperationDialogs.kt`、
+  メニューは `ContextMenus.kt`
 - 文言は `ui/Messages.kt` に集めてある。デスクトップと Android で違う文は `expect` にし、`Messages.jvm.kt` と
   `Messages.android.kt` に置く。設定の画面の欄の名前など一部は、それを描くファイルに直に書いてある
 - 色はテーマから取る。明るいテーマと暗いテーマは、`CloudMarksApp.kt` が端末の設定に合わせて選ぶ
@@ -108,7 +109,7 @@ Kotlin Multiplatform / Compose Multiplatform で、Android と Windows Desktop �
   （`docs/operations.md` の「原則」）
 - S3 へは `sync/OperationWriter.kt` が、`Operations.kt` と `ApplyOperations.kt` を使って書く。操作を足しても `sync/` は直さなくてよい
 - 利用者の操作から操作を組み立てて書くのは `app/CloudMarksController.kt`。画面の入口は `ui/OperationActions.kt`（AppBar・
-  リスト・ツリーからの操作）、`ui/OperationDialogs.kt`、`ui/ContextMenus.kt`
+  リスト・ツリー・検索の結果からの操作）、`ui/OperationDialogs.kt`、`ui/ContextMenus.kt`
 - 拡張からの追加のように、ホストが受けて書く操作なら、`host/HostRequest.kt` と `docs/native-messaging.md` も直す
   （下の「ホストが受けるメッセージを足す」）
 - テストは、適用を `commonTest` の `operations/` に、コントローラからの書き込みを `jvmTest` の `app/` に足す

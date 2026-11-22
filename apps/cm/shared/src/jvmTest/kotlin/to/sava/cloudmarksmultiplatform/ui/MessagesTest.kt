@@ -227,6 +227,35 @@ class MessagesTest {
         assertEquals(UiMessage("ブラウザを起動できませんでした。"), describeBrowserNotice(BrowserNotice.ShareFailed))
     }
 
+    // 項目の検索の、定数の文
+    @Test
+    fun searchConstants() {
+        assertEquals("検索", SEARCH_DESCRIPTION)
+        assertEquals("検索を閉じる", CLOSE_SEARCH_DESCRIPTION)
+        assertEquals("タイトルや URL で検索", SEARCH_PLACEHOLDER)
+        assertEquals("一致する項目はありません。", NO_SEARCH_RESULTS_NOTICE)
+        assertEquals("入っているフォルダを開く", OPEN_CONTAINING_FOLDER_LABEL)
+    }
+
+    // 検索で読めなかったフォルダの帯は、フォルダの数を入れ、数のあとに半角の空白を置く
+    @Test
+    fun unreadableFoldersNoticeHasCount() {
+        assertEquals(
+            "3 個のフォルダを読み込めなかったため、その中の項目は検索の結果に含まれていません。",
+            unreadableFoldersNotice(3),
+        )
+    }
+
+    // 検索の結果の行のフォルダの表記は、ルートフォルダ直下の項目なら「トップ」、そうでなければフォルダの名前を「 › 」（U+203A を半角の空白で
+    // 挟む）でつなぐ
+    @Test
+    fun searchResultFolderLabelJoinsNames() {
+        assertEquals("トップ", searchResultFolderLabel(emptyList()))
+        assertEquals("資料", searchResultFolderLabel(listOf("資料")))
+        assertEquals("資料 › 仕事", searchResultFolderLabel(listOf("資料", "仕事")))
+        assertEquals("a › b › c", searchResultFolderLabel(listOf("a", "b", "c")))
+    }
+
     // タッチの画面の、項目を選んでいるあいだの AppBar の題は、選んでいる数を入れる
     @Test
     fun selectionTitleHasCount() {

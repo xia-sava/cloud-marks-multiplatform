@@ -75,14 +75,6 @@ private fun ComposeUiTest.selectItemRow(n: Int) {
     tapText(SELECT_LABEL)
 }
 
-/** メニューの行 [labels] が、どれも出ていて、上からこの順に並んでいるか。 */
-@OptIn(ExperimentalTestApi::class)
-private fun ComposeUiTest.assertMenuRowsInOrder(labels: List<String>) {
-    val tops = labels.map { label -> onNodeWithText(label).assertIsDisplayed().fetchSemanticsNode().boundsInRoot.top }
-    assertEquals(tops.sorted(), tops)
-    assertEquals(labels.size, tops.toSet().size)
-}
-
 /** ダイアログの中の、文が [text] の要素。 */
 @OptIn(ExperimentalTestApi::class)
 private fun ComposeUiTest.inDialog(text: String): SemanticsNodeInteraction = onNode(hasText(text) and hasAnyAncestor(isDialog()))

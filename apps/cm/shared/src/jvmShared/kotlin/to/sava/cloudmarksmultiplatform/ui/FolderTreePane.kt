@@ -152,8 +152,8 @@ private fun ScrollToCurrentFolder(rows: List<FolderTreeRow>, currentFolderId: St
     }
 }
 
-/** キーが [key] の行が、表示の範囲に全部収まっているか。 */
-private fun LazyListState.isFullyVisible(key: String?): Boolean {
+/** キーが [key] の行が、表示の範囲に全部収まっているか。ツリーとリストが、行が見える位置までスクロールするときに使う。 */
+internal fun LazyListState.isFullyVisible(key: String?): Boolean {
     val info = layoutInfo
     val row = info.visibleItemsInfo.firstOrNull { it.key == key } ?: return false
     return row.offset >= info.viewportStartOffset && row.offset + row.size <= info.viewportEndOffset

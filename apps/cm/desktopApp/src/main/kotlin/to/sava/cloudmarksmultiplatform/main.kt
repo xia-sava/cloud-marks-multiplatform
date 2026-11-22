@@ -14,6 +14,7 @@ import to.sava.cloudmarksmultiplatform.browser.desktopBrowserOpener
 import to.sava.cloudmarksmultiplatform.logging.FileLog
 import to.sava.cloudmarksmultiplatform.settings.WindowsDpapiProtector
 import to.sava.cloudmarksmultiplatform.ui.CloudMarksApp
+import to.sava.cloudmarksmultiplatform.ui.SearchShortcut
 import to.sava.cloudmarksmultiplatform.update.desktopAppUpdater
 import to.sava.cloudmarksmultiplatform.window.InstanceLockResult
 import to.sava.cloudmarksmultiplatform.window.WindowGeometryFile
@@ -67,6 +68,8 @@ fun main() {
         scope = scope,
     )
     val updater = desktopAppUpdater(version, appFiles, fileLog::write)
+    // 検索を開くキーの操作（Ctrl+F）は、焦点がどこにあっても効くように、ウィンドウで受ける
+    val searchShortcut = SearchShortcut(controller)
     // 前の起動で記録したウィンドウの位置と大きさで開く
     val windowGeometryFile = WindowGeometryFile(appFiles.windowGeometryFile, fileLog::write)
     val restoredGeometry = windowGeometryFile.read()
@@ -91,12 +94,13 @@ fun main() {
             icon = painterResource("icon.png"),
             state = windowState,
             onCloseRequest = exit,
+            onPreviewKeyEvent = searchShortcut::onKeyEvent,
         ) {
             // あとから起動したアプリから知らせを受けたら、ウィンドウを前に出す
             LaunchedEffect(Unit) {
                 watchShowWindowRequests(appFiles.showWindowFile, fileLog::write).collect { bringWindowToFront(window) }
             }
-            CloudMarksApp(controller, updater, onReadyToExit = exit)
+            CloudMarksApp(controller, updater, onReadyToExit = exit, searchShortcut = searchShortcut)
         }
     }
 }

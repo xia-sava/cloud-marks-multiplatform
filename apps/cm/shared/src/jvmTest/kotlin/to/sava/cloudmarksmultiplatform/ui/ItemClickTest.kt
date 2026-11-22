@@ -109,6 +109,45 @@ class ItemClickTest {
         }
     }
 
+    // 検索の結果の行は、マウスでは修飾キーを押していても、長押しでも、タッチの画面の振る舞いで動かしていても開く。選ばない
+    @Test
+    fun searchResultMouseAlwaysOpens() {
+        val presses = listOf(
+            press(PointerType.Mouse),
+            press(PointerType.Mouse, ctrl = true),
+            press(PointerType.Mouse, shift = true),
+            press(PointerType.Mouse, ctrl = true, shift = true),
+        )
+        presses.forEach { press ->
+            listOf(false, true).forEach { longPress ->
+                listOf(false, true).forEach { touchScreen ->
+                    val name = "$press, 長押し: $longPress, タッチの画面: $touchScreen"
+                    assertEquals(ItemClick.Open, searchResultClickOf(press, longPress, touchScreen), name)
+                }
+            }
+        }
+    }
+
+    // 検索の結果の行は、タッチの画面の振る舞いで動かしていれば、マウスでない押下（ポインターで押していないときを含む）の長押しで
+    // 項目のメニューを出し、押下で開く。ペンでも同じ
+    @Test
+    fun searchResultTouchScreenLongPressShowsMenu() {
+        listOf(press(PointerType.Touch), press(PointerType.Stylus), null).forEach { press ->
+            assertEquals(ItemClick.Open, searchResultClickOf(press, longPress = false, touchScreen = true), "$press")
+            assertEquals(ItemClick.Menu, searchResultClickOf(press, longPress = true, touchScreen = true), "$press")
+        }
+    }
+
+    // 検索の結果の行は、タッチの画面の振る舞いで動かしていなければ、タッチの押下も長押しも、ポインターで押していないときも開く
+    @Test
+    fun searchResultWithoutTouchScreenOpens() {
+        listOf(press(PointerType.Touch), null).forEach { press ->
+            listOf(false, true).forEach { longPress ->
+                assertEquals(ItemClick.Open, searchResultClickOf(press, longPress, touchScreen = false), "$press, 長押し: $longPress")
+            }
+        }
+    }
+
     // タッチの画面の振る舞いで動かしていれば、ポインターで押していないとき（画面の読み上げの操作やキーボードなど）も、タッチと同じに扱う。
     // 選んでいる項目が無ければ押下は開き、長押しは項目のメニューを出す。選んでいる項目があるあいだは、押下も長押しも足す・外す
     @Test

@@ -31,14 +31,15 @@ import to.sava.cloudmarksmultiplatform.browse.MoveSubject
 import to.sava.cloudmarksmultiplatform.browse.canMoveTo
 import to.sava.cloudmarksmultiplatform.browse.flattenFolderTree
 import to.sava.cloudmarksmultiplatform.browse.withToggled
+import to.sava.cloudmarksmultiplatform.operations.ItemRef
 
 /** 移動先を選ぶダイアログの、ツリーの高さ。 */
 private val MOVE_DESTINATION_TREE_HEIGHT = 360.dp
 
 /** データを変える操作の、ダイアログ。 */
 internal sealed interface OperationDialog {
-    /** 開いているフォルダの項目 [itemId] のタイトルを変える。[title] は変える前のタイトル。 */
-    data class RenameItem(val itemId: String, val title: String) : OperationDialog
+    /** 項目 [ref] のタイトルを変える。開いているフォルダでないフォルダの項目も変えられる。[title] は変える前のタイトル。 */
+    data class RenameItem(val ref: ItemRef, val title: String) : OperationDialog
 
     /** フォルダ [parentId] の子のフォルダの末尾に、新しいフォルダを作る。 */
     data class NewFolder(val parentId: String) : OperationDialog
@@ -75,7 +76,7 @@ internal fun OperationDialogHost(
             allowsEmpty = true,
             canWrite = canWrite,
             onConfirm = { title ->
-                controller.renameItem(dialog.itemId, title)
+                controller.renameItem(dialog.ref, title)
                 onClose()
             },
             onDismiss = onClose,

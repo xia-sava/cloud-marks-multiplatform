@@ -1,14 +1,8 @@
 package to.sava.cloudmarksmultiplatform.ui
 
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performMouseInput
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
@@ -25,27 +19,6 @@ import kotlin.test.assertNotEquals
 /** ルートフォルダの項目を 3 つにする、起動の前の用意。 */
 private val threeRootItems: (ControllerFixture) -> Unit = {
     it.store.replaceItemsAsOtherWriter(ROOT_ID, fileId(30), (1..3).map { n -> item(n) })
-}
-
-/** 行の背景の色を見る、行の上端からの距離（画素）。行の上の余白（8 画素）の中で、文字にかからない。 */
-private const val BACKGROUND_SAMPLE_Y = 2
-
-/** マウスを動かして離れる先の、画面の下端からの距離（画素）。リストの行の無いところ。 */
-private const val BLANK_INSET = 40f
-
-/** リストの、項目 [n]（[item]）の行の背景の色。行の右寄り（文字の無いところ）の、上の余白の画素の色。 */
-@OptIn(ExperimentalTestApi::class)
-private fun ComposeUiTest.itemRowBackground(n: Int): Color {
-    val pixels = itemRow(n).captureToImage().toPixelMap()
-    return pixels[pixels.width * 3 / 4, BACKGROUND_SAMPLE_Y]
-}
-
-/** マウスを、リストの行の無いところへ動かす。行にマウスが載っているあいだの色を、行の背景の色と見分けるため。 */
-@OptIn(ExperimentalTestApi::class)
-private fun ComposeUiTest.moveMouseToBlank() {
-    val blank = Offset(itemRow(1).spot(RowSpot.MIDDLE).x, onRoot().fetchSemanticsNode().size.height - BLANK_INSET)
-    onRoot().performMouseInput { moveTo(blank) }
-    waitForIdle()
 }
 
 @OptIn(ExperimentalTestApi::class)

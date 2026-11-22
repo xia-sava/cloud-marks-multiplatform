@@ -26,9 +26,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -64,6 +66,7 @@ import to.sava.cloudmarksmultiplatform.browse.draggedItems
 import to.sava.cloudmarksmultiplatform.browse.listDrop
 import to.sava.cloudmarksmultiplatform.browse.selectionModeOf
 import to.sava.cloudmarksmultiplatform.operations.FolderNode
+import to.sava.cloudmarksmultiplatform.operations.ItemRef
 import to.sava.cloudmarksmultiplatform.storage.Item
 import to.sava.cloudmarksmultiplatform.sync.FolderReadResult
 
@@ -97,10 +100,10 @@ private const val STATUS_KEY = "status"
  * 項目を押したときの振る舞いは [itemClickOf] で決める。マウスでは、項目をクリックすると既定のブラウザで開き（選んでいる項目は変えない）、
  * Ctrl を押しながらで選ぶ項目を足す・外し、Shift を押しながらで範囲を選ぶ。項目の上では、ポインターを指の形にする。
  * タッチでは、選んでいる項目があるあいだは、押しても長押ししても足す・外す。選んでいる項目が無ければ、タッチの画面（[LocalTouchScreen]）では、
- * 押すと既定のブラウザで開き、長押しすると、押した位置にその項目の長押しのメニュー（[ItemLongPressMenuItems]。メニューの操作は
+ * 押すと既定のブラウザで開き、長押しすると、押した位置にその項目の長押しのメニュー（[ItemLongPressMenu]。メニューの操作は
  * 長押しした項目について行い、「選択」でその項目だけを選んで選ぶ状態に入る）を出す。タッチの画面でなければ、押すとその項目だけを選び、
  * 長押しで足す（選ぶ状態に入る）。タッチの画面では、キーボードや画面の読み上げの操作での押下も、タッチの押下と同じに扱う。
- * 項目を右クリックすると、選んでいなければその項目だけを選んでから、項目のメニュー（ブラウザで開く行と [ItemMenuItems]）を出す。
+ * 項目を右クリックすると、選んでいなければその項目だけを選んでから、項目のメニュー（[ItemContextMenu]）を出す。
  * 子のフォルダの行を右クリックすると、フォルダのメニュー（[FolderContextMenu]）を出す。タッチの画面では、子のフォルダの行を長押ししても出す。
  * リストに焦点があるときに Delete キーを押すと、選んでいる項目を消し、Esc キーを押すと、選ぶのをやめる。行の無いところを
  * マウスでクリックしても、選ぶのをやめる。
@@ -110,6 +113,7 @@ private const val STATUS_KEY = "status"
  * ドラッグしているあいだは、中へ移すならその行を強調し、並べ替えるなら挿入する行の境目に線を引く。ポインターがリストの上下の端にあれば、
  * その向きへスクロールし続ける（[moveDropTargets]）。ドロワーが開いているあいだ（[BrowseState.drawerOpen]）は、ドロワーに覆われた
  * このリストへは落とせない。
+ * [revealItemId] を渡したら、その項目の行が全部見える位置までスクロールし、リストに焦点を移す（[RevealItem]）。
  *
  * @param lastOpenedItemId 最後に開いた項目の ID（[to.sava.cloudmarksmultiplatform.app.AppState.lastOpenedItemId]）。
  * 開いているフォルダの項目に無ければ、どの行も強調しない。覚えていなければ null
@@ -120,6 +124,9 @@ private const val STATUS_KEY = "status"
  * @param onOpenFolder 子のフォルダを押したときに、そのフォルダを開く
  * @param onSelectItem 項目を押したときに、その項目を、渡した選び方で選ぶ
  * @param onClearSelection 選ぶのをやめる
+ * @param revealItemId 見える位置までスクロールする、開いているフォルダの項目の ID。検索の結果から、項目が入っているフォルダを開いたときに渡す。
+ * 無ければ null
+ * @param onItemRevealed [revealItemId] の項目の行までスクロールし、リストに焦点を移し終えたとき（行が無かったときも）に呼ぶ
  */
 @Composable
 internal fun FolderListPane(
@@ -133,6 +140,8 @@ internal fun FolderListPane(
     onSelectItem: (String, SelectionMode) -> Unit,
     onClearSelection: () -> Unit,
     modifier: Modifier = Modifier,
+    revealItemId: String? = null,
+    onItemRevealed: () -> Unit = {},
 ) {
     if (browse.tree == null) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -144,6 +153,13 @@ internal fun FolderListPane(
     val items = browse.currentItems
     val selectedItemIds = browse.selectedItemIds
     val focusRequester = remember { FocusRequester() }
+    val revealIndex = revealItemId?.let { itemId ->
+        (items as? FolderReadResult.Loaded)?.items
+            ?.indexOfFirst { it.id == itemId }
+            ?.takeIf { it >= 0 }
+            ?.let { children.size + it }
+    }
+    RevealItem(revealItemId, revealIndex, listState, focusRequester, onItemRevealed)
     val drag = actions.dragState
     val dropTargets = Modifier.moveDropTargets(drag, listState, enabled = !browse.drawerOpen) { hit, subject ->
         dropRowOf(hit.key)?.let { row -> browse.listDrop(row, hit.y, hit.height, subject) }
@@ -194,34 +210,30 @@ internal fun FolderListPane(
                     if (items.items.isEmpty() && children.isEmpty()) {
                         item(STATUS_KEY) { StatusText(UiMessage(EMPTY_FOLDER_NOTICE)) }
                     } else {
-                        items(items.items, key = { ITEM_KEY_PREFIX + it.id }) { item ->
-                            val selected = item.id in selectedItemIds
-                            ItemRow(
-                                item = item,
-                                selected = selected,
-                                lastOpened = item.id == lastOpenedItemId,
-                                hasSelection = selectedItemIds.isNotEmpty(),
-                                menuItemCount = if (selected) selectedItemIds.size else 1,
-                                line = markOf(DropRow.ListItem(item.id))?.line,
-                                actions = actions,
-                                browserActions = browserActions,
-                                shareActions = shareActions,
-                                onClick = { click ->
-                                    focusRequester.requestFocus()
-                                    when (click) {
-                                        ItemClick.Open -> browserActions.onOpenItem(item.id)
-                                        is ItemClick.Select -> onSelectItem(item.id, click.mode)
-                                        ItemClick.Menu -> Unit
-                                    }
-                                },
-                                onDragStart = {
-                                    browse.draggedItems(item.id)?.also {
-                                        if (item.id !in selectedItemIds) onSelectItem(item.id, SelectionMode.SINGLE)
-                                    }
-                                },
-                                onMoveSelected = { actions.openMoveDialog(browse) },
-                                onMoveItem = { actions.openItemMoveDialog(browse, item.id) },
-                            )
+                        // 開いているフォルダの項目を読めていれば、開いているフォルダがある
+                        browse.currentFolderId?.let { folderId ->
+                            items(items.items, key = { ITEM_KEY_PREFIX + it.id }) { item ->
+                                val ref = ItemRef(folderId, item.id)
+                                FolderItemRow(
+                                    ref = ref,
+                                    item = item,
+                                    browse = browse,
+                                    lastOpened = item.id == lastOpenedItemId,
+                                    line = markOf(DropRow.ListItem(item.id))?.line,
+                                    actions = actions,
+                                    browserActions = browserActions,
+                                    shareActions = shareActions,
+                                    onClick = { click ->
+                                        focusRequester.requestFocus()
+                                        when (click) {
+                                            ItemClick.Open -> browserActions.onOpenItem(ref)
+                                            is ItemClick.Select -> onSelectItem(item.id, click.mode)
+                                            ItemClick.Menu -> Unit
+                                        }
+                                    },
+                                    onSelectItem = onSelectItem,
+                                )
+                            }
                         }
                     }
                 is FolderReadResult.Broken -> item(STATUS_KEY) { StatusText(describeBrokenFolder(items.problem)) }
@@ -229,6 +241,24 @@ internal fun FolderListPane(
             }
         }
         ListVerticalScrollbar(listState, Modifier.align(Alignment.CenterEnd).fillMaxHeight())
+    }
+}
+
+/**
+ * [itemId] が替わって null でなければ、その項目の行（リストの [index] 番目の行。無ければ null）が全部見える位置までリストをスクロールし、
+ * リストに焦点を移して（[focusRequester]。選んでいる項目を Delete キーで消し、Esc キーで選ぶのをやめられるようにする）から、
+ * [onRevealed] を呼ぶ。行が既に全部見えていれば動かさない。行が無ければ、スクロールせずに焦点だけを移す。
+ * 新しく出したリストのレイアウトが済んでから、行の位置を調べる。
+ */
+@Composable
+private fun RevealItem(itemId: String?, index: Int?, listState: LazyListState, focusRequester: FocusRequester, onRevealed: () -> Unit) {
+    val currentOnRevealed by rememberUpdatedState(onRevealed)
+    LaunchedEffect(itemId) {
+        if (itemId == null) return@LaunchedEffect
+        withFrameNanos { }
+        if (index != null && !listState.isFullyVisible(ITEM_KEY_PREFIX + itemId)) listState.scrollToItem(index)
+        focusRequester.requestFocus()
+        currentOnRevealed()
     }
 }
 
@@ -387,9 +417,95 @@ internal class RepeatedOpenFilter(private val timeoutMillis: Long) {
 }
 
 /**
- * 項目の行。押す・長押し・右クリックで開くか選び（[itemClickOf]）、右クリックで項目のメニューを出し、ドラッグして移す元になる。
+ * 開いているフォルダのリストの、項目 [ref] の行（[ItemRow]）。押す・長押し・右クリックで開くか選び（[itemClickOf]）、
+ * 右クリックで項目のメニュー（[ItemContextMenu]）を出し、ドラッグして移す元になる。
+ * 選ばれていない項目を右クリックしたら、先にその項目だけを選んでから、メニューを出す。メニューのブラウザで開く・移動・削除は
+ * 選んでいる項目について、タイトルを変更は右クリックした項目について行う。
  * タッチの画面（[LocalTouchScreen]）では、選ぶ状態でないときに長押しすると、押した位置に、この項目の長押しのメニュー
- * （[ItemLongPressMenuItems]）を出す。
+ * （[ItemLongPressMenu]。「選択」でこの項目だけを選んで選ぶ状態に入る）を出す。
+ * 選んでいる行と、最後に開いた項目の行は、それぞれ違う色で強調する。
+ *
+ * @param browse メインの画面の状態。選んでいる項目と、移す項目（ドラッグして移す項目 [draggedItems] と、移動先を選ぶダイアログ）に使う
+ * @param lastOpened 最後に開いた項目か
+ * @param line ドラッグして移すものを並べ替える位置の、この行に引く線。無ければ null
+ * @param shareActions 項目をほかのアプリで開く操作と共有する操作の入口。できないプラットフォームでは null で、長押しのメニューに
+ * それらの行を出さない
+ * @param onClick 項目を押したときにすること（[ItemClick.Menu] を除く）を受け取る
+ * @param onSelectItem ドラッグを始めるときに、掴んだ項目を選んでいなければ、その項目だけを選ぶ
+ */
+@Composable
+private fun FolderItemRow(
+    ref: ItemRef,
+    item: Item,
+    browse: BrowseState,
+    lastOpened: Boolean,
+    line: DropLine?,
+    actions: OperationActions,
+    browserActions: BrowserActions,
+    shareActions: ItemShareActions?,
+    onClick: (ItemClick) -> Unit,
+    onSelectItem: (String, SelectionMode) -> Unit,
+) {
+    val selectedItemIds = browse.selectedItemIds
+    val selected = item.id in selectedItemIds
+    val hasSelection = selectedItemIds.isNotEmpty()
+    val touchScreen = LocalTouchScreen.current
+    ItemRow(
+        item = item,
+        selected = selected,
+        lastOpened = lastOpened,
+        clickOf = { press, longPress -> itemClickOf(press, longPress, hasSelection, touchScreen) },
+        onClick = onClick,
+        onMenuPress = {
+            // 選ばれていない項目を右クリックしたら、先にその項目だけを選ぶ
+            if (!selected) onClick(ItemClick.Select(SelectionMode.SINGLE))
+            browserActions.onMenuOpen()
+        },
+        contextMenu = { state ->
+            ItemContextMenu(
+                state = state,
+                browsers = browserActions.browsers,
+                itemCount = if (selected) selectedItemIds.size else 1,
+                canWrite = actions.canWrite,
+                onOpenInBrowser = browserActions.onOpenSelectedItems,
+                onRename = { actions.onOpenDialog(OperationDialog.RenameItem(ref, item.title)) },
+                onMove = { actions.openMoveDialog(browse) },
+                onDelete = actions.onDeleteSelectedItems,
+            )
+        },
+        longPressMenu = { state ->
+            ItemLongPressMenu(
+                state = state,
+                ref = ref,
+                title = item.title,
+                actions = actions,
+                shareActions = shareActions,
+                onOpen = { onClick(ItemClick.Open) },
+                onSelect = { onClick(ItemClick.Select(SelectionMode.SINGLE)) },
+            )
+        },
+        dragSource = Modifier.moveDragSource(
+            state = actions.dragState,
+            canWrite = actions.canWrite,
+            onDragStart = {
+                browse.draggedItems(item.id)?.also {
+                    if (item.id !in selectedItemIds) onSelectItem(item.id, SelectionMode.SINGLE)
+                }
+            },
+        ),
+        line = line,
+    )
+}
+
+/**
+ * 項目の行。タイトルとその右の URL を 1 行に並べ、折り返さずに、横へずらして見られるようにする。[caption] があれば、その下に小さく 1 行で出す。
+ * 開いているフォルダのリストの行（[FolderItemRow]）と、検索の結果の行（`SearchResultsPane.kt` の `SearchResultRow`）が使う。
+ * 項目の上では、ポインターを指の形にする。
+ *
+ * 押したとき（マウスのクリック、タッチの押下と長押し、キーボードや画面の読み上げの操作での押下）にすることは [clickOf] で決め、
+ * [ItemClick.Menu] なら、押した位置に長押しのメニュー（[longPressMenu]）を出し、そのほかは [onClick] に渡す。長押しのメニューは、
+ * タッチの画面（[LocalTouchScreen]）でだけ置く。右クリックでは、[onMenuPress] を呼んでから、押した位置に右クリックのメニュー
+ * （[contextMenu]）を出す。
  *
  * マウスのクリックは [onMouseClick] で受け、押してから [MOVE_DRAG_THRESHOLD] を越えて動かさずに離したときだけにする。
  * ダブルクリックしても、タッチの画面でダブルタップしても、開くのは 1 回だけにする（[RepeatedOpenFilter]。時間はダブルクリックを決める時間）。
@@ -398,35 +514,33 @@ internal class RepeatedOpenFilter(private val timeoutMillis: Long) {
  *
  * @param selected 選んでいるか。そうなら、行を強調する
  * @param lastOpened 最後に開いた項目か。そうなら、選んでいなければ、選んでいる行と違う色で控えめに強調する
- * @param hasSelection 選んでいる項目があるか
- * @param menuItemCount 項目のメニューで開く項目の数。この項目を選んでいれば選んでいる項目の数、そうでなければ 1
+ * @param clickOf 押したときの様子（ポインターで押していなければ null）と長押しかから、することを決める。マウスのクリックは、
+ * 押していた時間によらず長押しでないとして渡す
+ * @param onClick 押したときにすること（[ItemClick.Menu] を除く）を受け取る
+ * @param onMenuPress 右クリックで押したときに、右クリックのメニューを出す前に呼ぶ
+ * @param contextMenu 右クリックのメニュー。渡したメニューの状態で出す
+ * @param longPressMenu タッチの画面の、長押しのメニュー。渡したメニューの状態で出す
+ * @param dragSource ドラッグして移す元にする修飾（[moveDragSource]）。移す元にしなければ [Modifier]
  * @param line ドラッグして移すものを並べ替える位置の、この行に引く線。無ければ null
- * @param shareActions 項目をほかのアプリで開く操作と共有する操作の入口。できないプラットフォームでは null で、長押しのメニューに
- * それらの行を出さない
- * @param onClick 項目を押したときにすること（[ItemClick.Menu] を除く）を受け取る
- * @param onDragStart ドラッグを始めるときに、移す項目を決める。null なら始めない
- * @param onMoveSelected 選んでいる項目の、移動先を選ぶダイアログを開く
- * @param onMoveItem この項目の、移動先を選ぶダイアログを開く
+ * @param caption タイトルと URL の下に出す 1 行。無ければ null
  */
 @Composable
-private fun ItemRow(
+internal fun ItemRow(
     item: Item,
     selected: Boolean,
     lastOpened: Boolean,
-    hasSelection: Boolean,
-    menuItemCount: Int,
-    line: DropLine?,
-    actions: OperationActions,
-    browserActions: BrowserActions,
-    shareActions: ItemShareActions?,
+    clickOf: (press: PointerPress?, longPress: Boolean) -> ItemClick,
     onClick: (ItemClick) -> Unit,
-    onDragStart: () -> MoveSubject?,
-    onMoveSelected: () -> Unit,
-    onMoveItem: () -> Unit,
+    onMenuPress: () -> Unit,
+    contextMenu: @Composable (ContextMenuState) -> Unit,
+    longPressMenu: @Composable (ContextMenuState) -> Unit,
+    dragSource: Modifier = Modifier,
+    line: DropLine? = null,
+    caption: String? = null,
 ) {
-    val menu = rememberContextMenuState()
-    val longPressMenu = rememberContextMenuState()
-    val handleClick = { click: ItemClick -> if (click == ItemClick.Menu) longPressMenu.openAtLastPress() else onClick(click) }
+    val menuState = rememberContextMenuState()
+    val longPressMenuState = rememberContextMenuState()
+    val handleClick = { click: ItemClick -> if (click == ItemClick.Menu) longPressMenuState.openAtLastPress() else onClick(click) }
     val lastPress = remember { LastPress() }
     val touchScreen = LocalTouchScreen.current
     val doubleClickTimeoutMillis = LocalViewConfiguration.current.doubleTapTimeoutMillis
@@ -444,129 +558,62 @@ private fun ItemRow(
                     .background(background)
                     .onPointerPress { press ->
                         if (!press.secondary) {
-                            longPressMenu.recordPress(press.position)
+                            longPressMenuState.recordPress(press.position)
                             if (press.type != PointerType.Mouse) lastPress.press = press
                             return@onPointerPress
                         }
-                        // 選ばれていない項目を右クリックしたら、先にその項目だけを選ぶ
-                        if (!selected) onClick(ItemClick.Select(SelectionMode.SINGLE))
-                        browserActions.onMenuOpen()
-                        menu.open(press.position)
+                        onMenuPress()
+                        menuState.open(press.position)
                     }
                     .onMouseClick { click ->
-                        val itemClick = itemClickOf(click.press, longPress = false, hasSelection, touchScreen)
+                        val itemClick = clickOf(click.press, false)
                         val repeatedOpen = itemClick == ItemClick.Open && !openFilter.accepts(click.press.pressedAt, click.releasedAt)
                         if (!repeatedOpen) handleClick(itemClick)
                     }
                     .pointerHoverIcon(PointerIcon.Hand)
-                    .moveDragSource(state = actions.dragState, canWrite = actions.canWrite, onDragStart = onDragStart)
+                    .then(dragSource)
                     .combinedClickable(
                         onClick = {
                             val press = lastPress.take()
-                            val itemClick = itemClickOf(press, longPress = false, hasSelection, touchScreen)
+                            val itemClick = clickOf(press, false)
                             // タッチの押下は離した時刻を持たないので、押した時刻を離した時刻の代わりにする
                             val repeatedOpen = itemClick == ItemClick.Open && press != null &&
                                 !openFilter.accepts(press.pressedAt, press.pressedAt)
                             if (!repeatedOpen) handleClick(itemClick)
                         },
-                        onLongClick = { handleClick(itemClickOf(lastPress.take(), longPress = true, hasSelection, touchScreen)) },
+                        onLongClick = { handleClick(clickOf(lastPress.take(), true)) },
                     )
                     .padding(horizontal = LIST_HORIZONTAL_PADDING, vertical = LIST_ROW_VERTICAL_PADDING),
             ) {
-                // タイトルと URL は 1 つの横の並びとして、一緒にずらす
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                    Text(
-                        text = item.title,
-                        style = MaterialTheme.typography.bodyLarge,
-                        softWrap = false,
-                        maxLines = 1,
-                        modifier = Modifier.alignByBaseline(),
-                    )
-                    Spacer(Modifier.width(ITEM_URL_GAP))
-                    Text(
-                        text = item.url,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        softWrap = false,
-                        maxLines = 1,
-                        modifier = Modifier.alignByBaseline(),
-                    )
+                Column {
+                    // タイトルと URL は 1 つの横の並びとして、一緒にずらす
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                        Text(
+                            text = item.title,
+                            style = MaterialTheme.typography.bodyLarge,
+                            softWrap = false,
+                            maxLines = 1,
+                            modifier = Modifier.alignByBaseline(),
+                        )
+                        Spacer(Modifier.width(ITEM_URL_GAP))
+                        Text(
+                            text = item.url,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            softWrap = false,
+                            maxLines = 1,
+                            modifier = Modifier.alignByBaseline(),
+                        )
+                    }
+                    caption?.let {
+                        ScrollableLine(it, MaterialTheme.typography.bodySmall, Modifier.fillMaxWidth(), MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
-            ContextMenu(menu) {
-                OpenInBrowserMenuItems(browserActions.browsers, menuItemCount) { browser ->
-                    menu.close()
-                    browserActions.onOpenSelectedItems(browser)
-                }
-                ItemMenuItems(
-                    enabled = actions.canWrite,
-                    onRename = {
-                        menu.close()
-                        actions.onOpenDialog(OperationDialog.RenameItem(item.id, item.title))
-                    },
-                    onMove = {
-                        menu.close()
-                        onMoveSelected()
-                    },
-                    onDelete = {
-                        menu.close()
-                        actions.onDeleteSelectedItems()
-                    },
-                )
-            }
-            if (touchScreen) {
-                ItemLongPressMenu(
-                    state = longPressMenu,
-                    item = item,
-                    actions = actions,
-                    shareActions = shareActions,
-                    onOpen = { onClick(ItemClick.Open) },
-                    onMove = onMoveItem,
-                    onSelect = { onClick(ItemClick.Select(SelectionMode.SINGLE)) },
-                )
-            }
+            contextMenu(menuState)
+            if (touchScreen) longPressMenu(longPressMenuState)
         }
         HorizontalDivider()
-    }
-}
-
-/**
- * タッチの画面の、項目 [item] の行を長押ししたときのメニュー（[ItemLongPressMenuItems]）。行の中に置く。
- * 行を押すと、メニューを閉じてから、その行の操作を [item] について呼ぶ。
- *
- * @param shareActions 項目をほかのアプリで開く操作と共有する操作の入口。null なら、それらの行を出さない
- * @param onOpen [item] を、選ぶ状態でないときに押したときと同じに、既定のブラウザで開く
- * @param onMove [item] の、移動先を選ぶダイアログを開く
- * @param onSelect [item] だけを選び、選ぶ状態に入る
- */
-@Composable
-private fun ItemLongPressMenu(
-    state: ContextMenuState,
-    item: Item,
-    actions: OperationActions,
-    shareActions: ItemShareActions?,
-    onOpen: () -> Unit,
-    onMove: () -> Unit,
-    onSelect: () -> Unit,
-) {
-    val closing = { action: () -> Unit ->
-        {
-            state.close()
-            action()
-        }
-    }
-    ContextMenu(state) {
-        ItemLongPressMenuItems(
-            sharesItems = shareActions != null,
-            canWrite = actions.canWrite,
-            onOpen = closing(onOpen),
-            onOpenInOtherApp = closing { shareActions?.onOpenInOtherApp(item.id) },
-            onShare = closing { shareActions?.onShare(item.id) },
-            onRename = closing { actions.onOpenDialog(OperationDialog.RenameItem(item.id, item.title)) },
-            onMove = closing(onMove),
-            onDelete = closing { actions.onDeleteItem(item.id) },
-            onSelect = closing(onSelect),
-        )
     }
 }
 
@@ -665,7 +712,7 @@ private fun ScrollableLine(text: String, style: TextStyle, modifier: Modifier, c
     )
 }
 
-/** リストの、読み込み中のほか（壊れている・空・読めなかったなど）を見せる文。フォルダのリストと、戻せる時点の一覧が使う。 */
+/** リストの、読み込み中のほか（壊れている・空・読めなかったなど）を見せる文。フォルダのリストと、検索の結果と、戻せる時点の一覧が使う。 */
 @Composable
 internal fun StatusText(message: UiMessage) {
     MessageText(

@@ -17,7 +17,10 @@ import to.sava.cloudmarksmultiplatform.update.UpdateCheckFailure
 import to.sava.cloudmarksmultiplatform.update.UpdateInstallFailure
 import kotlin.time.Instant
 
-/** ルートフォルダを、ツリーと AppBar に出すときの名前。ルートフォルダの名前は空なので、代わりにこれを出す。 */
+/**
+ * ルートフォルダを、ツリーと AppBar と、検索の結果の行のフォルダの表記（[searchResultFolderLabel]）に出すときの名前。
+ * ルートフォルダの名前は空なので、代わりにこれを出す。
+ */
 internal const val ROOT_FOLDER_LABEL = "トップ"
 
 internal const val APP_TITLE = "Cloud Marks"
@@ -91,6 +94,36 @@ internal const val RELOAD_DESCRIPTION = "再読み込み"
 
 /** AppBar の、設定の画面を開くボタン。ボタンの説明とツールチップに使う。 */
 internal const val SETTINGS_DESCRIPTION = "設定"
+
+/** AppBar の、項目の検索を開くボタン。ボタンの説明とツールチップに使う。 */
+internal const val SEARCH_DESCRIPTION = "検索"
+
+/** 検索を開いているあいだの AppBar の、検索を閉じるボタン。ボタンの説明とツールチップに使う。 */
+internal const val CLOSE_SEARCH_DESCRIPTION = "検索を閉じる"
+
+/** 検索を開いているあいだの AppBar の、入力欄が空のときに欄の中に薄く出す案内。 */
+internal const val SEARCH_PLACEHOLDER = "タイトルや URL で検索"
+
+/** 検索で、入力した語に一致する項目が無いことを伝える文。 */
+internal const val NO_SEARCH_RESULTS_NOTICE = "一致する項目はありません。"
+
+/** 検索で項目を読めなかったフォルダがあるあいだ、結果の上の帯に出す文。[count] は読めなかったフォルダの数。 */
+internal fun unreadableFoldersNotice(count: Int): String =
+    "$count 個のフォルダを読み込めなかったため、その中の項目は検索の結果に含まれていません。"
+
+/** 項目が入っているフォルダを開く操作。検索の結果の行の、右クリックのメニューと、タッチの画面の長押しのメニューの項目。 */
+internal const val OPEN_CONTAINING_FOLDER_LABEL = "入っているフォルダを開く"
+
+/** 検索の結果の行の、フォルダの表記で、フォルダの名前のあいだに挟む区切り。 */
+private const val FOLDER_PATH_SEPARATOR = " › "
+
+/**
+ * 検索の結果の行の、項目が入っているフォルダの表記。[folderPath] は、ルートフォルダの子から項目が入っているフォルダまでの名前
+ * （[to.sava.cloudmarksmultiplatform.browse.ItemSearchResult.folderPath]）。ルートフォルダ直下の項目（[folderPath] が空）なら
+ * [ROOT_FOLDER_LABEL]、そうでなければ名前を [FOLDER_PATH_SEPARATOR] でつないだもの（例「資料 › 仕事」）。
+ */
+internal fun searchResultFolderLabel(folderPath: List<String>): String =
+    if (folderPath.isEmpty()) ROOT_FOLDER_LABEL else folderPath.joinToString(FOLDER_PATH_SEPARATOR)
 
 /** タッチの画面の、項目を選んでいるあいだの AppBar の題。[count] は選んでいる項目の数。 */
 internal fun selectionTitle(count: Int): String = "$count 件を選択中"
