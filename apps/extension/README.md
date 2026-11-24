@@ -118,8 +118,8 @@ root, which the build copies into each extension. The build bundles the TypeScri
 - ホストの側も同じ変更で直す（`apps/cm/README.md` の「ホストが受けるメッセージを足す」）。形が食い違えば、拡張と `apps/cm` の
   どちらかのテストが失敗する
 - 古いホストとの組み合わせに気を付ける。Firefox の拡張はアプリと別に更新されるので、新しい拡張が古いホストに送ることがある。
-  種類を足すだけなら `protocol` は上げず、古いホストはその種類を `invalidRequest` で断る。拡張は `invalidRequest` を受けたら、
-  アプリの更新を促す（`src/open-app.ts`）。リリースはアプリを先に出す（`docs/distribution.md` の「拡張の更新」「リリースの手順」）
+  種類を足すだけなら `protocol` は上げず、古いホストはその種類を `invalidRequest` で断る。断られたときの扱いは種類ごとに決める
+  （`openApp` はアプリの更新を促す。`src/open-app.ts`）。リリースは拡張を先に出す（`docs/distribution.md` の「拡張の更新」「リリースの手順」）
 
 #### manifest や権限を変える
 
