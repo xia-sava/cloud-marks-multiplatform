@@ -11,9 +11,11 @@ export interface RequestTab {
   title: string
 }
 
+/** `folder` は追加先のフォルダの ID。無ければホストがルートフォルダにする。 */
 export interface AddFolderRequest {
   protocol: 1
   type: "addFolder"
+  folder?: string
   name: string
   tabs: RequestTab[]
 }
@@ -21,6 +23,7 @@ export interface AddFolderRequest {
 export interface AddBookmarksRequest {
   protocol: 1
   type: "addBookmarks"
+  folder?: string
   tabs: RequestTab[]
 }
 
@@ -30,6 +33,12 @@ export type AddRequest = AddFolderRequest | AddBookmarksRequest
 export interface ExtensionPresentMessage {
   protocol: 1
   type: "extensionPresent"
+}
+
+/** フォルダの一覧を受け取る。 */
+export interface ListFoldersMessage {
+  protocol: 1
+  type: "listFolders"
 }
 
 /** アプリからのコマンドを受け取る。 */
@@ -54,14 +63,35 @@ export type HostErrorCode =
   | "storageUnavailable"
   | "updateRequired"
   | "dataBroken"
+  | "folderNotFound"
   | "busy"
   | "unconfirmed"
   | "invalidRequest"
   | "launchFailed"
   | "internal"
 
-/** 追加などの結果。失敗のときは画面にそのまま出す文を持つ。 */
-export type Outcome = { ok: true } | { ok: false; message: string }
+/**
+ * 失敗の結果。画面にそのまま出す文を持つ。
+ * `code` は、画面が文を出すほかに振る舞いを変える失敗（`folderNotFound`）のときだけ持つ。
+ */
+export interface Failure {
+  ok: false
+  message: string
+  code?: HostErrorCode
+}
+
+/** 追加などの結果。 */
+export type Outcome = { ok: true } | Failure
+
+/** `listFolders` の応答のフォルダ。`parent` はルートフォルダだけが `null`。 */
+export interface FolderEntry {
+  id: string
+  parent: string | null
+  name: string
+}
+
+/** `listFolders` の結果。 */
+export type FoldersOutcome = { ok: true; folders: FolderEntry[] } | Failure
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
@@ -70,17 +100,61 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * ホストの応答を結果にする。
  * 失敗は、空でない `error.message` をそのまま使う。`error.code` の有無や値は問わない。
+ * `error.code` が `folderNotFound` のときだけ、結果にも `code` を持たせる。
  * 形が合わない応答は、やり取りできなかった失敗にする。
  */
 export function interpretResponse(response: unknown): Outcome {
   if (isRecord(response)) {
     if (response.ok === true) return { ok: true }
     if (response.ok === false && isRecord(response.error)) {
-      const { message } = response.error
-      if (typeof message === "string" && message !== "") return { ok: false, message }
+      const { code, message } = response.error
+      if (typeof message === "string" && message !== "") {
+        const folderNotFound: HostErrorCode = "folderNotFound"
+        return code === folderNotFound ? { ok: false, message, code: folderNotFound } : { ok: false, message }
+      }
     }
   }
   return { ok: false, message: MESSAGES.communicationFailed }
+}
+
+function readFolderEntry(value: unknown): FolderEntry | undefined {
+  if (!isRecord(value)) return undefined
+  const { id, parent, name } = value
+  if (typeof id !== "string" || id === "" || typeof name !== "string") return undefined
+  if (parent !== null && typeof parent !== "string") return undefined
+  return { id, parent, name }
+}
+
+/**
+ * `folders` が取り決めの形なら、知っている欄だけを写した並びを返す。合わなければ undefined。
+ * 先頭だけがルートフォルダ（`parent` が `null`）で、ほかのフォルダの親は、それより前に現れる。
+ */
+function readFolders(value: unknown): FolderEntry[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined
+  const folders: FolderEntry[] = []
+  const seen = new Set<string>()
+  for (const item of value) {
+    const folder = readFolderEntry(item)
+    if (folder === undefined) return undefined
+    if ((folder.parent === null) !== (folders.length === 0)) return undefined
+    if (folder.parent !== null && !seen.has(folder.parent)) return undefined
+    seen.add(folder.id)
+    folders.push(folder)
+  }
+  return folders
+}
+
+/**
+ * `listFolders` の応答を結果にする。
+ * 失敗は `interpretResponse` と同じ。成功の応答でも、`folders` が取り決めの形でなければ、
+ * やり取りできなかった失敗にする。
+ */
+export function interpretFoldersResponse(response: unknown): FoldersOutcome {
+  const outcome = interpretResponse(response)
+  if (!outcome.ok) return outcome
+  const folders = readFolders((response as Record<string, unknown>).folders)
+  if (folders === undefined) return { ok: false, message: MESSAGES.communicationFailed }
+  return { ok: true, folders }
 }
 
 // ホストが登録されていないときに sendNativeMessage が返す誤りの書き出し。

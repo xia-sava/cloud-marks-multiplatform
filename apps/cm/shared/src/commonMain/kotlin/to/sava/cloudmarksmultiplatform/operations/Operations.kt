@@ -30,16 +30,28 @@ data class NewItem(
  */
 sealed interface Operation
 
-/** 複数の URL を、ルートフォルダの子のフォルダの末尾に作る新しいフォルダにまとめて追加する。[name] は空でない。 */
+/**
+ * 複数の URL を、[parentId] の子のフォルダの末尾に作る新しいフォルダにまとめて追加する。[name] は空でない。
+ *
+ * [parentId] が null なら、親はルートフォルダになる（ルートフォルダの ID を、読む前には決められない呼び出し側のため）。
+ * 親が無ければ適用しない。
+ */
 data class AddFolder(
     val folderId: String,
+    val parentId: String?,
     val name: String,
     val items: List<NewItem>,
     val added: Instant,
 ) : Operation
 
-/** URL を、ルートフォルダの項目の末尾に入力の順に追加する。 */
+/**
+ * URL を、[destinationId] のフォルダの項目の末尾に入力の順に追加する。
+ *
+ * [destinationId] が null なら、追加先はルートフォルダになる（ルートフォルダの ID を、読む前には決められない呼び出し側のため）。
+ * 追加先が無ければ適用しない。
+ */
 data class AddBookmarks(
+    val destinationId: String?,
     val items: List<NewItem>,
     val added: Instant,
 ) : Operation
@@ -104,7 +116,7 @@ data class DeleteFolder(
 fun requiredFolders(state: TreeState, operation: Operation): Set<String> =
     when (operation) {
         is AddFolder, is CreateFolder, is MoveFolder, is RenameFolder, is DeleteFolder -> emptySet()
-        is AddBookmarks -> setOf(state.rootId)
+        is AddBookmarks -> setOf(operation.destinationId ?: state.rootId)
         is DeleteItems -> operation.targets.map { it.folderId }
         is InsertItems -> listOf(operation.folderId)
         is MoveItems -> operation.targets.map { it.folderId } + operation.destinationId

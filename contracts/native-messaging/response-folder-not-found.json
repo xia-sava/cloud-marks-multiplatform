@@ -1,0 +1,7 @@
+{
+  "ok": false,
+  "error": {
+    "code": "folderNotFound",
+    "message": "追加先のフォルダが見つかりませんでした。追加先を選び直してください。"
+  }
+}

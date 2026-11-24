@@ -67,15 +67,17 @@ root, which the build copies into each extension. The build bundles the TypeScri
 | ファイル | 受け持ち |
 |---|---|
 | `src/popup.html`・`src/popup.css` | ポップアップの部品と見た目。文言は持たず、`popup.ts` が入れる |
-| `src/popup.ts` | ポップアップの振る舞い。追加の要求はバックグラウンドへ渡し、アプリを開く要求はバックグラウンドを通さずにホストへ送る |
-| `src/form.ts` | ポップアップのフォームの決まり。既定の動作、名前の欄、OK を押せるか、ホストへ送る追加の要求の組み立て |
+| `src/popup.ts` | ポップアップの振る舞い。追加の要求はバックグラウンドへ渡し、フォルダの一覧（追加先の欄）とアプリを開く要求はバックグラウンドを通さずにホストへ送る |
+| `src/form.ts` | ポップアップのフォームの決まり。既定の動作、名前の欄、OK を押せるか、ホストへ送る追加の要求の組み立て（追加先の `folder` を含む） |
+| `src/folders.ts` | フォルダの一覧の要求（`listFolders`）を送る。追加先の欄の選択肢の組み立てと、選ぶものの決め方 |
+| `src/last-folder.ts` | 前回の追加先（フォルダの ID と名前）を `storage.local` に覚え、読む |
 | `src/selected-tabs.ts` | 追加の対象にする、いまのウィンドウで選択しているタブ |
 | `src/background.ts` | バックグラウンドの入口。ポップアップからのポート、インストールとブラウザの起動、タブの変化を受ける |
-| `src/connection.ts` | ポップアップからの追加の要求をホストへ送り、結果をポップアップへ返す。ポップアップが閉じていて失敗したら、`failure-state.ts` に残す |
-| `src/port-messages.ts` | ポップアップとバックグラウンドのあいだのポートの名前と、受け渡すメッセージの形 |
+| `src/connection.ts` | ポップアップからの追加の要求をホストへ送り、結果をポップアップへ返す。ポップアップが閉じていて失敗したら、`failure-state.ts` に残す。成功したら、追加先を `last-folder.ts` で覚えてから結果を返す（ポップアップが閉じていても） |
+| `src/port-messages.ts` | ポップアップとバックグラウンドのあいだのポートの名前と、受け渡すメッセージの形（追加の要求と追加先、結果） |
 | `src/failure-state.ts` | ポップアップが閉じたあとの失敗を、ツールバーのボタンの `!` と説明に残し、次に開いたときに取り出す |
-| `src/protocol.ts` | ホストとやり取りするメッセージの型、ホストの名前、応答の解釈、送れなかったときの文 |
-| `src/send.ts` | `runtime.sendNativeMessage` でホストへ送り、応答を結果にする |
+| `src/protocol.ts` | ホストとやり取りするメッセージの型、ホストの名前、応答の解釈（`listFolders` の `folders` を含む）、送れなかったときの文 |
+| `src/send.ts` | `runtime.sendNativeMessage` でホストへ送り、応答を（差し替えた解釈で）結果にする |
 | `src/presence.ts` | 拡張が入っていることの知らせ（`extensionPresent`）を送る |
 | `src/command.ts` | アプリからのコマンド。呼び出しの URL からトークンを読み、`takeCommand` の応答をコマンドとして読む |
 | `src/open-tabs.ts` | 呼び出しの URL を開いたタブを見つけ、ホストからコマンドを受け取り、そのとおりにタブを開く |
@@ -105,13 +107,14 @@ root, which the build copies into each extension. The build bundles the TypeScri
   （`apps/cm` の `shared` の `host/HostErrors.kt`）
 - ポップアップの振る舞いと、拡張が出す文の一部は `docs/native-messaging.md` の「拡張の振る舞い」に書いてある。変えたら、こちらも直す
 - フォームの決まりのテストは `src/form.test.ts`
+- 追加先の欄（選択肢の並べ方と、選ぶフォルダの決め方）の決まりは `src/folders.ts`、そのテストは `src/folders.test.ts`
 
 #### ホストへ送るメッセージを足す
 
 - まず `docs/native-messaging.md` の「拡張から送るもの」に種類を足し、`contracts/native-messaging/` に見本を足して、
   その `README.md` の表にも載せる
 - 拡張では、`src/protocol.ts` にメッセージの型を足し、`src/send.ts` の送れる要求に加え、送る処理を置く
-  （`src/presence.ts` や `src/open-app.ts` に倣う）。テストで、送るメッセージが見本と同じ形であることを確かめる
+  （`src/presence.ts` や `src/open-app.ts`、応答の形が違うなら `src/folders.ts` に倣う）。テストで、送るメッセージが見本と同じ形であることを確かめる
 - ホストの側も同じ変更で直す（`apps/cm/README.md` の「ホストが受けるメッセージを足す」）。形が食い違えば、拡張と `apps/cm` の
   どちらかのテストが失敗する
 - 古いホストとの組み合わせに気を付ける。Firefox の拡張はアプリと別に更新されるので、新しい拡張が古いホストに送ることがある。

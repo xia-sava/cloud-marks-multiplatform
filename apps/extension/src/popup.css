@@ -42,12 +42,17 @@ fieldset {
   margin-bottom: 12px;
 }
 
-.field input {
+.field input,
+.field select {
   box-sizing: border-box;
   width: 100%;
   margin-top: 4px;
   padding: 4px 6px;
   font: inherit;
+}
+
+#folder-status {
+  margin: 4px 0 0;
 }
 
 .buttons {
@@ -96,6 +101,7 @@ fieldset {
   margin-bottom: 12px;
 }
 
+#folder-status:empty,
 #status:empty,
 #error:empty {
   display: none;

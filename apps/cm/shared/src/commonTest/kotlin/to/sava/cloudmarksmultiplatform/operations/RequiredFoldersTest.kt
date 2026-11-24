@@ -12,8 +12,13 @@ class RequiredFoldersTest {
     fun requiredFoldersPerOperation() {
         val newItem = NewItem(itemId(401), "https://example.com/", "t")
         val cases = mapOf(
-            "フォルダとして追加" to (AddFolder(folderId(50), "n", listOf(newItem), ADDED) to emptySet()),
-            "ブックマークとして追加" to (AddBookmarks(listOf(newItem), ADDED) to setOf(ROOT)),
+            "フォルダとして追加" to (AddFolder(folderId(50), null, "n", listOf(newItem), ADDED) to emptySet()),
+            "フォルダとして追加（親を指定）" to (AddFolder(folderId(50), FOLDER_A, "n", listOf(newItem), ADDED) to emptySet()),
+            "ブックマークとして追加" to (AddBookmarks(null, listOf(newItem), ADDED) to setOf(ROOT)),
+            "ブックマークとして追加（ルートフォルダを指定）" to (AddBookmarks(ROOT, listOf(newItem), ADDED) to setOf(ROOT)),
+            "ブックマークとして追加（追加先を指定）" to (AddBookmarks(FOLDER_A, listOf(newItem), ADDED) to setOf(FOLDER_A)),
+            "ブックマークとして追加（項目を持たない追加先）" to (AddBookmarks(FOLDER_C, listOf(newItem), ADDED) to setOf(FOLDER_C)),
+            "ブックマークとして追加（ツリーに無い追加先）" to (AddBookmarks(folderId(99), listOf(newItem), ADDED) to emptySet()),
             "項目の削除" to (
                 DeleteItems(listOf(ItemRef(FOLDER_A, A_ITEM_1), ItemRef(FOLDER_A, A_ITEM_2), ItemRef(FOLDER_B, B_ITEM_1))) to
                     setOf(FOLDER_A, FOLDER_B)
@@ -45,7 +50,7 @@ class RequiredFoldersTest {
     @Test
     fun requiredFoldersOfSequenceIsUnion() {
         val operations = listOf(
-            AddBookmarks(listOf(NewItem(itemId(401), "https://example.com/", "t")), ADDED),
+            AddBookmarks(null, listOf(NewItem(itemId(401), "https://example.com/", "t")), ADDED),
             ChangeItemTitle(ItemRef(FOLDER_B, B_ITEM_1), "t"),
             DeleteFolder(FOLDER_A),
         )
@@ -58,7 +63,7 @@ class RequiredFoldersTest {
     @Test
     fun applyingNeedsOnlyRequiredFolders() {
         val operations = listOf(
-            AddBookmarks(listOf(NewItem(itemId(401), "https://example.com/", "t")), ADDED),
+            AddBookmarks(null, listOf(NewItem(itemId(401), "https://example.com/", "t")), ADDED),
             MoveItems(listOf(ItemRef(FOLDER_A, A_ITEM_1)), ROOT, null),
             ChangeItemTitle(ItemRef(FOLDER_A, A_ITEM_2), "new"),
             DeleteFolder(FOLDER_B),

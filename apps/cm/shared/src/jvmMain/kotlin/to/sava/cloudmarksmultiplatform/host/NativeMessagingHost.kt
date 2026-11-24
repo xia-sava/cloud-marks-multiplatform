@@ -16,7 +16,9 @@ import to.sava.cloudmarksmultiplatform.settings.toSettings
 import to.sava.cloudmarksmultiplatform.storage.newId
 import to.sava.cloudmarksmultiplatform.sync.InMemorySyncCache
 import to.sava.cloudmarksmultiplatform.sync.SyncCache
+import to.sava.cloudmarksmultiplatform.sync.TreeReadResult
 import to.sava.cloudmarksmultiplatform.sync.WriteResult
+import to.sava.cloudmarksmultiplatform.sync.readOnlyFailure
 import to.sava.cloudmarksmultiplatform.sync.writeConfirming
 import java.io.IOException
 import java.io.InputStream
@@ -44,9 +46,13 @@ internal typealias OpenConnection =
  *
  * 追加は、要求を検証し、アプリの設定を読み、操作を組み立てて 1 回の書き込みとして S3 へ書く。書けたかどうかを確かめられなければ、
  * 同じ操作でもう一度だけ書く。マニフェストのヘッダーの `updatedBy` は [HOST_UPDATED_BY]。
+ * 要求の `folder` のフォルダが無ければ、何も書かずに `folderNotFound` を返す。
  * キャッシュはメモリの中だけに持ち、ローカルキャッシュは読みも書きもしない。
  * 書けたとき、または書けたかどうかを確かめられなかったときは、[AppFiles.storageChangedFile] を書き換えて、
  * デスクトップのアプリに知らせる。書き換えられなくても、ログに書くだけで応答は変えない。
+ *
+ * フォルダの一覧（`listFolders`）は、設定を読み、S3 のマニフェストだけを読んで、フォルダの並びを返す。
+ * 追加と同じく、キャッシュはメモリの中だけに持つ。何も書かず、[AppFiles.storageChangedFile] も書き換えない。
  *
  * 失敗は、その詳細を [log] に書く。認証情報と、要求の中の URL・タイトルは書かない。
  *
@@ -100,6 +106,7 @@ internal class NativeMessagingHost(
         }
         return when (request) {
             is HostRequest.Add -> add(request)
+            HostRequest.ListFolders -> listFolders()
             HostRequest.ExtensionPresent -> recordExtensionPresent()
             is HostRequest.TakeCommand -> HostResponse.CommandTaken(takeCommandFile(appFiles.commandDirectory, request.token, log))
             HostRequest.OpenApp -> openApp()
@@ -144,24 +151,68 @@ internal class NativeMessagingHost(
         return HostResponse.Ok
     }
 
-    /** 追加の要求 [request] を、S3 へ書く。 */
-    private suspend fun add(request: HostRequest.Add): HostResponse {
-        val settings = when (val read = settingsFile.read()) {
+    /** 保存済みの設定を読む。読めなければ、ログに書いた失敗の応答を持つ。 */
+    private fun readSettings(): HostSettings =
+        when (val read = settingsFile.read()) {
             is SettingsReadResult.Found ->
-                read.settings.takeIf { it.isComplete() } ?: return failed(SETTINGS_MISSING_ERROR, "設定に未入力の項目がある")
-            SettingsReadResult.NotFound -> return failed(SETTINGS_MISSING_ERROR, "設定のファイルが無い")
+                read.settings.takeIf { it.isComplete() }?.let { HostSettings.Ready(it) }
+                    ?: HostSettings.Unavailable(failed(SETTINGS_MISSING_ERROR, "設定に未入力の項目がある"))
+            SettingsReadResult.NotFound -> HostSettings.Unavailable(failed(SETTINGS_MISSING_ERROR, "設定のファイルが無い"))
             is SettingsReadResult.Corrupt, is SettingsReadResult.Undecryptable, is SettingsReadResult.Failed ->
-                return failed(SETTINGS_UNREADABLE_ERROR, "設定を読めなかった: $read")
+                HostSettings.Unavailable(failed(SETTINGS_UNREADABLE_ERROR, "設定を読めなかった: $read"))
+        }
+
+    /**
+     * 追加の要求 [request] を、S3 へ書く。
+     *
+     * 追加先のフォルダが無くて操作を適用できなかったときは、何も書かず、[AppFiles.storageChangedFile] も書き換えずに、
+     * [FOLDER_NOT_FOUND_ERROR] を返す。
+     */
+    private suspend fun add(request: HostRequest.Add): HostResponse {
+        val settings = when (val read = readSettings()) {
+            is HostSettings.Ready -> read.settings
+            is HostSettings.Unavailable -> return read.response
         }
         val operation = request.toOperation(added = clock.now(), generateId = generateId)
         val result = openConnection(settings, InMemorySyncCache(), HOST_UPDATED_BY, TimeSource.Monotonic).use { connection ->
             connection.sync.writeConfirming(listOf(operation))
         }
-        if (result !is WriteResult.Failed) notifyStorageChanged()
+        val folderNotFound = result is WriteResult.Success && result.isFolderNotFound()
+        if (result !is WriteResult.Failed && !folderNotFound) notifyStorageChanged()
         return when (val response = hostResponseOf(result)) {
             is HostResponse.Failed -> failed(response.error, describeWriteFailure(result))
-            HostResponse.Ok, is HostResponse.CommandTaken -> response
+            HostResponse.Ok, is HostResponse.CommandTaken, is HostResponse.Folders -> response
         }
+    }
+
+    /**
+     * フォルダの一覧を返す。S3 のマニフェストだけを読み（項目ファイルは読まない）、フォルダの行をマニフェストの順で返す。
+     * マニフェストが読み書きできるものでなければ、追加と同じ失敗にする。応答が [MAX_RESPONSE_BYTES] を超えるときは [INTERNAL_ERROR]。
+     * [AppFiles.storageChangedFile] は書き換えない。
+     */
+    private suspend fun listFolders(): HostResponse {
+        val settings = when (val read = readSettings()) {
+            is HostSettings.Ready -> read.settings
+            is HostSettings.Unavailable -> return read.response
+        }
+        val result = openConnection(settings, InMemorySyncCache(), HOST_UPDATED_BY, TimeSource.Monotonic).use { connection ->
+            connection.sync.read()
+        }
+        val manifest = when (result) {
+            is TreeReadResult.Readable -> result.tree.manifest
+            is TreeReadResult.ReadOnly -> {
+                val failure = readOnlyFailure(result.tree.manifest)
+                return failed(hostErrorOf(failure), "フォルダの一覧を読めなかった: $failure")
+            }
+            is TreeReadResult.Failed ->
+                return failed(hostErrorOf(result.failure), "フォルダの一覧を読めなかった: ${result.failure}")
+        }
+        val response = HostResponse.Folders(manifest.folders.map { HostFolder(id = it.id, parent = it.parent, name = it.name) })
+        val responseBytes = encodeHostResponse(response).size
+        if (responseBytes > MAX_RESPONSE_BYTES) {
+            return failed(INTERNAL_ERROR, "フォルダの一覧の応答（$responseBytes バイト）が上限を超えた")
+        }
+        return response
     }
 
     /** [AppFiles.storageChangedFile] を、いまの時刻を中身にして書き換える。書き換えられなければ、ログに書く。 */
@@ -178,6 +229,15 @@ internal class NativeMessagingHost(
         log("$HOST_LOG_PREFIX$detail")
         return HostResponse.Failed(error)
     }
+}
+
+/** ホストが読んだ、保存済みの設定。 */
+private sealed interface HostSettings {
+    /** 読めた。入力が要る欄は、どれも埋まっている。 */
+    class Ready(val settings: ConnectionSettings) : HostSettings
+
+    /** 読めなかった。[response] は、失敗の応答。 */
+    class Unavailable(val response: HostResponse) : HostSettings
 }
 
 /** アプリの設定の画面で入力が要る欄が、どれも埋まっているか。 */

@@ -96,8 +96,27 @@ describe("buildRequest", () => {
       { url: "https://example.com/articles/1", title: "記事のタイトル" },
       { url: "https://example.org/", title: "" },
     ]
-    const request = buildRequest("addFolder", "2026-11-16 21:30:15", tabs)
+    const request = buildRequest("addFolder", "2026-11-16 21:30:15", tabs, "7d4c1e2a-3b5f-4a6d-9e8c-1f2a3b4c5d6e")
     expect(JSON.parse(JSON.stringify(request))).toEqual(contract("add-folder.json"))
+  })
+
+  it("追加先を渡さなければ、folder を持たない", () => {
+    const tabs = [{ url: "https://example.com/", title: "A" }]
+    expect(buildRequest("addFolder", "名前", tabs)).not.toHaveProperty("folder")
+    expect(buildRequest("addBookmarks", "A", tabs)).not.toHaveProperty("folder")
+    expect(buildRequest("addBookmarks", "", [...tabs, ...tabs])).not.toHaveProperty("folder")
+  })
+
+  it("ブックマークの要求も、追加先を folder に入れる", () => {
+    const one = [{ url: "https://example.com/", title: "A" }]
+    expect(buildRequest("addBookmarks", "B", one, "f1")).toEqual({
+      protocol: 1,
+      type: "addBookmarks",
+      folder: "f1",
+      tabs: [{ url: "https://example.com/", title: "B" }],
+    })
+    const two = [...one, { url: "https://example.org/", title: "C" }]
+    expect(buildRequest("addBookmarks", "", two, "f1")).toMatchObject({ type: "addBookmarks", folder: "f1", tabs: two })
   })
 
   it("タブが 1 つのブックマークの要求は、名前の欄の値をタイトルにして見本と同じ JSON になる", () => {

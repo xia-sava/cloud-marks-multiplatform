@@ -98,9 +98,9 @@ class TreeStateTest {
     fun entriesAfterAddFolderCarryFileIdAndCountOrNull() {
         val withItems = applyOne(
             SAMPLE_STATE,
-            AddFolder(folderId(50), "n", listOf(NewItem(itemId(401), "https://example.com/1", "t")), ADDED),
+            AddFolder(folderId(50), null, "n", listOf(NewItem(itemId(401), "https://example.com/1", "t")), ADDED),
         )
-        val withoutItems = applyOne(SAMPLE_STATE, AddFolder(folderId(51), "n", emptyList(), ADDED))
+        val withoutItems = applyOne(SAMPLE_STATE, AddFolder(folderId(51), null, "n", emptyList(), ADDED))
 
         assertEquals(
             FolderEntry(folderId(50), ROOT, "n", fileId(90), 1),

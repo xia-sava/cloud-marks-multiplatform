@@ -37,6 +37,7 @@ private const val LAUNCH_FAILED_MESSAGE = "Cloud Marks を開けませんでし�
 private const val DEV_HOST_LAUNCH_MESSAGE = "開発版の Cloud Marks は、拡張機能から開けません。"
 private const val STORAGE_OTHER_MESSAGE = "S3 とのやり取りでエラーが起きたため、追加できませんでした。"
 private const val INTERNAL_MESSAGE = "エラーが起きたため、追加できませんでした。"
+private const val FOLDER_NOT_FOUND_MESSAGE = "追加先のフォルダが見つかりませんでした。追加先を選び直してください。"
 
 class HostErrorsTest {
     // S3 の読み書きの失敗は、種類ごとに決まった code と文言になる
@@ -73,9 +74,24 @@ class HostErrorsTest {
             LAUNCH_FAILED_ERROR to ("launchFailed" to LAUNCH_FAILED_MESSAGE),
             DEV_HOST_LAUNCH_ERROR to ("launchFailed" to DEV_HOST_LAUNCH_MESSAGE),
             INTERNAL_ERROR to ("internal" to INTERNAL_MESSAGE),
+            FOLDER_NOT_FOUND_ERROR to ("folderNotFound" to FOLDER_NOT_FOUND_MESSAGE),
         )
 
         cases.forEach { (error, expected) -> assertEquals(expected, error.code.value to error.message) }
+    }
+
+    // 追加先のフォルダが無くて適用できなかった操作は、folderNotFound にする。ほかの理由で適用できなかった操作が
+    // 一緒にあっても、folderNotFound を優先する
+    @Test
+    fun destinationNotFoundIsFolderNotFound() {
+        val missing = OperationResult(ADD_FOLDER, OperationStatus.NotApplied(NotAppliedReason.DestinationNotFound))
+        val emptyName = OperationResult(ADD_FOLDER, OperationStatus.NotApplied(NotAppliedReason.EmptyName))
+
+        assertEquals(HostResponse.Failed(FOLDER_NOT_FOUND_ERROR), hostResponseOf(WriteResult.Success(TREE, listOf(missing))))
+        assertEquals(
+            HostResponse.Failed(FOLDER_NOT_FOUND_ERROR),
+            hostResponseOf(WriteResult.Success(TREE, listOf(emptyName, missing))),
+        )
     }
 
     // 書けて、適用できなかった操作が無ければ、成功の応答になる。適用済みだった操作も成功に数える
@@ -112,7 +128,7 @@ class HostErrorsTest {
     }
 
     private companion object {
-        val ADD_FOLDER = AddFolder("folder", "name", emptyList(), Instant.parse("2026-11-16T12:34:56.789Z"))
+        val ADD_FOLDER = AddFolder("folder", null, "name", emptyList(), Instant.parse("2026-11-16T12:34:56.789Z"))
         val TREE = initialManifest().let { LoadedTree(it, "\"etag\"", it.toTreeState(), emptyMap()) }
     }
 }

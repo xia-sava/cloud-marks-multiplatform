@@ -129,16 +129,20 @@ private fun applied(state: TreeState, skippedTargets: List<ItemRef> = emptyList(
 private fun TreeState.addFolder(operation: AddFolder): Step {
     if (operation.folderId in folders) return alreadyApplied()
     if (operation.name.isEmpty()) return notApplied(NotAppliedReason.EmptyName)
+    val parentId = operation.parentId ?: rootId
+    if (parentId !in folders) return notApplied(NotAppliedReason.DestinationNotFound)
     val added = operation.added.truncatedToMilliseconds()
     val newItems = operation.items.distinctBy { it.id }.map { Item(it.id, it.url, it.title, added) }
     return applied(
-        withFolderAdded(operation.folderId, rootId, operation.name, before = null)
+        withFolderAdded(operation.folderId, parentId, operation.name, before = null)
             .withLoadedItems(operation.folderId, newItems),
     )
 }
 
 private fun TreeState.addBookmarks(operation: AddBookmarks): Step {
-    val current = itemsOf(rootId)
+    val destinationId = operation.destinationId ?: rootId
+    if (destinationId !in folders) return notApplied(NotAppliedReason.DestinationNotFound)
+    val current = itemsOf(destinationId)
     val presentIds = current.map { it.id }.toSet()
     val added = operation.added.truncatedToMilliseconds()
     val newItems = operation.items
@@ -146,7 +150,7 @@ private fun TreeState.addBookmarks(operation: AddBookmarks): Step {
         .distinctBy { it.id }
         .map { Item(it.id, it.url, it.title, added) }
     if (newItems.isEmpty()) return alreadyApplied()
-    return applied(withLoadedItems(rootId, current + newItems))
+    return applied(withLoadedItems(destinationId, current + newItems))
 }
 
 // 項目

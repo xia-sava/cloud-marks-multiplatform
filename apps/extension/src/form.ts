@@ -69,15 +69,24 @@ export function canSubmit(action: AddAction, name: string, tabCount: number): bo
   return true
 }
 
-/** フォームの値とタブから、ホストへ送る要求を組み立てる。名前は入力のまま使う。 */
-export function buildRequest(action: AddAction, name: string, tabs: readonly RequestTab[]): AddRequest {
+/**
+ * フォームの値とタブから、ホストへ送る要求を組み立てる。名前は入力のまま使う。
+ * 追加先のフォルダの ID（`folder`）があれば、要求に入れる。
+ */
+export function buildRequest(
+  action: AddAction,
+  name: string,
+  tabs: readonly RequestTab[],
+  folder?: string,
+): AddRequest {
+  const destination = folder === undefined ? {} : { folder }
   if (action === "addFolder") {
-    return { protocol: 1, type: "addFolder", name, tabs: tabs.map(copyTab) }
+    return { protocol: 1, type: "addFolder", ...destination, name, tabs: tabs.map(copyTab) }
   }
   if (tabs.length === 1) {
-    return { protocol: 1, type: "addBookmarks", tabs: [{ url: tabs[0].url, title: name }] }
+    return { protocol: 1, type: "addBookmarks", ...destination, tabs: [{ url: tabs[0].url, title: name }] }
   }
-  return { protocol: 1, type: "addBookmarks", tabs: tabs.map(copyTab) }
+  return { protocol: 1, type: "addBookmarks", ...destination, tabs: tabs.map(copyTab) }
 }
 
 function copyTab(tab: RequestTab): RequestTab {

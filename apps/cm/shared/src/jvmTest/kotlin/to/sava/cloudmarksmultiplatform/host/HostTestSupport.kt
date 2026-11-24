@@ -43,6 +43,9 @@ internal class SequentialIds {
 /** 見本 `take-command.json` のトークン。 */
 internal const val TOKEN = "0123456789abcdef0123456789abcdef"
 
+/** UUID の形の `folder` の例。 */
+internal const val FOLDER_UUID = "7d4c1e2a-3b5f-4a6d-9e8c-1f2a3b4c5d6e"
+
 /** 場合の名前と、取り決めに合わない要求の本体。検証の規則（`docs/native-messaging.md`）ごとに 1 つ以上。 */
 internal val INVALID_REQUESTS: List<Pair<String, String>> = listOf(
     "protocol が 2" to """{"protocol":2,"type":"addBookmarks","tabs":[{"url":"https://example.com/","title":"t"}]}""",
@@ -56,6 +59,24 @@ internal val INVALID_REQUESTS: List<Pair<String, String>> = listOf(
     "addFolder の name が文字列でない" to
         """{"protocol":1,"type":"addFolder","name":null,"tabs":[{"url":"https://example.com/","title":"t"}]}""",
     "addFolder の name が空" to """{"protocol":1,"type":"addFolder","name":"","tabs":[{"url":"https://example.com/","title":"t"}]}""",
+    "addFolder の folder が UUID の形でない" to
+        """{"protocol":1,"type":"addFolder","folder":"not-a-uuid","name":"n","tabs":[{"url":"https://example.com/","title":"t"}]}""",
+    "addFolder の folder が大文字" to
+        """{"protocol":1,"type":"addFolder","folder":"${FOLDER_UUID.uppercase()}","name":"n","tabs":[{"url":"https://example.com/","title":"t"}]}""",
+    "addFolder の folder が文字列でない" to
+        """{"protocol":1,"type":"addFolder","folder":1,"name":"n","tabs":[{"url":"https://example.com/","title":"t"}]}""",
+    "addFolder の folder が null" to
+        """{"protocol":1,"type":"addFolder","folder":null,"name":"n","tabs":[{"url":"https://example.com/","title":"t"}]}""",
+    "addBookmarks の folder が UUID の形でない" to
+        """{"protocol":1,"type":"addBookmarks","folder":"../x","tabs":[{"url":"https://example.com/","title":"t"}]}""",
+    "addBookmarks の folder が空" to
+        """{"protocol":1,"type":"addBookmarks","folder":"","tabs":[{"url":"https://example.com/","title":"t"}]}""",
+    "addBookmarks の folder の後ろに改行" to
+        """{"protocol":1,"type":"addBookmarks","folder":"$FOLDER_UUID\n","tabs":[{"url":"https://example.com/","title":"t"}]}""",
+    "addBookmarks の folder が文字列でない" to
+        """{"protocol":1,"type":"addBookmarks","folder":[],"tabs":[{"url":"https://example.com/","title":"t"}]}""",
+    "listFolders の protocol が 2" to """{"protocol":2,"type":"listFolders"}""",
+    "listFolders の protocol が無い" to """{"type":"listFolders"}""",
     "tabs が無い" to """{"protocol":1,"type":"addBookmarks"}""",
     "tabs が配列でない" to """{"protocol":1,"type":"addBookmarks","tabs":{"url":"https://example.com/","title":"t"}}""",
     "tabs が空" to """{"protocol":1,"type":"addFolder","name":"n","tabs":[]}""",

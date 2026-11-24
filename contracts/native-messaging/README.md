@@ -14,15 +14,18 @@
 
 | ファイル | 内容 |
 |---|---|
-| `add-folder.json` | フォルダを追加（2 つのタブ。空のタイトルを含む） |
-| `add-bookmarks.json` | ブックマークを追加（1 つのタブ。タイトルは名前の欄の値） |
+| `add-folder.json` | フォルダを追加（追加先を指定。2 つのタブ。空のタイトルを含む） |
+| `add-bookmarks.json` | ブックマークを追加（追加先を指定しない。1 つのタブ。タイトルは名前の欄の値） |
+| `list-folders.json` | フォルダの一覧を受け取る |
 | `extension-present.json` | 拡張が入っていることの知らせ |
 | `take-command.json` | コマンドを受け取る |
 | `open-app.json` | アプリを開く |
 | `response-ok.json` | 成功の応答 |
 | `response-command.json` | コマンドを受け取ったときの成功の応答（2 つのタブ。空のタイトルを含む）。`command` の中身は、アプリが書くコマンドのファイルの見本も兼ねる |
 | `response-no-command.json` | コマンドが無いときの成功の応答 |
+| `response-folders.json` | フォルダの一覧の成功の応答（ルートフォルダと、2 段の深さのフォルダ） |
 | `response-error.json` | 失敗の応答 |
+| `response-folder-not-found.json` | 追加先のフォルダが無いときの失敗の応答。拡張はこの `code` で一覧を読み直す |
 
 ## 配布版と開発版の名前
 

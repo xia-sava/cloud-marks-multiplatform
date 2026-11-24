@@ -58,6 +58,10 @@ export interface ExtensionApi {
       set(items: Record<string, unknown>): Promise<void>
       remove(key: string): Promise<void>
     }
+    local: {
+      get(key: string): Promise<Record<string, unknown>>
+      set(items: Record<string, unknown>): Promise<void>
+    }
   }
   action: {
     setBadgeText(details: { text: string }): Promise<void>

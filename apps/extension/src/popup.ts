@@ -10,6 +10,8 @@ import {
   rememberName,
   type AddAction,
 } from "./form"
+import { choicesFromFolders, initialChoices, listFolders, type FolderChoices } from "./folders"
+import { readLastFolder } from "./last-folder"
 import { MESSAGES, tabCountText } from "./messages"
 import { openApp } from "./open-app"
 import { isResultMessage, POPUP_PORT_NAME, type SubmitMessage } from "./port-messages"
@@ -25,6 +27,8 @@ const api = getApi()
 
 const form = element<HTMLFormElement>("form")
 const controls = element<HTMLFieldSetElement>("controls")
+const folderSelect = element<HTMLSelectElement>("folder")
+const folderStatus = element<HTMLElement>("folder-status")
 const nameInput = element<HTMLInputElement>("name")
 const nameLabel = element<HTMLElement>("name-label")
 const okButton = element<HTMLButtonElement>("ok")
@@ -36,6 +40,7 @@ const radios = Array.from(form.querySelectorAll<HTMLInputElement>('input[name="a
 
 element("label-add-folder").textContent = MESSAGES.addFolder
 element("label-add-bookmarks").textContent = MESSAGES.addBookmarks
+element("folder-label").textContent = MESSAGES.folderLabel
 okButton.textContent = MESSAGES.ok
 cancelButton.textContent = MESSAGES.cancel
 openAppButton.textContent = MESSAGES.openApp
@@ -49,14 +54,45 @@ async function showPreviousFailure(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const [tabs] = await Promise.all([selectedTabs(), showPreviousFailure()])
+  const [tabs, lastFolder] = await Promise.all([selectedTabs(), readLastFolder(api), showPreviousFailure()])
   const tabCount = tabs.length
 
   let action: AddAction = defaultAction(tabCount)
   let values = initialNameValues(new Date(), tabs)
   let sending = false
+  let folderChoices: FolderChoices = initialChoices(lastFolder)
+  let folderLoadCount = 0
 
   element("tab-count").textContent = tabCount === 0 ? MESSAGES.noTabs : tabCountText(tabCount)
+
+  function renderFolders(): void {
+    folderSelect.replaceChildren(
+      ...folderChoices.options.map((option) => {
+        const optionElement = document.createElement("option")
+        optionElement.textContent = option.label
+        return optionElement
+      }),
+    )
+    folderSelect.selectedIndex = folderChoices.selectedIndex
+    folderSelect.disabled = tabCount === 0
+  }
+
+  // フォルダの一覧を受け取り、追加先の欄を並べ直す。受け取れなかったら、欄をそのままにして文を出す。
+  // 続けて呼ばれたときは、最後の呼び出しの結果だけを使う。
+  async function loadFolders(): Promise<void> {
+    const loadNumber = ++folderLoadCount
+    folderStatus.textContent = MESSAGES.loadingFolders
+    const outcome = await listFolders(api)
+    if (loadNumber !== folderLoadCount) return
+    if (!outcome.ok) {
+      folderStatus.textContent = MESSAGES.foldersLoadFailed
+      return
+    }
+    const selectedId = folderChoices.options[folderSelect.selectedIndex]?.id
+    folderChoices = choicesFromFolders(outcome.folders, selectedId, lastFolder)
+    renderFolders()
+    folderStatus.textContent = ""
+  }
 
   function render(): void {
     const field = nameField(action, tabCount)
@@ -118,6 +154,7 @@ async function main(): Promise<void> {
         return
       }
       fail(message.outcome.message)
+      if (message.outcome.code === "folderNotFound") void loadFolders()
     })
     port.onDisconnect.addListener(() => {
       if (settled) return
@@ -126,7 +163,12 @@ async function main(): Promise<void> {
     })
 
     const name = nameInput.disabled ? "" : nameInput.value
-    const message: SubmitMessage = { type: "submit", request: buildRequest(action, name, tabs) }
+    const folder = folderChoices.options[folderSelect.selectedIndex]
+    const message: SubmitMessage = {
+      type: "submit",
+      request: buildRequest(action, name, tabs, folder.id),
+      ...(folder.id === undefined ? {} : { destination: { id: folder.id, name: folder.name } }),
+    }
     port.postMessage(message)
   }
 
@@ -163,8 +205,10 @@ async function main(): Promise<void> {
     if (event.key === "Escape" && !event.isComposing) window.close()
   })
 
+  renderFolders()
   render()
   focusEntry()
+  void loadFolders()
 }
 
 await main()

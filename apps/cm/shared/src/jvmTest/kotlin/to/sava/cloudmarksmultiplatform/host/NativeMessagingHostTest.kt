@@ -3,7 +3,14 @@ package to.sava.cloudmarksmultiplatform.host
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
 import to.sava.cloudmarksmultiplatform.app.Connection
@@ -18,17 +25,31 @@ import to.sava.cloudmarksmultiplatform.settings.SETTINGS
 import to.sava.cloudmarksmultiplatform.settings.SecretProtector
 import to.sava.cloudmarksmultiplatform.settings.SettingsFile
 import to.sava.cloudmarksmultiplatform.settings.SettingsWriteResult
+import to.sava.cloudmarksmultiplatform.storage.FolderEntry
 import to.sava.cloudmarksmultiplatform.storage.Item
+import to.sava.cloudmarksmultiplatform.storage.Manifest
+import to.sava.cloudmarksmultiplatform.storage.encodeManifestGzip
+import to.sava.cloudmarksmultiplatform.storage.itemsFileKey
 import to.sava.cloudmarksmultiplatform.storage.manifestKey
+import to.sava.cloudmarksmultiplatform.storage.newId
+import to.sava.cloudmarksmultiplatform.sync.A_FILE_ID
+import to.sava.cloudmarksmultiplatform.sync.A_ITEMS
+import to.sava.cloudmarksmultiplatform.sync.FOLDER_A
+import to.sava.cloudmarksmultiplatform.sync.FOLDER_B
 import to.sava.cloudmarksmultiplatform.sync.FixedClock
 import to.sava.cloudmarksmultiplatform.sync.InMemorySyncCache
 import to.sava.cloudmarksmultiplatform.sync.MAX_RESENDS
 import to.sava.cloudmarksmultiplatform.sync.NOW
+import to.sava.cloudmarksmultiplatform.sync.ROOT_FILE_ID
 import to.sava.cloudmarksmultiplatform.sync.ROOT_ID
 import to.sava.cloudmarksmultiplatform.sync.ROOT_ITEMS
 import to.sava.cloudmarksmultiplatform.sync.StorageSync
 import to.sava.cloudmarksmultiplatform.sync.SyncCache
+import to.sava.cloudmarksmultiplatform.sync.fileId
+import to.sava.cloudmarksmultiplatform.sync.initialManifest
+import to.sava.cloudmarksmultiplatform.sync.item
 import to.sava.cloudmarksmultiplatform.sync.puts
+import to.sava.cloudmarksmultiplatform.sync.replaceItemsAsOtherWriter
 import to.sava.cloudmarksmultiplatform.sync.seed
 import to.sava.cloudmarksmultiplatform.sync.storedItems
 import to.sava.cloudmarksmultiplatform.sync.storedManifest
@@ -52,6 +73,23 @@ private val WRITTEN_ADDED: Instant = Instant.parse("2026-11-16T12:34:56.789Z")
 /** S3 へ書いたことを知らせるファイルに書かれる中身。時計の現在（[NOW]）。 */
 private val STORAGE_CHANGED_TEXT = "$NOW\n"
 
+/** 見本 `add-folder.json` の `folder`。 */
+private val CONTRACT_FOLDER: String = jsonOf(contractBytes("add-folder.json")).jsonObject.getValue("folder").jsonPrimitive.content
+
+/** 見本の `folder` のフォルダ（ルートフォルダの子。項目なし）を足した、ホストのテストが置くマニフェスト。 */
+private fun hostManifest(): Manifest =
+    initialManifest().let { it.copy(folders = it.folders + FolderEntry(CONTRACT_FOLDER, ROOT_ID, "資料", null, 0)) }
+
+/** 追加の要求の本体。[folder] が null なら `folder` の欄を付けない。 */
+private fun addBody(type: String, folder: String?, withName: Boolean = false): ByteArray =
+    buildJsonObject {
+        put("protocol", 1)
+        put("type", type)
+        if (folder != null) put("folder", folder)
+        if (withName) put("name", "n")
+        putJsonArray("tabs") { addJsonObject { put("url", "https://example.org/x"); put("title", "t") } }
+    }.toString().encodeToByteArray()
+
 /** ホストが接続を作るときに受け取ったもの。 */
 private class OpenedConnection(
     val settings: ConnectionSettings,
@@ -73,7 +111,7 @@ class NativeMessagingHostTest {
      */
     private inner class Fixture(protector: SecretProtector = FakeSecretProtector()) {
         val appFiles = desktopAppFilesIn(temporaryFolder.newFolder().toPath())
-        val store = FakeObjectStore().apply { seed() }
+        val store = FakeObjectStore().apply { seed(hostManifest()) }
         val logs = mutableListOf<String>()
         val opened = mutableListOf<OpenedConnection>()
         var closed = 0
@@ -140,7 +178,7 @@ class NativeMessagingHostTest {
         }
     }
 
-    // フォルダとして追加すると、成功を返し、マニフェストの updatedBy を host にして、ルートフォルダの子のフォルダの末尾に
+    // フォルダとして追加すると、成功を返し、マニフェストの updatedBy を host にして、見本の `folder` のフォルダの子のフォルダの末尾に
     // 見本の順で項目を入れる。追加した日時は時計の現在、ID はホストが振る。接続は 1 回作って閉じる
     @Test
     fun addFolderIsWritten() = runTest {
@@ -152,7 +190,7 @@ class NativeMessagingHostTest {
         val manifest = fixture.store.storedManifest()
         assertEquals("host", manifest.header.updatedBy)
         val folder = manifest.folders.last()
-        assertEquals(listOf(hostId(1), ROOT_ID, "2026-11-16 21:30:15"), listOf(folder.id, folder.parent, folder.name))
+        assertEquals(listOf(hostId(1), CONTRACT_FOLDER, "2026-11-16 21:30:15"), listOf(folder.id, folder.parent, folder.name))
         assertEquals(
             listOf(
                 Item(hostId(2), "https://example.com/articles/1", "記事のタイトル", WRITTEN_ADDED),
@@ -165,7 +203,19 @@ class NativeMessagingHostTest {
         assertEquals(emptyList(), fixture.logs)
     }
 
-    // ブックマークとして追加すると、ルートフォルダの項目の末尾に足す
+    // `folder` を持たないフォルダとして追加する要求は、ルートフォルダの子のフォルダの末尾に作る
+    @Test
+    fun addFolderWithoutFolderGoesUnderRoot() = runTest {
+        val fixture = Fixture().apply { storeSettings() }
+
+        val response = fixture.respond(addBody("addFolder", folder = null, withName = true))
+
+        assertEquals(HostResponse.Ok, response)
+        val folder = fixture.store.storedManifest().folders.last()
+        assertEquals(listOf(hostId(1), ROOT_ID, "n"), listOf(folder.id, folder.parent, folder.name))
+    }
+
+    // ブックマークとして追加すると、`folder` を持たない見本は、ルートフォルダの項目の末尾に足す
     @Test
     fun addBookmarksIsWritten() = runTest {
         val fixture = Fixture().apply { storeSettings() }
@@ -179,6 +229,111 @@ class NativeMessagingHostTest {
             ROOT_ITEMS + Item(hostId(1), "https://example.net/page", "名前の欄で書き換えたタイトル", WRITTEN_ADDED),
             fixture.store.storedItems(manifest, ROOT_ID),
         )
+    }
+
+    // `folder` を持つブックマークの追加は、そのフォルダの項目の末尾に足す。項目を持たないフォルダにも足せる。
+    // ほかのフォルダの項目は変わらない
+    @Test
+    fun addBookmarksToGivenFolderIsWritten() = runTest {
+        val fixture = Fixture().apply { storeSettings() }
+
+        assertEquals(HostResponse.Ok, fixture.respond(addBody("addBookmarks", FOLDER_A)))
+        assertEquals(HostResponse.Ok, fixture.respond(addBody("addBookmarks", CONTRACT_FOLDER)))
+
+        val manifest = fixture.store.storedManifest()
+        assertEquals(
+            A_ITEMS + Item(hostId(1), "https://example.org/x", "t", WRITTEN_ADDED),
+            fixture.store.storedItems(manifest, FOLDER_A),
+        )
+        assertEquals(
+            listOf(Item(hostId(2), "https://example.org/x", "t", WRITTEN_ADDED)),
+            fixture.store.storedItems(manifest, CONTRACT_FOLDER),
+        )
+        assertEquals(ROOT_ITEMS, fixture.store.storedItems(manifest, ROOT_ID))
+    }
+
+    // `folder` のフォルダが無ければ、何も書かず（PUT もマニフェストの変更も、S3 へ書いたことを知らせるファイルの書き換えも無い）、
+    // folderNotFound を返す。ログには URL もタイトルも書かない
+    @Test
+    fun missingFolderIsFolderNotFoundAndWritesNothing() = runTest {
+        listOf(
+            "addFolder" to addBody("addFolder", hostId(99), withName = true),
+            "addBookmarks" to addBody("addBookmarks", hostId(99)),
+        ).forEach { (name, body) ->
+            val fixture = Fixture().apply { storeSettings() }
+            val before = fixture.store.storedManifest()
+
+            val response = fixture.respond(body)
+
+            assertEquals(HostResponse.Failed(FOLDER_NOT_FOUND_ERROR), response, name)
+            assertEquals(
+                jsonOf(contractBytes("response-folder-not-found.json")),
+                jsonOf(encodeHostResponse(response)),
+                name,
+            )
+            assertEquals(emptyList(), fixture.store.puts { true }, name)
+            assertEquals(before, fixture.store.storedManifest(), name)
+            assertEquals(null, fixture.storageChangedText(), name)
+            val log = fixture.logs.single()
+            assertTrue(log.startsWith(HOST_LOG_PREFIX), log)
+            assertFalse(log.contains("https://example.org/x"), log)
+        }
+    }
+
+    // マニフェストの PUT が 412 になって再適用するあいだに、ほかの書き手が追加先のフォルダ（親）を消したときは、
+    // 再適用で適用できず、folderNotFound を返す。マニフェストの PUT は 412 の 1 回だけで、ほかの書き手のマニフェストが残り、
+    // S3 へ書いたことを知らせるファイルは書き換えない
+    @Test
+    fun folderDeletedByOtherWriterIsFolderNotFound() = runTest {
+        listOf(
+            "addFolder" to addBody("addFolder", CONTRACT_FOLDER, withName = true),
+            "addBookmarks" to addBody("addBookmarks", CONTRACT_FOLDER),
+        ).forEach { (name, body) ->
+            val fixture = Fixture().apply { storeSettings() }
+            fixture.store.onNextPut(
+                PutFault.RunBefore {
+                    val current = fixture.store.storedManifest()
+                    val withoutFolder = current.copy(
+                        header = current.header.copy(commit = newId(), updatedBy = "android"),
+                        folders = current.folders.filter { it.id != CONTRACT_FOLDER },
+                    )
+                    fixture.store.overwrite(manifestKey(fixture.store.prefix), encodeManifestGzip(withoutFolder))
+                },
+                key = fixture.isManifest,
+            )
+
+            val response = fixture.respond(body)
+
+            assertEquals(HostResponse.Failed(FOLDER_NOT_FOUND_ERROR), response, name)
+            assertEquals(1, fixture.store.puts(fixture.isManifest).size, name)
+            assertEquals(null, fixture.storageChangedText(), name)
+            val manifest = fixture.store.storedManifest()
+            assertEquals("android", manifest.header.updatedBy, name)
+            assertEquals(listOf(ROOT_ID, FOLDER_A, FOLDER_B), manifest.folders.map { it.id }, name)
+        }
+    }
+
+    // 再適用するあいだに、ほかの書き手が追加先のフォルダに項目を足したときは、再適用で追加先の末尾に足し、
+    // ほかの書き手の項目も残す。マニフェストの PUT は 412 の分と合わせて 2 回
+    @Test
+    fun itemAddedByOtherWriterToDestinationIsKept() = runTest {
+        val fixture = Fixture().apply { storeSettings() }
+        val othersItem = item(50)
+        fixture.store.onNextPut(
+            PutFault.RunBefore { fixture.store.replaceItemsAsOtherWriter(FOLDER_A, fileId(50), A_ITEMS + othersItem) },
+            key = fixture.isManifest,
+        )
+
+        val response = fixture.respond(addBody("addBookmarks", FOLDER_A))
+
+        assertEquals(HostResponse.Ok, response)
+        assertEquals(2, fixture.store.puts(fixture.isManifest).size)
+        assertEquals(
+            A_ITEMS + othersItem + Item(hostId(1), "https://example.org/x", "t", WRITTEN_ADDED),
+            fixture.store.storedItems(fixture.store.storedManifest(), FOLDER_A),
+        )
+        assertEquals(ROOT_ITEMS, fixture.store.storedItems(fixture.store.storedManifest(), ROOT_ID))
+        assertEquals(STORAGE_CHANGED_TEXT, fixture.storageChangedText())
     }
 
     // 接続は、保存済みの設定と、メモリの中だけのキャッシュ、updatedBy の host、モノトニッククロックで作る
@@ -299,6 +454,111 @@ class NativeMessagingHostTest {
         assertEquals(HostResponse.Failed(MANIFEST_NOT_FOUND_ERROR), response)
         assertEquals(emptyList(), fixture.store.puts { true })
         assertEquals(null, fixture.storageChangedText())
+    }
+
+    /** 見本 `response-folders.json` と同じフォルダの並びのマニフェスト。 */
+    private fun contractFoldersManifest(): Manifest {
+        val folders = jsonOf(contractBytes("response-folders.json")).jsonObject.getValue("folders").jsonArray.map { it.jsonObject }
+        return initialManifest().copy(
+            folders = folders.map { folder ->
+                FolderEntry(
+                    id = folder.getValue("id").jsonPrimitive.content,
+                    parent = folder.getValue("parent").jsonPrimitive.contentOrNull,
+                    name = folder.getValue("name").jsonPrimitive.content,
+                    items = null,
+                    count = 0,
+                )
+            },
+        )
+    }
+
+    // フォルダの一覧は、マニフェストのフォルダの行を、マニフェストの順のまま返す。応答は見本と JSON として同じ。
+    // マニフェストだけを GET し、項目ファイルは読まず、何も書かず、S3 へ書いたことを知らせるファイルも書き換えない。
+    // 接続は、メモリの中だけのキャッシュで作って閉じる
+    @Test
+    fun listFoldersReturnsManifestFoldersInOrder() = runTest {
+        val fixture = Fixture().apply { storeSettings() }
+        fixture.store.seed(contractFoldersManifest())
+
+        val response = fixture.respond(contractBytes("list-folders.json"))
+
+        assertEquals(jsonOf(contractBytes("response-folders.json")), jsonOf(encodeHostResponse(response)))
+        assertEquals(listOf(FakeObjectStore.Request.Get(manifestKey(fixture.store.prefix), null)), fixture.store.requests)
+        assertEquals(null, fixture.storageChangedText())
+        assertIs<InMemorySyncCache>(fixture.opened.single().cache)
+        assertEquals(HOST_UPDATED_BY, fixture.opened.single().updatedBy)
+        assertEquals(1, fixture.closed)
+        assertEquals(emptyList(), fixture.logs)
+    }
+
+    // フォルダの一覧は、項目ファイルが壊れていても、無くても返せる
+    @Test
+    fun listFoldersDoesNotReadItemsFiles() = runTest {
+        val fixture = Fixture().apply { storeSettings() }
+        fixture.store.remove(itemsFileKey(fixture.store.prefix, ROOT_ID, ROOT_FILE_ID))
+        fixture.store.remove(itemsFileKey(fixture.store.prefix, FOLDER_A, A_FILE_ID))
+
+        val response = assertIs<HostResponse.Folders>(fixture.respond(contractBytes("list-folders.json")))
+
+        assertEquals(
+            listOf(ROOT_ID, FOLDER_A, FOLDER_B, CONTRACT_FOLDER),
+            response.folders.map { it.id },
+        )
+        assertEquals(listOf(null, ROOT_ID, ROOT_ID, ROOT_ID), response.folders.map { it.parent })
+        assertEquals(listOf("", "A", "B", "資料"), response.folders.map { it.name })
+    }
+
+    // フォルダの一覧を読めないときは、追加と同じ失敗の応答を返し、S3 へ書いたことを知らせるファイルは書き換えない。
+    // 設定が無いときも同じ
+    @Test
+    fun listFoldersFailuresMatchAdd() = runTest {
+        val cases = listOf<Pair<String, (Fixture) -> Unit>>(
+            "マニフェストが無い" to { it.store.remove(manifestKey(it.store.prefix)) },
+            "権限が無い" to { it.store.onNextGet(GetFault.Forbidden, key = it.isManifest) },
+            "つながらない" to { it.store.onNextGet(GetFault.ServerError, key = it.isManifest) },
+            "形式のバージョンが新しい" to { it.store.seed(initialManifest(version = 2, readableBy = 1)) },
+        )
+        val expected = listOf(MANIFEST_NOT_FOUND_ERROR, FORBIDDEN_ERROR, UNREACHABLE_ERROR, UPDATE_REQUIRED_ERROR)
+
+        cases.zip(expected).forEach { (case, error) ->
+            val (name, arrange) = case
+            val fixture = Fixture().apply { storeSettings() }
+            arrange(fixture)
+
+            assertEquals(HostResponse.Failed(error), fixture.respond(contractBytes("list-folders.json")), name)
+            assertEquals(null, fixture.storageChangedText(), name)
+            assertEquals(emptyList(), fixture.store.puts { true }, name)
+            assertTrue(fixture.logs.single().startsWith(HOST_LOG_PREFIX), name)
+        }
+    }
+
+    // フォルダの一覧の要求も、設定のファイルが無ければ notConfigured を返し、接続を作らない
+    @Test
+    fun listFoldersWithoutSettingsIsNotConfigured() = runTest {
+        val fixture = Fixture()
+
+        assertEquals(HostResponse.Failed(SETTINGS_MISSING_ERROR), fixture.respond(contractBytes("list-folders.json")))
+        assertEquals(emptyList(), fixture.opened.map { it.settings })
+        assertEquals(emptyList(), fixture.store.requests)
+    }
+
+    // フォルダの一覧の応答が 1 MiB を超えるときは、一覧を返さず internal を返す。ちょうど上限までなら返す
+    @Test
+    fun listFoldersOverResponseLimitIsInternal() = runTest {
+        val fixture = Fixture().apply { storeSettings() }
+
+        fun manifestWithNameBytes(nameLength: Int): Manifest =
+            initialManifest().let { base ->
+                base.copy(folders = base.folders + FolderEntry(CONTRACT_FOLDER, ROOT_ID, "x".repeat(nameLength), null, 0))
+            }
+
+        val overhead = encodeHostResponse(HostResponse.Folders(manifestWithNameBytes(0).folders.map { HostFolder(it.id, it.parent, it.name) })).size
+        fixture.store.seed(manifestWithNameBytes(MAX_RESPONSE_BYTES - overhead))
+        assertIs<HostResponse.Folders>(fixture.respond(contractBytes("list-folders.json")))
+
+        fixture.store.seed(manifestWithNameBytes(MAX_RESPONSE_BYTES - overhead + 1))
+        assertEquals(HostResponse.Failed(INTERNAL_ERROR), fixture.respond(contractBytes("list-folders.json")))
+        assertTrue(fixture.logs.single().startsWith(HOST_LOG_PREFIX), fixture.logs.toString())
     }
 
     // 取り決めに合わない要求は、設定を読まず、接続も作らず、何も書かずに invalidRequest を返す

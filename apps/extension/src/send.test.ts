@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
 import type { ExtensionApi } from "./api"
 import { MESSAGES } from "./messages"
-import { HOST_NAME, type AddRequest } from "./protocol"
+import { listFoldersMessage } from "./folders"
+import { HOST_NAME, type AddRequest, type FoldersOutcome } from "./protocol"
 import { sendRequest } from "./send"
 
 const request: AddRequest = {
@@ -34,6 +35,13 @@ describe("sendRequest", () => {
     const interpret = vi.fn((_response: unknown) => ({ ok: false as const, message: "差し替えた文" }))
     await expect(sendRequest(api, request, interpret)).resolves.toEqual({ ok: false, message: "差し替えた文" })
     expect(interpret).toHaveBeenCalledWith(response)
+  })
+
+  it("interpret を渡さない呼び出しの結果は、FoldersOutcome として使えない", async () => {
+    const { api } = apiWith(async () => ({ ok: true }))
+    // @ts-expect-error interpret を渡さないと、結果は Outcome になる
+    const outcome: FoldersOutcome = await sendRequest(api, listFoldersMessage())
+    expect(outcome).toEqual({ ok: true })
   })
 
   it("ホストが見つからない誤りは、見つからない旨にする", async () => {

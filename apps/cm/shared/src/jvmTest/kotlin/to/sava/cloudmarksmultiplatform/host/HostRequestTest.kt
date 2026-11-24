@@ -28,6 +28,7 @@ class HostRequestTest {
             HostRequestParseResult.Valid(
                 HostRequest.AddFolder(
                     name = "2026-11-16 21:30:15",
+                    folder = FOLDER_UUID,
                     tabs = listOf(
                         BrowserTab("https://example.com/articles/1", "記事のタイトル"),
                         BrowserTab("https://example.org/", ""),
@@ -44,7 +45,7 @@ class HostRequestTest {
         val parsed = parseHostRequest(contractBytes("add-bookmarks.json"))
 
         assertEquals(
-            HostRequestParseResult.Valid(HostRequest.AddBookmarks(listOf(BrowserTab("https://example.net/page", "名前の欄で書き換えたタイトル")))),
+            HostRequestParseResult.Valid(HostRequest.AddBookmarks(null, listOf(BrowserTab("https://example.net/page", "名前の欄で書き換えたタイトル")))),
             parsed,
         )
     }
@@ -59,6 +60,7 @@ class HostRequestTest {
         assertEquals(
             AddFolder(
                 folderId = hostId(1),
+                parentId = FOLDER_UUID,
                 name = "2026-11-16 21:30:15",
                 items = listOf(
                     NewItem(hostId(2), "https://example.com/articles/1", "記事のタイトル"),
@@ -78,9 +80,50 @@ class HostRequestTest {
         val operation = addRequest(contractBytes("add-bookmarks.json").decodeToString()).toOperation(ADDED, ids::next)
 
         assertEquals(
-            AddBookmarks(items = listOf(NewItem(hostId(1), "https://example.net/page", "名前の欄で書き換えたタイトル")), added = ADDED),
+            AddBookmarks(
+                destinationId = null,
+                items = listOf(NewItem(hostId(1), "https://example.net/page", "名前の欄で書き換えたタイトル")),
+                added = ADDED,
+            ),
             operation,
         )
+    }
+
+    // `folder` が無い追加の要求は、フォルダの ID を持たない（ルートフォルダを表す）。UUID の形の `folder` は、そのまま読む
+    @Test
+    fun folderIsOptionalAndKeptAsIs() {
+        val tab = """[{"url":"u","title":"t"}]"""
+
+        assertEquals(
+            HostRequest.AddFolder("n", null, listOf(BrowserTab("u", "t"))),
+            validRequest("""{"protocol":1,"type":"addFolder","name":"n","tabs":$tab}"""),
+        )
+        assertEquals(
+            HostRequest.AddFolder("n", FOLDER_UUID, listOf(BrowserTab("u", "t"))),
+            validRequest("""{"protocol":1,"type":"addFolder","folder":"$FOLDER_UUID","name":"n","tabs":$tab}"""),
+        )
+        assertEquals(
+            HostRequest.AddBookmarks(FOLDER_UUID, listOf(BrowserTab("u", "t"))),
+            validRequest("""{"protocol":1,"type":"addBookmarks","folder":"$FOLDER_UUID","tabs":$tab}"""),
+        )
+    }
+
+    // `folder` を持たない見本の追加は、親も追加先も null の操作になる
+    @Test
+    fun addWithoutFolderBecomesOperationWithNullFolder() {
+        val request = addRequest("""{"protocol":1,"type":"addBookmarks","tabs":[{"url":"u","title":"t"}]}""")
+
+        assertEquals(
+            AddBookmarks(destinationId = null, items = listOf(NewItem(hostId(1), "u", "t")), added = ADDED),
+            request.toOperation(ADDED, SequentialIds()::next),
+        )
+    }
+
+    // 見本の「フォルダの一覧」を読むと、フォルダの一覧の要求になる。表に無い欄は無視する
+    @Test
+    fun listFoldersContractIsParsed() {
+        assertEquals(HostRequestParseResult.Valid(HostRequest.ListFolders), parseHostRequest(contractBytes("list-folders.json")))
+        assertEquals(HostRequest.ListFolders, validRequest("""{"protocol":1,"type":"listFolders","folder":"x","tabs":[]}"""))
     }
 
     // 検証の規則に合わない要求は、どれも取り決めに合わないとする。理由には、要求の中の値を含めない
@@ -109,7 +152,7 @@ class HostRequestTest {
             """{"protocol":1,"type":"addFolder","name":"n","extra":{"a":[1]},"tabs":[{"url":"u","title":"t","favIconUrl":"x"}]}""",
         )
 
-        assertEquals(HostRequest.AddFolder("n", listOf(BrowserTab("u", "t"))), request)
+        assertEquals(HostRequest.AddFolder("n", null, listOf(BrowserTab("u", "t"))), request)
     }
 
     // ブックマークを追加する要求の name は、文字列でも、空でも、文字列でなくても無視する
@@ -118,7 +161,7 @@ class HostRequestTest {
         listOf("\"n\"", "\"\"", "null", "1").forEach { name ->
             val request = validRequest("""{"protocol":1,"type":"addBookmarks","name":$name,"tabs":[{"url":"u","title":""}]}""")
 
-            assertEquals(HostRequest.AddBookmarks(listOf(BrowserTab("u", ""))), request, name)
+            assertEquals(HostRequest.AddBookmarks(null, listOf(BrowserTab("u", ""))), request, name)
         }
     }
 
@@ -136,7 +179,7 @@ class HostRequestTest {
             """.trimIndent(),
         )
 
-        assertEquals(HostRequest.AddFolder(" ", listOf(BrowserTab(" ", " "))), request)
+        assertEquals(HostRequest.AddFolder(" ", null, listOf(BrowserTab(" ", " "))), request)
     }
 
     // 見本の「拡張が入っていることの知らせ」を読むと、拡張が入っていることの知らせになる

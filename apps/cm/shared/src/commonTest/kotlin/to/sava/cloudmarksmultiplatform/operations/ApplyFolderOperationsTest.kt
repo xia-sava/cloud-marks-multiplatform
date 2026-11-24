@@ -17,7 +17,7 @@ class ApplyFolderOperationsTest {
     // フォルダとして追加：ルートフォルダの子のフォルダの末尾に作り、項目を入力の順に入れて added を設定する
     @Test
     fun addFolderAppendsFolderToRootWithItemsInOrder() {
-        val result = applyOne(SAMPLE_STATE, AddFolder(newFolder, "新しい", newItems, ADDED))
+        val result = applyOne(SAMPLE_STATE, AddFolder(newFolder, null, "新しい", newItems, ADDED))
 
         assertEquals(OperationStatus.Applied, result.singleStatus())
         assertEquals(listOf(FOLDER_A, FOLDER_B, FOLDER_C, newFolder), result.state.childIds(ROOT))
@@ -33,16 +33,45 @@ class ApplyFolderOperationsTest {
         assertTrue(result.treeChanged)
     }
 
-    // フォルダとして追加：フォルダの ID が既にあれば適用済み。2 回目は状態が変わらない
+    // フォルダとして追加：親にフォルダを指定すれば、その子のフォルダの末尾に作る。ルートフォルダを指定しても、親が null のときと同じ
+    @Test
+    fun addFolderAppendsFolderToGivenParent() {
+        val underA = applyOne(SAMPLE_STATE, AddFolder(newFolder, FOLDER_A, "新しい", newItems, ADDED))
+
+        assertEquals(OperationStatus.Applied, underA.singleStatus())
+        assertEquals(listOf(FOLDER_A1, newFolder), underA.state.childIds(FOLDER_A))
+        assertEquals(listOf(FOLDER_A, FOLDER_B, FOLDER_C), underA.state.childIds(ROOT))
+        assertEquals(
+            FolderNode(newFolder, FOLDER_A, "新しい", emptyList(), null, 0),
+            underA.state.folders.getValue(newFolder),
+        )
+        assertEquals(newItems.map { it.id }, underA.state.itemIds(newFolder))
+        assertEquals(setOf(newFolder), underA.changedFolderIds)
+
+        val underRoot = applyOne(SAMPLE_STATE, AddFolder(newFolder, ROOT, "新しい", newItems, ADDED))
+        assertEquals(applyOne(SAMPLE_STATE, AddFolder(newFolder, null, "新しい", newItems, ADDED)).state, underRoot.state)
+    }
+
+    // フォルダとして追加：親が無ければ適用しない。状態は変わらない
+    @Test
+    fun addFolderWithMissingParentIsNotApplied() {
+        val result = applyOne(SAMPLE_STATE, AddFolder(newFolder, folderId(99), "新しい", newItems, ADDED))
+
+        assertEquals(notApplied(NotAppliedReason.DestinationNotFound), result.singleStatus())
+        assertTrue(result.unchanged)
+    }
+
+    // フォルダとして追加：フォルダの ID が既にあれば適用済み。2 回目は状態が変わらない。親を指定していても同じ
     @Test
     fun addFolderIsIdempotent() {
-        assertIdempotent(SAMPLE_STATE, AddFolder(newFolder, "新しい", newItems, ADDED))
+        assertIdempotent(SAMPLE_STATE, AddFolder(newFolder, null, "新しい", newItems, ADDED))
+        assertIdempotent(SAMPLE_STATE, AddFolder(newFolder, FOLDER_A, "新しい", newItems, ADDED))
     }
 
     // フォルダとして追加：名前が空なら適用しない
     @Test
     fun addFolderWithEmptyNameIsNotApplied() {
-        val result = applyOne(SAMPLE_STATE, AddFolder(newFolder, "", newItems, ADDED))
+        val result = applyOne(SAMPLE_STATE, AddFolder(newFolder, null, "", newItems, ADDED))
 
         assertEquals(notApplied(NotAppliedReason.EmptyName), result.singleStatus())
         assertTrue(result.unchanged)

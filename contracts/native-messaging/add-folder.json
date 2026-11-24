@@ -1,6 +1,7 @@
 {
   "protocol": 1,
   "type": "addFolder",
+  "folder": "7d4c1e2a-3b5f-4a6d-9e8c-1f2a3b4c5d6e",
   "name": "2026-11-16 21:30:15",
   "tabs": [
     {"url": "https://example.com/articles/1", "title": "記事のタイトル"},

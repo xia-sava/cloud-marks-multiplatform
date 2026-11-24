@@ -597,7 +597,7 @@ class RevisionRestoreTest {
     fun restoringTheStateBeforeUndoesTheRestore() = runTest {
         val fixture = SyncFixture().apply { store.seed() }
         val initial = fixture.currentManifestRevision()
-        val added = AddBookmarks(listOf(NewItem(itemId(100), "https://example.com/new", "new")), ADDED)
+        val added = AddBookmarks(null, listOf(NewItem(itemId(100), "https://example.com/new", "new")), ADDED)
         assertIs<WriteResult.Success>(fixture.sync.write(listOf(added)))
         val beforeRestore = fixture.currentManifestRevision()
         val contentsBeforeRestore = fixture.store.storedContents()

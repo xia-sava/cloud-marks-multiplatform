@@ -31,7 +31,7 @@ import kotlin.time.Duration.Companion.minutes
 
 class OperationWriteTest {
     private val newItem = NewItem(itemId(100), "https://example.com/new", "new")
-    private val addBookmark = AddBookmarks(listOf(newItem), ADDED)
+    private val addBookmark = AddBookmarks(null, listOf(newItem), ADDED)
 
     /** 置いてあるマニフェストが指すルートフォルダの項目に、追加した項目がいくつあるか。 */
     private fun SyncFixture.newItemCountInRoot(): Int =

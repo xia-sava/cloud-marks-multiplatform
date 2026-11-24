@@ -15,7 +15,7 @@ class ApplyItemOperationsTest {
     // ブックマークとして追加：ルートフォルダの項目の末尾に入力の順で足し、added を設定する。ほかのフォルダの項目は変わらない
     @Test
     fun addBookmarksAppendsToRootInInputOrderWithAdded() {
-        val result = applyOne(SAMPLE_STATE, AddBookmarks(listOf(newItem1, newItem2), ADDED))
+        val result = applyOne(SAMPLE_STATE, AddBookmarks(null, listOf(newItem1, newItem2), ADDED))
 
         assertEquals(OperationStatus.Applied, result.singleStatus())
         assertEquals(listOf(ROOT_ITEM_1, ROOT_ITEM_2, newItem1.id, newItem2.id), result.state.itemIds(ROOT))
@@ -28,26 +28,61 @@ class ApplyItemOperationsTest {
         assertFalse(result.unchanged)
     }
 
-    // ブックマークとして追加：ルートフォルダに同じ ID の項目があれば適用済み。一部だけあれば、無いものだけ足す
+    // ブックマークとして追加：追加先にフォルダを指定すれば、そのフォルダの項目の末尾に足す。ほかのフォルダの項目は変わらない。
+    // 項目を持たないフォルダにも足せる
     @Test
-    fun addBookmarksSkipsItemsAlreadyInRoot() {
-        val operation = AddBookmarks(listOf(newItem1, newItem2), ADDED)
-        assertIdempotent(SAMPLE_STATE, operation)
+    fun addBookmarksAppendsToGivenDestination() {
+        val toA = applyOne(SAMPLE_STATE, AddBookmarks(FOLDER_A, listOf(newItem1, newItem2), ADDED))
 
-        val partial = applyOne(
-            SAMPLE_STATE.withLoadedItems(ROOT, listOf(item(newItem1.id))),
-            operation,
-        )
-        assertEquals(OperationStatus.Applied, partial.singleStatus())
-        assertEquals(listOf(newItem1.id, newItem2.id), partial.state.itemIds(ROOT))
+        assertEquals(OperationStatus.Applied, toA.singleStatus())
+        assertEquals(listOf(A_ITEM_1, A_ITEM_2, A_ITEM_3, newItem1.id, newItem2.id), toA.state.itemIds(FOLDER_A))
+        assertEquals(listOf(ROOT_ITEM_1, ROOT_ITEM_2), toA.state.itemIds(ROOT))
+        assertEquals(Item(newItem1.id, newItem1.url, newItem1.title, ADDED), toA.state.items.getValue(FOLDER_A)[3])
+        assertEquals(setOf(FOLDER_A), toA.changedFolderIds)
+        assertEquals(mapOf(FOLDER_A to toA.state.items.getValue(FOLDER_A)), toA.itemsToWrite)
+
+        val toEmpty = applyOne(SAMPLE_STATE, AddBookmarks(FOLDER_C, listOf(newItem1), ADDED))
+        assertEquals(listOf(newItem1.id), toEmpty.state.itemIds(FOLDER_C))
+        assertEquals(setOf(FOLDER_C), toEmpty.changedFolderIds)
+
+        val toRoot = applyOne(SAMPLE_STATE, AddBookmarks(ROOT, listOf(newItem1), ADDED))
+        assertEquals(applyOne(SAMPLE_STATE, AddBookmarks(null, listOf(newItem1), ADDED)).state, toRoot.state)
     }
 
-    // ブックマークとして追加：ルートフォルダの項目を読み込んでいなければ、プログラムの誤りとして例外にする
+    // ブックマークとして追加：追加先が無ければ適用しない。状態は変わらない
     @Test
-    fun addBookmarksFailsWhenRootItemsAreNotLoaded() {
-        val unloaded = SAMPLE_STATE.copy(items = SAMPLE_STATE.items - ROOT)
+    fun addBookmarksWithMissingDestinationIsNotApplied() {
+        val result = applyOne(SAMPLE_STATE, AddBookmarks(folderId(99), listOf(newItem1), ADDED))
 
-        assertFailsWith<IllegalStateException> { applyOne(unloaded, AddBookmarks(listOf(newItem1), ADDED)) }
+        assertEquals(notApplied(NotAppliedReason.DestinationNotFound), result.singleStatus())
+        assertTrue(result.unchanged)
+    }
+
+    // ブックマークとして追加：追加先のフォルダに同じ ID の項目があれば適用済み。一部だけあれば、無いものだけ足す
+    @Test
+    fun addBookmarksSkipsItemsAlreadyInDestination() {
+        listOf(null, FOLDER_A).forEach { destination ->
+            val folderId = destination ?: ROOT
+            val operation = AddBookmarks(destination, listOf(newItem1, newItem2), ADDED)
+            assertIdempotent(SAMPLE_STATE, operation)
+
+            val partial = applyOne(
+                SAMPLE_STATE.withLoadedItems(folderId, listOf(item(newItem1.id))),
+                operation,
+            )
+            assertEquals(OperationStatus.Applied, partial.singleStatus(), "追加先 $destination")
+            assertEquals(listOf(newItem1.id, newItem2.id), partial.state.itemIds(folderId), "追加先 $destination")
+        }
+    }
+
+    // ブックマークとして追加：追加先の項目を読み込んでいなければ、プログラムの誤りとして例外にする
+    @Test
+    fun addBookmarksFailsWhenDestinationItemsAreNotLoaded() {
+        val unloadedRoot = SAMPLE_STATE.copy(items = SAMPLE_STATE.items - ROOT)
+        assertFailsWith<IllegalStateException> { applyOne(unloadedRoot, AddBookmarks(null, listOf(newItem1), ADDED)) }
+
+        val unloadedA = SAMPLE_STATE.copy(items = SAMPLE_STATE.items - FOLDER_A)
+        assertFailsWith<IllegalStateException> { applyOne(unloadedA, AddBookmarks(FOLDER_A, listOf(newItem1), ADDED)) }
     }
 
     // 項目の削除：対象だけを消し、残りの並びを保つ。もう無い対象は何も起こさず、報告もされない
@@ -317,7 +352,7 @@ class ApplyItemOperationsTest {
         val first = NewItem(itemId(401), "https://example.com/first", "first")
         val duplicate = NewItem(itemId(401), "https://example.com/dup", "dup")
 
-        val bookmarks = applyOne(SAMPLE_STATE, AddBookmarks(listOf(first, duplicate), ADDED))
+        val bookmarks = applyOne(SAMPLE_STATE, AddBookmarks(null, listOf(first, duplicate), ADDED))
         assertEquals(listOf(ROOT_ITEM_1, ROOT_ITEM_2, first.id), bookmarks.state.itemIds(ROOT))
         assertEquals("first", bookmarks.state.items.getValue(ROOT).last().title)
 
@@ -328,7 +363,7 @@ class ApplyItemOperationsTest {
         assertEquals(listOf(A_ITEM_1, A_ITEM_2, A_ITEM_3, itemId(501)), inserted.state.itemIds(FOLDER_A))
         assertEquals("first", inserted.state.items.getValue(FOLDER_A).last().title)
 
-        val folder = applyOne(SAMPLE_STATE, AddFolder(folderId(50), "n", listOf(first, duplicate), ADDED))
+        val folder = applyOne(SAMPLE_STATE, AddFolder(folderId(50), null, "n", listOf(first, duplicate), ADDED))
         assertEquals(listOf(first.id), folder.state.itemIds(folderId(50)))
         assertEquals("first", folder.state.items.getValue(folderId(50)).single().title)
     }
@@ -339,8 +374,8 @@ class ApplyItemOperationsTest {
         val precise = Instant.parse("2026-11-16T12:30:15.123456789Z")
         val truncated = Instant.parse("2026-11-16T12:30:15.123Z")
 
-        val bookmarks = applyOne(SAMPLE_STATE, AddBookmarks(listOf(newItem1), precise))
-        val folder = applyOne(SAMPLE_STATE, AddFolder(folderId(50), "n", listOf(newItem1), precise))
+        val bookmarks = applyOne(SAMPLE_STATE, AddBookmarks(null, listOf(newItem1), precise))
+        val folder = applyOne(SAMPLE_STATE, AddFolder(folderId(50), null, "n", listOf(newItem1), precise))
 
         assertEquals(truncated, bookmarks.state.items.getValue(ROOT).last().added)
         assertEquals(truncated, folder.state.items.getValue(folderId(50)).single().added)
@@ -355,7 +390,7 @@ class ApplyItemOperationsTest {
     // 項目の追加・挿入で項目が空なら、何もせず適用済みとして扱う
     @Test
     fun addingOrInsertingNoItemsIsAlreadyApplied() {
-        assertEquals(OperationStatus.AlreadyApplied, applyOne(SAMPLE_STATE, AddBookmarks(emptyList(), ADDED)).singleStatus())
+        assertEquals(OperationStatus.AlreadyApplied, applyOne(SAMPLE_STATE, AddBookmarks(null, emptyList(), ADDED)).singleStatus())
         assertEquals(OperationStatus.AlreadyApplied, applyOne(SAMPLE_STATE, InsertItems(FOLDER_A, emptyList(), null)).singleStatus())
     }
 

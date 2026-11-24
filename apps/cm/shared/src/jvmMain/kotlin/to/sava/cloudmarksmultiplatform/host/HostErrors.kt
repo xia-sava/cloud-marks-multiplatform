@@ -1,5 +1,7 @@
 package to.sava.cloudmarksmultiplatform.host
 
+import to.sava.cloudmarksmultiplatform.operations.NotAppliedReason
+import to.sava.cloudmarksmultiplatform.operations.OperationStatus
 import to.sava.cloudmarksmultiplatform.sync.SyncFailure
 import to.sava.cloudmarksmultiplatform.sync.WriteResult
 
@@ -57,6 +59,12 @@ internal val FOLDER_CORRUPT_ERROR = HostError(
     "追加先のフォルダのデータが壊れているため、追加できません。",
 )
 
+/** 追加の `folder` のフォルダが無い。 */
+internal val FOLDER_NOT_FOUND_ERROR = HostError(
+    HostErrorCode.FOLDER_NOT_FOUND,
+    "追加先のフォルダが見つかりませんでした。追加先を選び直してください。",
+)
+
 /** 再送か再適用が、回数の上限を超えた（[SyncFailure.Busy]）。 */
 internal val BUSY_ERROR = HostError(
     HostErrorCode.BUSY,
@@ -100,6 +108,10 @@ internal val INTERNAL_ERROR = HostError(
     "エラーが起きたため、追加できませんでした。",
 )
 
+/** 追加先のフォルダが無いために、操作を適用しなかったか。このとき書いていない。 */
+internal fun WriteResult.Success.isFolderNotFound(): Boolean =
+    results.any { it.status == OperationStatus.NotApplied(NotAppliedReason.DestinationNotFound) }
+
 /** S3 の読み書きの失敗 [failure] を、応答の `error` にする。 */
 internal fun hostErrorOf(failure: SyncFailure): HostError =
     when (failure) {
@@ -117,13 +129,17 @@ internal fun hostErrorOf(failure: SyncFailure): HostError =
 /**
  * 書き込みの結果 [result] を、応答にする。
  *
- * 書けても、適用できなかった操作があれば（[to.sava.cloudmarksmultiplatform.operations.OperationResult.hasNoticeForUser]）、
+ * 書けても、追加先のフォルダが無くて適用できなかった操作があれば（[isFolderNotFound]）[FOLDER_NOT_FOUND_ERROR]、
+ * そのほかに適用できなかった操作があれば（[to.sava.cloudmarksmultiplatform.operations.OperationResult.hasNoticeForUser]）、
  * そのほかの失敗にする。確かめられなかったときは、中の失敗の種類によらず [UNCONFIRMED_ERROR]。
  */
 internal fun hostResponseOf(result: WriteResult): HostResponse =
     when (result) {
-        is WriteResult.Success ->
-            if (result.results.any { it.hasNoticeForUser }) HostResponse.Failed(INTERNAL_ERROR) else HostResponse.Ok
+        is WriteResult.Success -> when {
+            result.isFolderNotFound() -> HostResponse.Failed(FOLDER_NOT_FOUND_ERROR)
+            result.results.any { it.hasNoticeForUser } -> HostResponse.Failed(INTERNAL_ERROR)
+            else -> HostResponse.Ok
+        }
         is WriteResult.Failed -> HostResponse.Failed(hostErrorOf(result.failure))
         is WriteResult.Unconfirmed -> HostResponse.Failed(UNCONFIRMED_ERROR)
     }
