@@ -10,7 +10,7 @@ plugins {
     alias(libs.plugins.composeCompiler)
 }
 
-/** Desktopを動かすJetBrains Runtimeのバージョン。コンパイルに使うJDKのバージョンも同じにする。 */
+/** Desktopを動かすJetBrains Runtimeのバージョン。コンパイルにも同じバージョンのJetBrains Runtimeを使う。 */
 private val JETBRAINS_RUNTIME_VERSION = libs.versions.desktop.jdk.get().toInt()
 
 /**
@@ -54,7 +54,10 @@ private val requiresJetBrainsRuntime =
     providers.gradleProperty("cloudmarks.requireJetBrainsRuntime").isPresent
 
 kotlin {
-    jvmToolchain(JETBRAINS_RUNTIME_VERSION)
+    jvmToolchain {
+        languageVersion.set(JavaLanguageVersion.of(JETBRAINS_RUNTIME_VERSION))
+        vendor.set(JvmVendorSpec.JETBRAINS)
+    }
 }
 
 dependencies {

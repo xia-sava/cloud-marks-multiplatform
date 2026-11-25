@@ -10,7 +10,7 @@ plugins {
     alias(libs.plugins.kotlinSerialization)
 }
 
-/** デスクトップ（`jvm()`）のコンパイルとテストに使うJDKのバージョン。 */
+/** デスクトップ（`jvm()`）のコンパイルとテストに使うJetBrains Runtimeのバージョン。 */
 private val DESKTOP_JDK_VERSION = libs.versions.desktop.jdk.get().toInt()
 
 /**
@@ -21,11 +21,13 @@ private val ENABLE_NATIVE_ACCESS = "--enable-native-access=ALL-UNNAMED"
 
 /**
  * デスクトップのJDK。`jvm()`のコンパイルと`jvmTest`だけに使い、Androidのコンパイルとホストのテストは既定のJDKのまま動かす。
+ * デスクトップのアプリを動かすものと同じJetBrains Runtimeに限る。
  *
  * `kotlin.jvmToolchain`はプロジェクト全体に適用され、Androidにも及ぶ。
  */
 private val desktopJdkSpec = Action<JavaToolchainSpec> {
     languageVersion.set(JavaLanguageVersion.of(DESKTOP_JDK_VERSION))
+    vendor.set(JvmVendorSpec.JETBRAINS)
 }
 private val desktopJdk = extensions.getByType<JavaToolchainService>().launcherFor(desktopJdkSpec)
 private val desktopJavaCompiler = extensions.getByType<JavaToolchainService>().compilerFor(desktopJdkSpec)
