@@ -14,8 +14,9 @@ on:
       - ".github/workflows/cm.yml"
 
 env:
-  # デスクトップ（sharedのjvm()とdesktopApp）をコンパイル・テストするJDKのバージョン。
-  # apps/cm/gradle/libs.versions.tomlのdesktop-jdkと揃え、Gradleがツールチェーンとして見つけられるようにする。
+  # Gradleのデーモンと、デスクトップ（sharedのjvm()とdesktopApp）のコンパイルとテストに使うJetBrains Runtimeのバージョン。
+  # apps/cm/gradle/gradle-daemon-jvm.propertiesのtoolchainVersionとlibs.versions.tomlのdesktop-jdkに揃え、
+  # Gradleがダウンロードせずに見つけられるようにする。
   JAVA_VERSION: "25"
 
 # 既定ではGITHUB_TOKENに何の権限も与えない。必要なジョブが必要な分だけ宣言する。
@@ -33,7 +34,7 @@ jobs:
 
       - uses: actions/setup-java@v6
         with:
-          distribution: temurin
+          distribution: jetbrains
           java-version: ${{ env.JAVA_VERSION }}
 
       # リポジトリに置いているgradle-wrapper.jarが公式のものであることを確かめる。
@@ -73,7 +74,7 @@ jobs:
 
       - uses: actions/setup-java@v6
         with:
-          distribution: temurin
+          distribution: jetbrains
           java-version: ${{ env.JAVA_VERSION }}
 
       - uses: gradle/actions/setup-gradle@v6

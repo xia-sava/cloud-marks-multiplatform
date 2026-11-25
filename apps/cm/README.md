@@ -175,7 +175,8 @@ IntelliJ IDEA で `apps/cm` を開く。
 ## ビルドと起動
 
 デスクトップ（`shared` の `jvm()` と `:desktopApp`）は JDK 25 でコンパイルし、JetBrains Runtime 25 で動かす。
-バージョンは `gradle/libs.versions.toml` の `desktop-jdk` が持つ。Android の側は JDK 21 のデーモンのままビルドする。
+バージョンは `gradle/libs.versions.toml` の `desktop-jdk` が持つ。Gradle のデーモンも JetBrains Runtime 25 で動かし、
+Android の側はそのデーモンの JDK でビルドする。デーモンの JDK は `gradle/gradle-daemon-jvm.properties` が持ち、`desktop-jdk` と揃える。
 
 - Android: `./gradlew :androidApp:assembleDebug` でデバッグ版の APK をビルドする
 - Desktop: `./gradlew :desktopApp:run` で起動する

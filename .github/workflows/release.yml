@@ -18,8 +18,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # デスクトップ（shared の jvm() と desktopApp）をコンパイル・テストする JDK と、配布物に入れる JetBrains Runtime のバージョン。
-  # apps/cm/gradle/libs.versions.toml の desktop-jdk と揃える。
+  # Gradle のデーモン、デスクトップ（shared の jvm() と desktopApp）のコンパイルとテスト、配布物に使う JetBrains Runtime のバージョン。
+  # apps/cm/gradle/gradle-daemon-jvm.properties の toolchainVersion と libs.versions.toml の desktop-jdk に揃える。
   JAVA_VERSION: "25"
   # Windows のインストーラをビルドする Inno Setup。ランナーに無いときに入れるバージョンを固定する。
   INNO_SETUP_VERSION: "6.7.1"
@@ -214,7 +214,7 @@ jobs:
 
       - uses: actions/setup-java@v6
         with:
-          distribution: temurin
+          distribution: jetbrains
           java-version: ${{ env.JAVA_VERSION }}
 
       # リポジトリに置いている gradle-wrapper.jar が公式のものであることを確かめる。
@@ -275,16 +275,10 @@ jobs:
 
       # 配布物に入れる JetBrains Runtime。Gradle のツールチェーンが自動でダウンロードする先には
       # 載っていないバージョンがあるため、ここで入れて場所を Gradle へ渡す。
-      # Gradle を動かす JDK を後から入れ、JAVA_HOME はそちらを指したままにする。
       - uses: actions/setup-java@v6
         id: jetbrains-runtime
         with:
           distribution: jetbrains
-          java-version: ${{ env.JAVA_VERSION }}
-
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
       - uses: gradle/actions/setup-gradle@v6
@@ -394,7 +388,7 @@ jobs:
 
       - uses: actions/setup-java@v6
         with:
-          distribution: temurin
+          distribution: jetbrains
           java-version: ${{ env.JAVA_VERSION }}
 
       # 署名鍵とそのパスワードを渡すジョブなので、動くタグではなくコミットで固定する。
@@ -693,7 +687,7 @@ jobs:
 
       - uses: actions/setup-java@v6
         with:
-          distribution: temurin
+          distribution: jetbrains
           java-version: ${{ env.JAVA_VERSION }}
 
       - uses: gradle/actions/setup-gradle@v6
