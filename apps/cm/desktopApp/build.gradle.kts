@@ -19,45 +19,15 @@ private val JETBRAINS_RUNTIME_VERSION = libs.versions.desktop.jdk.get().toInt()
  */
 private val ENABLE_NATIVE_ACCESS = "--enable-native-access=ALL-UNNAMED"
 
-private val MISSING_JETBRAINS_RUNTIME =
-    "JetBrains Runtime $JETBRAINS_RUNTIME_VERSION が見当たらないため、同じバージョンの別のJDKで動かす。" +
-        "Windowsでマウスを載せただけのアクティブ化（X-mouse）は動作しない。"
-
-private val REQUIRED_JETBRAINS_RUNTIME_MISSING =
-    "JetBrains Runtime $JETBRAINS_RUNTIME_VERSION が見当たらない。" +
-        "同じバージョンの別のJDKでパッケージングした配布物は、" +
-        "Windowsでマウスを載せただけのアクティブ化（X-mouse）が動作しない。"
-
-/** ローカルにあるJetBrains Runtime。無ければ失敗として返り、[sameVersionRuntime]へ委ねる。 */
-private val jetBrainsRuntime = runCatching {
-    extensions.getByType<JavaToolchainService>().launcherFor {
-        languageVersion.set(JavaLanguageVersion.of(JETBRAINS_RUNTIME_VERSION))
-        vendor.set(JvmVendorSpec.JETBRAINS)
-    }.get()
-}
-
-/**
- * JetBrains Runtimeが無いときに動かす、同じバージョンのJDK（ベンダーを問わない）。
- *
- * Composeの既定はGradleのデーモンのJDKで、バージョンが低いとコンパイルしたクラスを読み込めない。
- */
-private val sameVersionRuntime = extensions.getByType<JavaToolchainService>().launcherFor {
+/** コンパイル、`run`、配布物、開発版のホストに使うJetBrains Runtime。 */
+private val jetBrainsRuntimeSpec = Action<JavaToolchainSpec> {
     languageVersion.set(JavaLanguageVersion.of(JETBRAINS_RUNTIME_VERSION))
+    vendor.set(JvmVendorSpec.JETBRAINS)
 }
-
-/**
- * 同じバージョンの別のJDKへフォールバックすることを許さないか。
- *
- * 配布物をビルドするときに有効にする。ログへ出すだけでは、動作しない部分のある配布物がビルドに成功したまま作られる。
- */
-private val requiresJetBrainsRuntime =
-    providers.gradleProperty("cloudmarks.requireJetBrainsRuntime").isPresent
+private val jetBrainsRuntime = extensions.getByType<JavaToolchainService>().launcherFor(jetBrainsRuntimeSpec)
 
 kotlin {
-    jvmToolchain {
-        languageVersion.set(JavaLanguageVersion.of(JETBRAINS_RUNTIME_VERSION))
-        vendor.set(JvmVendorSpec.JETBRAINS)
-    }
+    jvmToolchain(jetBrainsRuntimeSpec)
 }
 
 dependencies {
@@ -135,15 +105,8 @@ compose.desktop {
         jvmArgs += ENABLE_NATIVE_ACCESS
 
         // Windowsでマウスを載せただけのアクティブ化を働かせるには、JetBrains Runtimeで動かす必要がある。
-        // 素のOpenJDKはこれに対応していない。ローカルに無ければ同じバージョンの別のJDKで動かして
-        // 何が働かなくなるかをログへ出し、配布物をビルドするときは失敗させる。
-        jetBrainsRuntime
-            .onSuccess { javaHome = it.metadata.installationPath.asFile.path }
-            .onFailure {
-                if (requiresJetBrainsRuntime) throw GradleException(REQUIRED_JETBRAINS_RUNTIME_MISSING)
-                logger.lifecycle(MISSING_JETBRAINS_RUNTIME)
-                javaHome = sameVersionRuntime.get().metadata.installationPath.asFile.path
-            }
+        // 素のOpenJDKはこれに対応していない。
+        javaHome = jetBrainsRuntime.get().metadata.installationPath.asFile.path
 
         nativeDistributions {
             // jlinkの自動解決では含まれないが、S3へのHTTPS接続に要る。
@@ -224,10 +187,6 @@ private object NativeMessagingHostManifests {
  */
 private val HOST_JVM_ARGS = listOf("-XX:TieredStopAtLevel=1", "-Xlog:disable", "-Xlog:all=warning:stderr")
 
-/** `run`と同じJDK。JetBrains Runtimeがあればそれを、無ければ同じバージョンの別のJDKを使う。 */
-private val desktopRuntime: Provider<JavaLauncher> =
-    jetBrainsRuntime.fold(onSuccess = { launcher -> provider { launcher } }, onFailure = { sameVersionRuntime })
-
 // 開発版のNative Messagingのホストを書き出す。ホストを起動するバッチと、ChromeとFirefoxにホストを登録するJSON。
 // ホストの名前と受け付ける拡張は、`identities.json`の開発版の組。バッチは`jpackage.app-path`を渡さないので、
 // ホストは開発版として動き、開発版のデータの場所を使う。
@@ -238,7 +197,7 @@ tasks.register("writeDevNativeMessagingHost") {
     description = "Writes a launcher and manifests for a development native messaging host. Does not register them."
 
     val classpath = sourceSets.main.get().runtimeClasspath
-    val javaExecutable = desktopRuntime.map { it.executablePath.asFile.absolutePath }
+    val javaExecutable = jetBrainsRuntime.map { it.executablePath.asFile.absolutePath }
     val outputDirectory = layout.buildDirectory.dir("native-messaging-host")
     val identities = NATIVE_MESSAGING_IDENTITIES
     val variant = DEV_IDENTITY

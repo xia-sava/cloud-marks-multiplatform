@@ -9,9 +9,8 @@ cm-dev-host:
 
 # 配布版のWindowsのインストーラ（apps/cm/desktopApp/build/compose/binaries/main/inno/cloudmarks-setup.exe）を組む。
 # 先に拡張を作り、配布版のChromeの拡張（apps/extension/dist/chrome）を入れる。Firefoxの拡張（署名済みの.xpi）は入れない。
-# JetBrains Runtimeが無ければ失敗する。
 cm-installer: ext-build
-    cd apps/cm && ./gradlew :desktopApp:packageInnoSetup -Pcloudmarks.requireJetBrainsRuntime
+    cd apps/cm && ./gradlew :desktopApp:packageInnoSetup
 
 # 配布版（apps/extension/dist/chrome・firefox）と開発版（apps/extension/dist/dev/chrome・firefox）の拡張を作る。
 ext-build:

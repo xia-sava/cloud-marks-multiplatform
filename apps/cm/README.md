@@ -232,7 +232,7 @@ Windows のインストーラは Inno Setup でビルドする（`winget install
 拡張を作ってからインストーラを組む）。
 
 ```
-./gradlew :desktopApp:packageInnoSetup -Pcloudmarks.versionName=1.2.3 -Pcloudmarks.requireJetBrainsRuntime
+./gradlew :desktopApp:packageInnoSetup -Pcloudmarks.versionName=1.2.3
 ```
 
 - バージョンは `-Pcloudmarks.versionName` で渡す。リリースでは数字3つの書式（`1.2.3`）、`release.yml` を手動で実行した回は
@@ -241,7 +241,6 @@ Windows のインストーラは Inno Setup でビルドする（`winget install
   デスクトップと Android は、これに加えて更新の新旧の比較に使う
   `-Pcloudmarks.versionCode`（1 以上の整数）を受け取る。渡さないローカルのビルドでは、それぞれ `0.0.0` と `1` になる。
   `versionCode` が 1 以上の整数でなければ、どちらのビルドも失敗する。
-- `-Pcloudmarks.requireJetBrainsRuntime` を付けると、JetBrains Runtime 25 が無いときに失敗する。付けなければ同じバージョンの別の JDK で動かす。
 - 出力は `desktopApp/build/compose/binaries/main/inno/cloudmarks-setup.exe`。
 
 `:desktopApp:stageInstallerFiles` は、インストーラに入れるファイルを `desktopApp/build/compose/binaries/main/staged/CloudMarks/` に揃える。

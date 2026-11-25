@@ -323,8 +323,6 @@ jobs:
           name: firefox-extension
           path: firefox-extension
 
-      # requireJetBrainsRuntime を立てて組む。素のランタイムで固めると、
-      # マウスを載せただけのアクティブ化（X-mouse）が働かないものが成功として出てくる。
       # Firefox の拡張は、version が取れたときだけ渡す。
       - name: Build installer
         working-directory: apps/cm
@@ -338,7 +336,6 @@ jobs:
             ":desktopApp:packageInnoSetup",
             "-Pcloudmarks.versionCode=$env:VERSION_CODE",
             "-Pcloudmarks.versionName=$env:VERSION_NAME",
-            "-Pcloudmarks.requireJetBrainsRuntime",
             "-Porg.gradle.java.installations.paths=$env:JETBRAINS_RUNTIME",
             "--console=plain"
           )
